@@ -7,18 +7,27 @@ the gotchas listed are the ones that actually bit.
 
 ```jsonc
 // tinyjs.json
-{ "activation": "accessory" }   // launches with no Dock icon, window hidden — no flash
+{ "activation": "accessory" } // launches with no Dock icon, window hidden — no flash
 ```
+
 ```js
 export function init(app) {
-  app.tray.set({ title: '◎', menu: [{ id: 'show', label: 'Open' }, { separator: true }, { id: 'quit', label: 'Quit' }] });
-  app.window('main').setHideOnClose(true);
+  app.tray.set({
+    title: "◎",
+    menu: [
+      { id: "show", label: "Open" },
+      { separator: true },
+      { id: "quit", label: "Quit" },
+    ],
+  });
+  app.window("main").setHideOnClose(true);
 }
 export function onTray(id, app) {
-  if (id === 'show') app.window('main').show();
-  if (id === 'quit') app.quit();
+  if (id === "show") app.window("main").show();
+  if (id === "quit") app.quit();
 }
 ```
+
 - `tray.position()` anchors a dropdown window under the icon (null on Linux
   — AppIndicator hides geometry; center the window instead).
 - Icons without assets: `'sf:<symbol>'` on macOS, `'emoji:<glyph>'` on
@@ -53,13 +62,13 @@ transparent windows, everything driven by `app.window(id).*`.
 
 Decision table first — audio routing is the most platform-divergent area:
 
-| need | use |
-|---|---|
-| play music / long streams | `<audio>` element (streams from disk/net; never decode whole songs) |
-| game/UI sound effects, pitch/pan per shot | `tiny.audio.sampler` (native mixer on Linux, Web Audio host elsewhere — same API) |
-| EQ / DSP on the app's whole output | `tiny.audio.filters` (native: Linux + macOS); Windows: `capabilities().audioFilters === false` → `tiny.audio.pageChain(ctx)` |
-| VU meter / visualizer of what's playing | `tiny.audioTap` (PCM chunks at meter rate; post-filter where a chain is active) |
-| cross-origin stream INTO Web Audio | `audio.crossOrigin='anonymous'; audio.src = tiny.proxyURL(url)` (mac + linux; not Windows) |
+| need                                      | use                                                                                                                          |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| play music / long streams                 | `<audio>` element (streams from disk/net; never decode whole songs)                                                          |
+| game/UI sound effects, pitch/pan per shot | `tiny.audio.sampler` (native mixer on Linux, Web Audio host elsewhere — same API)                                            |
+| EQ / DSP on the app's whole output        | `tiny.audio.filters` (native: Linux + macOS); Windows: `capabilities().audioFilters === false` → `tiny.audio.pageChain(ctx)` |
+| VU meter / visualizer of what's playing   | `tiny.audioTap` (PCM chunks at meter rate; post-filter where a chain is active)                                              |
+| cross-origin stream INTO Web Audio        | `audio.crossOrigin='anonymous'; audio.src = tiny.proxyURL(url)` (mac + linux; not Windows)                                   |
 
 - **Linux hard rule: no Web Audio graph into `ctx.destination`** — WebKitGTK
   renders the graph on a normal-priority thread and it crackles on an idle
@@ -80,6 +89,7 @@ Decision table first — audio routing is the most platform-divergent area:
 ```jsonc
 { "fileExtensions": ["md", "txt"], "openFolders": true, "readAccess": true }
 ```
+
 - Files arrive via `onOpenFiles(paths, app)` from every route: double-click,
   drag onto the icon, `open -a`, argv (`myapp notes.md`), and a second
   launch forwards to the running instance. Buffer-safe on cold start.
@@ -98,15 +108,20 @@ Decision table first — audio routing is the most platform-divergent area:
 ## Wrapping a hosted web app
 
 ```jsonc
-{ "url": "https://app.example.com",      // the main window IS the site
-  "userAgent": "Mozilla/5.0 … Version/17.4 Safari/605.1.15",  // per OS, below
-  "api": { "origins": {                  // ← do not skip this, see below
-    "https://app.example.com": ["notify", "store.*", "win.*", "app.badge"],
-    "file://*": "all"                    // your own bootstrap pages, if any
-  } },
-  "downloads": "auto",                   // auto | ask | deny
-  "popups": "external",                  // external | window | deny
-  "inject": "src/shim.js" }              // optional document-start shim
+{
+  "url": "https://app.example.com", // the main window IS the site
+  "userAgent": "Mozilla/5.0 … Version/17.4 Safari/605.1.15", // per OS, below
+  "api": {
+    "origins": {
+      // ← do not skip this, see below
+      "https://app.example.com": ["notify", "store.*", "win.*", "app.badge"],
+      "file://*": "all", // your own bootstrap pages, if any
+    },
+  },
+  "downloads": "auto", // auto | ask | deny
+  "popups": "external", // external | window | deny
+  "inject": "src/shim.js",
+} // optional document-start shim
 ```
 
 **`"url"`, not `frontend.devUrl`** — devUrl is dev-only by construction, so a
@@ -126,6 +141,7 @@ to an unlisted domain inherits no access. Denied calls reject with a readable
 reason, and `capabilities().api.denied` lets the page hide UI it can't use.
 
 What a wrapped site gets that a local-page app never needed:
+
 - `alert`/`confirm`/`prompt` → native panels headlined by the page's origin.
 - Downloads: `<a download>`, blobs, and un-renderable MIME types. `auto`
   writes to the OS Downloads dir with de-duplicated names.
@@ -138,6 +154,7 @@ What a wrapped site gets that a local-page app never needed:
 - `tiny.win.find(term)` for ⌘F.
 
 Other notes:
+
 - The default webview UA lacks `Version/x Safari/x`; UA-sniffing sites
   reject it — set a real one. It REPLACES the UA, and `tiny.system.os()`/
   `isWindows()`/`isLinux()` read the UA: put a matching UA in each OS block

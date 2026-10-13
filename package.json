@@ -1,7 +1,7 @@
 {
   "name": "teneo",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "prepare": "husky"
   },
   "dependencies": {
@@ -20,6 +22,7 @@
     "@vue/tsconfig": "^0.9.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
+    "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
     "oxlint-tsgolint": "^7.0.2004",
     "typescript": "~6.0.2",
@@ -27,6 +30,7 @@
     "vue-tsc": "^3.3.11"
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,mjs,cjs}": "bun run lint"
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "bun run lint",
+    "*": "oxfmt --no-error-on-unmatched-pattern"
   }
 }
