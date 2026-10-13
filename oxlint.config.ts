@@ -10,5 +10,12 @@ export default defineConfig({
     "no-console": "error",
   },
   plugins: ["vue", "unicorn", "typescript", "oxc"],
-  ignorePatterns: ["dist/**", "coverage/**", "vendor/**", "test/snapshots/**"], //will update later
+  ignorePatterns: [
+    "dist/**",
+    "coverage/**",
+    "vendor/**",
+    "test/snapshots/**",
+    "src/components/ui/**",
+    ".build/**",
+  ], //will update later
 });

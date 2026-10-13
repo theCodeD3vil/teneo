@@ -1,7 +1,5 @@
-<script setup lang="ts">
-import HelloWorld from "./components/HelloWorld.vue";
-</script>
+<script setup lang="ts"></script>
 
 <template>
-  <HelloWorld />
+  <h1 class="font-bold text-blue-500">Hello world!</h1>
 </template>
