@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "vue-tsc -b && vite build --base=./",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "prepare": "husky"
   },
   "dependencies": {
     "vue": "^3.5.42"
@@ -15,8 +18,14 @@
     "@types/node": "^24.13.3",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
+    "husky": "^9.1.7",
+    "oxlint": "^1.88.0",
+    "oxlint-tsgolint": "^7.0.2004",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "vue-tsc": "^3.3.11"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "bun run lint"
   }
 }
