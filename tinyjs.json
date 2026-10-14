@@ -1,8 +1,8 @@
 {
   "name": "teneo",
-  "title": "teneo",
-  "size": "960x640",
-  "id": "com.example.teneo",
+  "title": "Teneo",
+  "size": "560x420",
+  "id": "com.michael.teneo",
   "version": "0.1.0",
   "backend": "backend/main.ts",
   "frontend": {
@@ -10,5 +10,13 @@
     "dist": "dist",
     "dev": "bun run dev",
     "devUrl": "http://127.0.0.1:5173"
-  }
+  },
+  "permissions": {},
+  "chrome": {
+    "windowControls": false,
+    "frame": false,
+    "vibrancy": "popover",
+    "transparent": true
+  },
+  "activation": "accessory"
 }

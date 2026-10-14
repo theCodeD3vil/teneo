@@ -5,11 +5,11 @@ const FRONTEND = "http://127.0.0.1:5173";
 
 const app = await createApp({
   htmlPath: FRONTEND,
-  title: "teneo",
-  size: "960x640",
+  title: "Teneo",
+  size: "560x420",
   version: "0.1.0",
   tinyjsVersion: "v0.51.1",
-  id: "com.example.teneo",
+  id: "com.michael.teneo",
   api: appMod.api ?? {},
   onMenu: appMod.onMenu,
   onTray: appMod.onTray,
@@ -35,9 +35,9 @@ const app = await createApp({
   popups: null,
   apiAccess: null,
   inject: null,
-  chrome: null,
+  chrome: {"windowControls":false,"frame":false,"vibrancy":"popover","transparent":true},
   update: null,
-  activation: null,
+  activation: "accessory",
   mainWindow: true,
   readAccess: null,
   userAgent: null,
@@ -50,7 +50,7 @@ const app = await createApp({
   urlScheme: null,
   fileExtensions: null,
   openFolders: false,
-  permissions: null,
+  permissions: {},
   offscreenRescue: null,
 });
 if (appMod.init) appMod.init(app);

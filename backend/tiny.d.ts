@@ -282,6 +282,8 @@ declare interface TinyTraySpec {
   template?: boolean;
   tooltip?: string;
   menu?: TinyMenuItem[];
+  /** left-click fires onTray(null, app); the menu moves to right-click */
+  primaryAction?: boolean;
 }
 
 declare interface TinyNotifyAction {
