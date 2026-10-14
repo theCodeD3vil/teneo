@@ -36,7 +36,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-3 p-3">
+  <div class="flex h-screen flex-col gap-3 overflow-hidden bg-transparent! p-4">
     <SearchInput />
     <TabManager />
   </div>

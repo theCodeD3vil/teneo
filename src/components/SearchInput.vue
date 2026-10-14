@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Icon } from "@iconify/vue";
+import SearchIcon from "~icons/hugeicons/search-01";
 
 import {
   InputGroup,
@@ -15,7 +15,7 @@ import {
         placeholder="Search clipboard"
         class="text-sm font-light" />
       <InputGroupAddon>
-        <Icon icon="hugeicons:search-01" />
+        <SearchIcon />
       </InputGroupAddon>
     </InputGroup>
   </div>
