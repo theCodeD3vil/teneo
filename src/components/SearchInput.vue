@@ -11,7 +11,9 @@ import {
 <template>
   <div class="w-full gap-6">
     <InputGroup variant="transparent">
-      <InputGroupInput placeholder="Search clipboard" />
+      <InputGroupInput
+        placeholder="Search clipboard"
+        class="text-sm font-light" />
       <InputGroupAddon>
         <Icon icon="hugeicons:search-01" />
       </InputGroupAddon>

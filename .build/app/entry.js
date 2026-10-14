@@ -2,14 +2,16 @@ import { createApp } from './bridge.js';
 import * as appMod from './src/main.js';
 
 const FRONTEND = "http://127.0.0.1:5173";
+const RESOURCES = null;
 
 const app = await createApp({
   htmlPath: FRONTEND,
   title: "Teneo",
   size: "560x420",
   version: "0.1.0",
-  tinyjsVersion: "v0.51.1",
+  tinyjsVersion: "v0.53.1",
   id: "com.michael.teneo",
+  resourcesPath: RESOURCES,
   api: appMod.api ?? {},
   onMenu: appMod.onMenu,
   onTray: appMod.onTray,

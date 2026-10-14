@@ -1,4 +1,5 @@
 export const clipboardItemVariants = [
+  "all",
   "files",
   "image",
   "color",
