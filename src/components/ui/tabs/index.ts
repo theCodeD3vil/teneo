@@ -13,6 +13,7 @@ export const tabsListVariants = cva(
       variant: {
         default: 'bg-muted',
         line: 'gap-1 bg-transparent',
+        transparent: 'bg-transparent'
       },
     },
     defaultVariants: {
