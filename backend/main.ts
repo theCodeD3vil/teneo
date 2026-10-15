@@ -20,6 +20,6 @@ export async function onClipboardChange(
 }
 
 export function init(app: TinyApp) {
-  app.tray.set({ icon: "sf:document.on.clipboard" });
+  app.tray.set({ icon: "sf:sparkles.square.filled.on.square" });
   app.setHideOnClose(true);
 }

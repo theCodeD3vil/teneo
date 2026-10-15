@@ -21,18 +21,24 @@ function logError(message, error) {
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/run-command.ts
-var textDecoder = new TextDecoder();
 async function runCommand(command) {
-  const child = tjs.spawn(command, { stdout: "pipe", stderr: "ignore" });
-  const reader = child.stdout.getReader();
-  let output = "";
-  for (; ; ) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    output += textDecoder.decode(value, { stream: true });
+  try {
+    const child = tjs.spawn(command, { stdout: "pipe", stderr: "ignore" });
+    const reader = child.stdout.getReader();
+    const textDecoder = new TextDecoder();
+    let output = "";
+    for (; ; ) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      output += textDecoder.decode(value, { stream: true });
+    }
+    output += textDecoder.decode();
+    const exit = await child.wait();
+    return exit.exit_status === 0 ? output.trim() : "";
+  } catch (error) {
+    logError(`${command[0]} failed to run:`, error);
+    return "";
   }
-  const exit = await child.wait();
-  return exit.exit_status === 0 ? output.trim() : "";
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/find-app.ts
@@ -51,15 +57,20 @@ async function findAppWithSpotlight(bundleId) {
     "/usr/bin/mdfind",
     `kMDItemCFBundleIdentifier == '${bundleId}'`
   ]);
-  return results.split("\n").find((path) => path.endsWith(".app"));
+  const appPath = results.split("\n").find((path) => path.endsWith(".app"));
+  return appPath && await fileExists(appPath) ? appPath : void 0;
 }
 function getInstalledApps() {
-  installedApps ??= (async () => {
-    const apps = /* @__PURE__ */ new Map();
-    for (const folder of APP_FOLDERS) await scanFolderForApps(folder, apps, 1);
-    return apps;
-  })();
+  installedApps ??= scanAllFolders().catch((error) => {
+    installedApps = void 0;
+    throw error;
+  });
   return installedApps;
+}
+async function scanAllFolders() {
+  const apps = /* @__PURE__ */ new Map();
+  for (const folder of APP_FOLDERS) await scanFolderForApps(folder, apps, 1);
+  return apps;
 }
 async function scanFolderForApps(folder, apps, subfolderDepth) {
   let entries;
@@ -165,7 +176,7 @@ async function onClipboardChange({ self }, app) {
   if (item) app.push("clipboard-item", item);
 }
 function init(app) {
-  app.tray.set({ icon: "sf:document.on.clipboard" });
+  app.tray.set({ icon: "sf:sparkles.square.filled.on.square" });
   app.setHideOnClose(true);
 }
 export {

@@ -1,5 +1,6 @@
 // Find an installed app's .app folder from its bundle id. Spotlight first, a
 // folder scan as fallback: neither sends Apple Events, so no Automation prompt.
+import { fileExists } from "./files";
 import { runCommand } from "./run-command";
 
 // Folders scanned when Spotlight can't find an app. Each is also scanned one
@@ -30,18 +31,25 @@ async function findAppWithSpotlight(
     "/usr/bin/mdfind",
     `kMDItemCFBundleIdentifier == '${bundleId}'`,
   ]);
-  return results.split("\n").find((path) => path.endsWith(".app"));
+  const appPath = results.split("\n").find((path) => path.endsWith(".app"));
+  // a stale index can still list an app that was moved or deleted; undefined lets the folder scan run
+  return appPath && (await fileExists(appPath)) ? appPath : undefined;
 }
 
 /** Bundle id → .app path for every app in APP_FOLDERS. Scanned once, on first
  *  use; the promise is kept so concurrent callers share a single scan. */
 function getInstalledApps(): Promise<Map<string, string>> {
-  installedApps ??= (async () => {
-    const apps = new Map<string, string>();
-    for (const folder of APP_FOLDERS) await scanFolderForApps(folder, apps, 1);
-    return apps;
-  })();
+  installedApps ??= scanAllFolders().catch((error) => {
+    installedApps = undefined; // don't keep a failed scan; the next call retries
+    throw error;
+  });
   return installedApps;
+}
+
+async function scanAllFolders(): Promise<Map<string, string>> {
+  const apps = new Map<string, string>();
+  for (const folder of APP_FOLDERS) await scanFolderForApps(folder, apps, 1);
+  return apps;
 }
 
 /** Add every .app in folder (and up to `subfolderDepth` levels below) to apps. */
