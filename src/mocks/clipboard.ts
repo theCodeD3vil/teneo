@@ -117,99 +117,99 @@ export const mockTextItems: TinyClipboardData[] = [
   },
 ];
 
+// Real clipboard images are PNGs the backend saved to the app's data dir. Mocks
+// use real files instead, so the card's preview path runs as it does for real items.
+// macOS ships these sample pictures (the account-photo set) on every Mac.
+const samplePicture = (name: string) => `/Library/User Pictures/${name}.heic`;
+
 export const mockImageItems: TinyClipboardData[] = [
   {
     ...baseItem,
     kind: "image",
     changeCount: 201,
-    image:
-      "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1200&h=800&fit=crop",
-    imageSize: { width: 1200, height: 800 },
+    image: samplePicture("Animals/Owl"),
+    imageSize: { width: 512, height: 512 },
     sourceApp: apps.chrome,
-    sourceURL: "https://unsplash.com/s/photos/mountains",
+    sourceURL: "https://unsplash.com/s/photos/owl",
+    // Chrome's "Copy Image" also writes an <img> tag; the card reads the filename from it
+    html: `<meta charset="utf-8"><img src="https://images.unsplash.com/snowy-owl.jpg?w=1200" alt="owl">`,
   },
   {
     ...baseItem,
     kind: "image",
     changeCount: 202,
-    image:
-      "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=800&h=800&fit=crop",
-    imageSize: { width: 800, height: 800 },
-    sourceApp: apps.chrome,
-    sourceURL: "https://unsplash.com/s/photos/nature",
+    image: repoFile("icon.png"),
+    imageSize: { width: 1024, height: 1024 },
+    sourceApp: apps.figma,
   },
   {
     ...baseItem,
     kind: "image",
     changeCount: 203,
-    image:
-      "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=600&h=800&fit=crop",
-    imageSize: { width: 600, height: 800 },
-    sourceApp: apps.preview,
-  },
-  {
-    ...baseItem,
-    kind: "image",
-    changeCount: 204,
-    image:
-      "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1200&h=800&fit=crop",
-    imageSize: { width: 1200, height: 800 },
-    sourceApp: apps.photos,
-  },
-  {
-    ...baseItem,
-    kind: "image",
-    changeCount: 205,
-    image:
-      "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1200&h=675&fit=crop",
-    imageSize: { width: 1200, height: 675 },
-    sourceApp: apps.figma,
-  },
-  {
-    ...baseItem,
-    kind: "image",
-    changeCount: 206,
-    image:
-      "https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=1000&h=667&fit=crop",
-    imageSize: { width: 1000, height: 667 },
+    // never created: shows the deleted-image state
+    image: repoFile("deleted-screenshot.png"),
+    imageSize: { width: 1440, height: 900 },
     sourceApp: apps.slack,
   },
   {
     ...baseItem,
     kind: "image",
-    changeCount: 207,
-    image:
-      "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=1200&h=800&fit=crop",
-    imageSize: { width: 1200, height: 800 },
+    changeCount: 204,
+    image: repoFile("src/assets/hero.png"),
+    imageSize: { width: 343, height: 361 },
+    sourceApp: apps.preview,
+  },
+  {
+    ...baseItem,
+    kind: "image",
+    changeCount: 205,
+    image: samplePicture("Animals/Parrot"),
+    imageSize: { width: 512, height: 512 },
     sourceApp: apps.chrome,
-    sourceURL: "https://unsplash.com/s/photos/laptop",
+    sourceURL: "https://unsplash.com/s/photos/parrot",
+    html: `<meta charset="utf-8"><img src="https://images.unsplash.com/macaw-parrot.jpg?w=1200" alt="parrot">`,
+  },
+  {
+    ...baseItem,
+    kind: "image",
+    changeCount: 206,
+    image: samplePicture("Flowers/Dahlia"),
+    imageSize: { width: 512, height: 512 },
+    sourceApp: apps.photos,
+  },
+  {
+    ...baseItem,
+    kind: "image",
+    changeCount: 207,
+    image: samplePicture("Nature/Earth"),
+    imageSize: { width: 512, height: 512 },
+    sourceApp: apps.chrome,
+    sourceURL: "https://unsplash.com/s/photos/earth",
+    html: `<meta charset="utf-8"><img src="https://images.unsplash.com/earth-from-space.png?w=1200" alt="earth">`,
   },
   {
     ...baseItem,
     kind: "image",
     changeCount: 208,
-    image:
-      "https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?w=1200&h=800&fit=crop",
-    imageSize: { width: 1200, height: 800 },
-    sourceApp: apps.figma,
+    image: samplePicture("Nature/Leaf"),
+    imageSize: { width: 512, height: 512 },
+    sourceApp: apps.photos,
   },
   {
     ...baseItem,
     kind: "image",
     changeCount: 209,
-    image:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600&h=800&fit=crop",
-    imageSize: { width: 600, height: 800 },
+    image: samplePicture("Nature/Snowflake"),
+    imageSize: { width: 512, height: 512 },
     sourceApp: apps.preview,
   },
   {
     ...baseItem,
     kind: "image",
     changeCount: 210,
-    image:
-      "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=1200&h=800&fit=crop",
-    imageSize: { width: 1200, height: 800 },
-    sourceApp: apps.photos,
+    image: samplePicture("Nature/Cactus"),
+    imageSize: { width: 512, height: 512 },
+    sourceApp: apps.figma,
   },
 ];
 

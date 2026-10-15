@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import { Icon } from "@iconify/vue";
 
-import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { cn } from "@/lib/utils";
 const props = defineProps<{
   itemDetails: TinyClipboardData;
@@ -12,6 +11,8 @@ function getClipboardIcon() {
       return "hugeicons:text-align-left";
     case "files":
       return "hugeicons:file-01";
+    case "image":
+      return "hugeicons:image-01";
     default:
       return "hugeicons:clipboard";
   }
@@ -32,33 +33,57 @@ const sourceAppIconUrl = await tiny.api.call("appIcon", {
   bundleId: props.itemDetails.sourceApp?.bundleId,
 });
 
-// Files: preview the first path; null means the file was moved or deleted since it was copied
+// Images and files are previewed from disk: the saved image copy, or the first copied file.
+// A null preview means that file was moved or deleted since it was copied.
+const isImage = props.itemDetails.kind === "image";
 const isFiles = props.itemDetails.kind === "files";
 const firstPath = props.itemDetails.paths[0];
-const filePreviewUrl = isFiles
-  ? await tiny.api.call("filePreview", { path: firstPath })
+const previewPath = isImage
+  ? props.itemDetails.image
+  : isFiles
+    ? firstPath
+    : null;
+const previewUrl = previewPath
+  ? await tiny.api.call("filePreview", { path: previewPath })
   : null;
-const isFileMissing = isFiles && !filePreviewUrl;
+const isPreviewMissing = (isImage || isFiles) && !previewUrl;
 const fileName = firstPath?.split("/").pop();
 const otherFileCount = props.itemDetails.paths.length - 1;
+
+/** Original filename from a browser copy's `<img src>` html, or null. */
+function imageNameFromHtml(html: string | null): string | null {
+  const src = html?.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
+  if (!src) return null;
+  try {
+    const { protocol, pathname } = new URL(src);
+    if (protocol === "data:") return null;
+    return decodeURIComponent(pathname.split("/").pop() ?? "") || null;
+  } catch {
+    return null; // relative or malformed src
+  }
+}
+
+// Copied image data has no filename: use the browser's <img src> name when there
+// is one, otherwise label the image by the app it came from.
+const sourceAppName = props.itemDetails.sourceApp?.name;
+const imageName =
+  imageNameFromHtml(props.itemDetails.html) ??
+  (sourceAppName ? `Image from ${sourceAppName}` : "Image");
 </script>
 <template>
   <div
     class="hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]">
     <div class="flex items-center gap-4">
-      <div v-if="itemDetails.image">
-        <!-- <AspectRatio :ratio="1 / 1"> -->
-        <img
-          :src="itemDetails.image"
-          alt="Image"
-          class="size-9 rounded-md object-cover" />
-        <!-- </AspectRatio> -->
-      </div>
       <img
-        v-else-if="filePreviewUrl"
-        :src="filePreviewUrl"
-        :alt="fileName"
-        class="size-9 shrink-0 rounded-md object-contain" />
+        v-if="previewUrl"
+        :src="previewUrl"
+        :alt="isImage ? imageName : fileName"
+        :class="
+          cn([
+            'size-9 shrink-0 rounded-md',
+            isImage ? 'object-cover' : 'object-contain',
+          ])
+        " />
       <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
         <Icon width="20" height="20" :icon="getClipboardIcon()" />
       </div>
@@ -86,7 +111,7 @@ const otherFileCount = props.itemDetails.paths.length - 1;
             :class="
               cn([
                 'truncate',
-                isFileMissing && 'text-foreground/50 line-through',
+                isPreviewMissing && 'text-foreground/50 line-through',
               ])
             ">
             {{ fileName }}
@@ -94,15 +119,29 @@ const otherFileCount = props.itemDetails.paths.length - 1;
           <span v-if="otherFileCount > 0" class="text-foreground/50 text-xs"
             >+{{ otherFileCount }}</span
           >
-          <span v-if="isFileMissing" class="text-foreground/50 text-xs"
+          <span v-if="isPreviewMissing" class="text-foreground/50 text-xs"
             >File no longer exists</span
           >
         </p>
 
         <p
-          class="font-foreground max-w-[70%] truncate text-sm"
-          v-if="itemDetails.image">
-          {{ itemDetails.text }}
+          v-if="isImage"
+          :class="
+            cn([
+              'font-foreground max-w-[70%] truncate text-sm',
+              isPreviewMissing && 'text-foreground/50 line-through',
+            ])
+          ">
+          {{ imageName }}
+        </p>
+        <p
+          v-if="isImage && (isPreviewMissing || itemDetails.imageSize)"
+          class="text-foreground/50 text-xs">
+          {{
+            isPreviewMissing
+              ? "Image no longer exists"
+              : `${itemDetails.imageSize?.width} × ${itemDetails.imageSize?.height}`
+          }}
         </p>
 
         <div class="flex gap-x-1">

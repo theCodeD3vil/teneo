@@ -1,14 +1,27 @@
-// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/main.ts
-var iconCache = /* @__PURE__ */ new Map();
-var BUNDLE_ID_PATTERN = /^[\w.-]+$/;
-var APP_FOLDERS = [
-  "/Applications",
-  "/System/Applications",
-  "/System/Library/CoreServices",
-  `${tjs.env.HOME}/Applications`
-];
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/files.ts
+async function fileExists(path) {
+  try {
+    await tjs.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function dataFolder(app, name) {
+  const folder = `${app.paths.data}/${name}`;
+  await tjs.makeDir(folder, { recursive: true });
+  return folder;
+}
+async function pngDataUrl(path) {
+  const png = await tjs.readFile(path);
+  return `data:image/png;base64,${png.toBase64()}`;
+}
+function logError(message, error) {
+  console.error(message, error);
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/run-command.ts
 var textDecoder = new TextDecoder();
-var installedApps;
 async function runCommand(command) {
   const child = tjs.spawn(command, { stdout: "pipe", stderr: "ignore" });
   const reader = child.stdout.getReader();
@@ -21,6 +34,18 @@ async function runCommand(command) {
   const exit = await child.wait();
   return exit.exit_status === 0 ? output.trim() : "";
 }
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/find-app.ts
+var APP_FOLDERS = [
+  "/Applications",
+  "/System/Applications",
+  "/System/Library/CoreServices",
+  `${tjs.env.HOME}/Applications`
+];
+var installedApps;
+async function findAppPath(bundleId) {
+  return await findAppWithSpotlight(bundleId) ?? (await getInstalledApps()).get(bundleId);
+}
 async function findAppWithSpotlight(bundleId) {
   const results = await runCommand([
     "/usr/bin/mdfind",
@@ -28,14 +53,13 @@ async function findAppWithSpotlight(bundleId) {
   ]);
   return results.split("\n").find((path) => path.endsWith(".app"));
 }
-async function readBundleId(appPath) {
-  return runCommand([
-    "/usr/bin/plutil",
-    "-extract",
-    "CFBundleIdentifier",
-    "raw",
-    `${appPath}/Contents/Info.plist`
-  ]);
+function getInstalledApps() {
+  installedApps ??= (async () => {
+    const apps = /* @__PURE__ */ new Map();
+    for (const folder of APP_FOLDERS) await scanFolderForApps(folder, apps, 1);
+    return apps;
+  })();
+  return installedApps;
 }
 async function scanFolderForApps(folder, apps, subfolderDepth) {
   let entries;
@@ -54,66 +78,98 @@ async function scanFolderForApps(folder, apps, subfolderDepth) {
     }
   }
 }
-function getInstalledApps() {
-  installedApps ??= (async () => {
-    const apps = /* @__PURE__ */ new Map();
-    for (const folder of APP_FOLDERS) await scanFolderForApps(folder, apps, 1);
-    return apps;
-  })();
-  return installedApps;
+function readBundleId(appPath) {
+  return runCommand([
+    "/usr/bin/plutil",
+    "-extract",
+    "CFBundleIdentifier",
+    "raw",
+    `${appPath}/Contents/Info.plist`
+  ]);
 }
-async function findAppPath(bundleId) {
-  if (typeof bundleId !== "string" || !BUNDLE_ID_PATTERN.test(bundleId)) {
-    throw new Error(`invalid bundle id: ${bundleId}`);
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/app-icons.ts
+var ICON_SIZE = 32;
+var BUNDLE_ID_PATTERN = /^[\w.-]+$/;
+var iconUrls = /* @__PURE__ */ new Map();
+async function saveAppIcon(bundleId, app) {
+  if (!BUNDLE_ID_PATTERN.test(bundleId)) return null;
+  const iconPath = `${await dataFolder(app, "icons")}/${bundleId}.png`;
+  if (await fileExists(iconPath)) return iconPath;
+  const appPath = await findAppPath(bundleId);
+  if (!appPath) return null;
+  const thumbnail = await app.thumbnail(appPath, ICON_SIZE);
+  await tjs.copyFile(thumbnail.path, iconPath);
+  return iconPath;
+}
+function getAppIconUrl(bundleId, app) {
+  if (typeof bundleId !== "string") return Promise.resolve(null);
+  let iconUrl = iconUrls.get(bundleId);
+  if (!iconUrl) {
+    iconUrl = loadAppIconUrl(bundleId, app);
+    iconUrls.set(bundleId, iconUrl);
   }
-  const appPath = await findAppWithSpotlight(bundleId) ?? (await getInstalledApps()).get(bundleId);
-  if (!appPath) throw new Error(`no app for ${bundleId}`);
-  return appPath;
+  return iconUrl;
 }
-async function thumbnailUrl(path, size, app) {
-  const thumbnail = await app.thumbnail(path, size);
-  const png = await tjs.readFile(thumbnail.path);
-  return `data:image/png;base64,${png.toBase64()}`;
-}
-async function fileExists(path) {
+async function loadAppIconUrl(bundleId, app) {
   try {
-    await tjs.stat(path);
-    return true;
-  } catch {
-    return false;
+    const iconPath = await saveAppIcon(bundleId, app);
+    return iconPath ? await pngDataUrl(iconPath) : null;
+  } catch (error) {
+    logError(`appIcon failed for ${bundleId}:`, error);
+    return null;
   }
 }
-var api = {
-  async appIcon({ bundleId }, app) {
-    if (iconCache.has(bundleId)) return iconCache.get(bundleId);
-    let iconUrl = null;
-    try {
-      const appPath = await findAppPath(bundleId);
-      iconUrl = await thumbnailUrl(appPath, 32, app);
-    } catch (error) {
-      console.error(`appIcon failed for ${bundleId}:`, error);
-    }
-    iconCache.set(bundleId, iconUrl);
-    return iconUrl;
-  },
-  // Not cached: files change and get deleted, and a Quick Look thumbnail takes milliseconds.
-  // Resolves null when the file is gone (moved or deleted since it was copied).
-  async filePreview({ path }, app) {
-    if (typeof path !== "string" || !path.startsWith("/")) return null;
-    if (!await fileExists(path)) return null;
-    try {
-      return await thumbnailUrl(path, 64, app);
-    } catch (error) {
-      console.error(`filePreview failed for ${path}:`, error);
-      return null;
-    }
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/clipboard-history.ts
+async function readClipboardItem(app) {
+  const item = await app.clipboard.read();
+  if (item.concealed || item.kind === "empty") return null;
+  const bundleId = item.sourceApp?.bundleId;
+  if (bundleId) {
+    await saveAppIcon(bundleId, app).catch(
+      (error) => logError(`saving icon for ${bundleId} failed:`, error)
+    );
   }
+  return saveClipboardImage(item, app);
+}
+async function saveClipboardImage(item, app) {
+  if (item.kind !== "image" || !item.image) return item;
+  const savedPath = `${await dataFolder(app, "images")}/${Date.now()}-${item.changeCount}.png`;
+  await tjs.copyFile(item.image, savedPath);
+  return { ...item, image: savedPath };
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
+var PREVIEW_SIZE = 64;
+async function getFilePreviewUrl(path, app) {
+  if (typeof path !== "string" || !path.startsWith("/")) return null;
+  if (!await fileExists(path)) return null;
+  try {
+    const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
+    return await pngDataUrl(thumbnail.path);
+  } catch (error) {
+    logError(`filePreview failed for ${path}:`, error);
+    return null;
+  }
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/main.ts
+var api = {
+  appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
+  filePreview: ({ path }, app) => getFilePreviewUrl(path, app)
 };
+async function onClipboardChange({ self }, app) {
+  if (self) return;
+  const item = await readClipboardItem(app);
+  if (item) app.push("clipboard-item", item);
+}
 function init(app) {
   app.tray.set({ icon: "sf:document.on.clipboard" });
   app.setHideOnClose(true);
 }
 export {
   api,
-  init
+  init,
+  onClipboardChange
 };
