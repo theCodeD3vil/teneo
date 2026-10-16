@@ -2,9 +2,13 @@
 import { Icon } from "@iconify/vue";
 
 import { cn } from "@/lib/utils";
+
 const props = defineProps<{
   itemDetails: TinyClipboardData;
+  supportsQuickPaste?: boolean;
+  quickPasteIndex?: number;
 }>();
+
 function getClipboardIcon() {
   switch (props.itemDetails.kind) {
     case "text":
@@ -17,6 +21,7 @@ function getClipboardIcon() {
       return "hugeicons:clipboard";
   }
 }
+
 function getClipboardThemeClasses() {
   switch (props.itemDetails.kind) {
     case "text":
@@ -38,17 +43,44 @@ const sourceAppIconUrl = await tiny.api.call("appIcon", {
 const isImage = props.itemDetails.kind === "image";
 const isFiles = props.itemDetails.kind === "files";
 const firstPath = props.itemDetails.paths[0];
+
 const previewPath = isImage
   ? props.itemDetails.image
   : isFiles
     ? firstPath
     : null;
-const previewUrl = previewPath
+
+const preview: { url: string; size: number | null } | null = previewPath
   ? await tiny.api.call("filePreview", { path: previewPath })
   : null;
+const previewUrl = preview?.url ?? null;
+
 const isPreviewMissing = (isImage || isFiles) && !previewUrl;
+
 const fileName = firstPath?.split("/").pop();
 const otherFileCount = props.itemDetails.paths.length - 1;
+
+const SIZE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"];
+
+/** Bytes in base 1000, as Finder shows them: 178523 → "178.5 kB". */
+function formatFileSize(bytes: number): string {
+  const unitIndex = Math.min(
+    Math.floor(Math.log10(Math.max(bytes, 1)) / 3),
+    SIZE_UNITS.length - 1,
+  );
+  return new Intl.NumberFormat(undefined, {
+    style: "unit",
+    unit: SIZE_UNITS[unitIndex],
+    unitDisplay: "short",
+    maximumFractionDigits: 1,
+  }).format(bytes / 1000 ** unitIndex);
+}
+
+// Only for a single copied file: next to "+N" the first file's size would read as the total.
+const fileSize =
+  isFiles && otherFileCount === 0 && preview?.size != null
+    ? formatFileSize(preview.size)
+    : null;
 
 /** Original filename from a browser copy's `<img src>` html, or null. */
 function imageNameFromHtml(html: string | null): string | null {
@@ -74,6 +106,7 @@ const imageName =
   <div
     class="hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]">
     <div class="flex items-center gap-4">
+      <!-- media -->
       <img
         v-if="previewUrl"
         :src="previewUrl"
@@ -87,12 +120,15 @@ const imageName =
       <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
         <Icon width="20" height="20" :icon="getClipboardIcon()" />
       </div>
-      <div class="flex-1 space-y-2">
+      <!-- main content -->
+      <div class="min-w-0 flex-1 space-y-2">
+        <!-- text -->
         <p
-          class="font-foreground max-w-[70%] truncate text-sm"
-          v-if="itemDetails.text">
+          class="font-foreground line-clamp-2 text-sm wrap-break-word"
+          v-if="itemDetails.kind === 'text' && itemDetails.text">
           {{ itemDetails.text }}
         </p>
+        <!-- color (value + small preview) -->
         <p
           class="font-foreground flex items-center gap-2 text-sm"
           v-if="itemDetails.color">
@@ -103,6 +139,7 @@ const imageName =
             class="size-4 rounded"
             :style="`background: ${itemDetails.color}`"></span>
         </p>
+        <!-- file -->
         <p
           v-if="isFiles"
           class="font-foreground flex items-center gap-2 text-sm"
@@ -144,7 +181,7 @@ const imageName =
           }}
         </p>
 
-        <div class="flex gap-x-1">
+        <div class="flex items-center gap-x-2">
           <span
             v-if="sourceAppIconUrl"
             class="text-foreground/50 flex items-center gap-x-1 text-xs">
@@ -153,6 +190,25 @@ const imageName =
               class="aspect-square size-4 overflow-hidden rounded" />
             {{ itemDetails.sourceApp?.name }}
           </span>
+          <template v-if="fileSize">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 text-xs">{{ fileSize }}</span>
+          </template>
+          <template v-if="isFiles && firstPath">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 min-w-0 flex-1 truncate text-xs">
+              {{ firstPath }}</span
+            >
+          </template>
+        </div>
+      </div>
+      <!-- actions + quick paste -->
+      <div class="shrink-0 p-2">
+        <div
+          class="bg-foreground/5 flex w-max items-center gap-0.5 rounded p-1"
+          v-if="supportsQuickPaste">
+          <Icon icon="hugeicons:command" />
+          <span class="text-xs">{{ quickPasteIndex }}</span>
         </div>
       </div>
     </div>

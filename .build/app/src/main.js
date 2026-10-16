@@ -132,6 +132,11 @@ async function loadAppIconUrl(bundleId, app) {
   }
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/utils/uuid-generatoe.ts
+function generateUUID() {
+  return crypto.randomUUID();
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/clipboard-history.ts
 async function readClipboardItem(app) {
   const item = await app.clipboard.read();
@@ -146,19 +151,182 @@ async function readClipboardItem(app) {
 }
 async function saveClipboardImage(item, app) {
   if (item.kind !== "image" || !item.image) return item;
-  const savedPath = `${await dataFolder(app, "images")}/${Date.now()}-${item.changeCount}.png`;
+  const savedPath = `${await dataFolder(app, "images")}/${generateUUID()}-${item.changeCount}.png`;
   await tjs.copyFile(item.image, savedPath);
   return { ...item, image: savedPath };
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/database.ts
+import { Database } from "tjs:sqlite";
+var databasePromise = null;
+function initializeDatabase(app) {
+  databasePromise ??= openDatabase(app);
+  return databasePromise;
+}
+async function openDatabase(app) {
+  await tjs.makeDir(app.paths.data, { recursive: true });
+  const database = new Database(`${app.paths.data}/teneo.sqlite`);
+  run(
+    database,
+    `
+      CREATE TABLE IF NOT EXISTS "CLIPBOARD_ITEMS" (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK(kind IN ('text', 'image', 'files', 'color')),
+        imageSize TEXT,
+        path TEXT,
+        value TEXT,
+        dateCopied INTEGER NOT NULL
+      )
+    `
+  );
+  run(
+    database,
+    `
+      CREATE INDEX IF NOT EXISTS clipboard_items_date_copied_index
+      ON "CLIPBOARD_ITEMS" (dateCopied DESC)
+    `
+  );
+  return database;
+}
+async function saveClipboardItem(item, app) {
+  if (item.kind === "empty") {
+    throw new Error("Cannot save an empty clipboard item");
+  }
+  const dateCopied = Date.now();
+  const savedItem = {
+    ...item,
+    id: generateUUID(),
+    dateCopied
+  };
+  run(
+    await initializeDatabase(app),
+    `
+      INSERT INTO "CLIPBOARD_ITEMS" (id, kind, imageSize, path, value, dateCopied)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+    savedItem.id,
+    savedItem.kind,
+    serializeImageSize(savedItem),
+    serializePath(savedItem, app),
+    serializeValue(savedItem),
+    savedItem.dateCopied
+  );
+  return savedItem;
+}
+async function listClipboardItems(app) {
+  const rows = all(
+    await initializeDatabase(app),
+    `
+      SELECT id, kind, imageSize, path, value, dateCopied
+      FROM "CLIPBOARD_ITEMS"
+      ORDER BY dateCopied DESC
+    `
+  );
+  return rows.flatMap((row) => {
+    const item = rowToClipboardItem(row, app);
+    return item ? [item] : [];
+  });
+}
+function serializeImageSize(item) {
+  return item.kind === "image" && item.imageSize ? JSON.stringify(item.imageSize) : null;
+}
+function serializePath(item, app) {
+  if (item.kind === "image") {
+    if (!item.image) return null;
+    const dataDirectory = `${app.paths.data}/`;
+    if (!item.image.startsWith(dataDirectory)) {
+      throw new Error(
+        "Clipboard image was not saved to the app data directory"
+      );
+    }
+    return item.image.slice(dataDirectory.length);
+  }
+  return item.kind === "files" ? JSON.stringify(item.paths) : null;
+}
+function serializeValue(item) {
+  if (item.kind === "text") return item.text;
+  if (item.kind === "color") return item.color;
+  return null;
+}
+function rowToClipboardItem(row, app) {
+  if (!isClipboardItemKind(row.kind) || !isValidDate(row.dateCopied)) {
+    return null;
+  }
+  return {
+    id: row.id,
+    dateCopied: row.dateCopied,
+    kind: row.kind,
+    changeCount: row.dateCopied,
+    text: row.kind === "text" ? row.value : null,
+    html: null,
+    paths: row.kind === "files" ? parsePaths(row.path) : [],
+    image: row.kind === "image" ? restoreImagePath(row.path, app) : null,
+    imageSize: row.kind === "image" ? parseImageSize(row.imageSize) : null,
+    color: row.kind === "color" ? row.value : null,
+    concealed: false,
+    sourceApp: null,
+    sourceURL: null
+  };
+}
+function isClipboardItemKind(value) {
+  return value === "text" || value === "image" || value === "files" || value === "color";
+}
+function isValidDate(value) {
+  return Number.isFinite(value) && value > 0;
+}
+function restoreImagePath(path, app) {
+  if (!path || path.startsWith("/") || path.includes("..")) return null;
+  return `${app.paths.data}/${path}`;
+}
+function parsePaths(path) {
+  if (!path) return [];
+  try {
+    const paths = JSON.parse(path);
+    return Array.isArray(paths) && paths.every((item) => typeof item === "string") ? paths : [];
+  } catch {
+    return [];
+  }
+}
+function parseImageSize(imageSize) {
+  if (!imageSize) return null;
+  try {
+    const parsed = JSON.parse(imageSize);
+    if (!parsed || typeof parsed !== "object") return null;
+    const { width, height } = parsed;
+    return typeof width === "number" && typeof height === "number" ? { width, height } : null;
+  } catch {
+    return null;
+  }
+}
+function run(database, query, ...values) {
+  const statement = database.prepare(query);
+  try {
+    statement.run(...values);
+  } finally {
+    statement.finalize();
+  }
+}
+function all(database, query) {
+  const statement = database.prepare(query);
+  try {
+    return statement.all();
+  } finally {
+    statement.finalize();
+  }
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
 var PREVIEW_SIZE = 64;
-async function getFilePreviewUrl(path, app) {
+async function getFilePreview(path, app) {
   if (typeof path !== "string" || !path.startsWith("/")) return null;
-  if (!await fileExists(path)) return null;
+  const stats = await tjs.stat(path).catch(() => null);
+  if (!stats) return null;
   try {
     const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
-    return await pngDataUrl(thumbnail.path);
+    return {
+      url: await pngDataUrl(thumbnail.path),
+      size: stats.isDirectory ? null : stats.size
+    };
   } catch (error) {
     logError(`filePreview failed for ${path}:`, error);
     return null;
@@ -168,14 +336,16 @@ async function getFilePreviewUrl(path, app) {
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/main.ts
 var api = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
-  filePreview: ({ path }, app) => getFilePreviewUrl(path, app)
+  clipboardItems: (_parameters, app) => listClipboardItems(app),
+  filePreview: ({ path }, app) => getFilePreview(path, app)
 };
 async function onClipboardChange({ self }, app) {
   if (self) return;
   const item = await readClipboardItem(app);
-  if (item) app.push("clipboard-item", item);
+  if (item) app.push("clipboard-item", await saveClipboardItem(item, app));
 }
-function init(app) {
+async function init(app) {
+  await initializeDatabase(app);
   app.tray.set({ icon: "sf:sparkles.square.filled.on.square" });
   app.setHideOnClose(true);
 }

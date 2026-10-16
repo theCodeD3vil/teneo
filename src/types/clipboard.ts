@@ -10,3 +10,8 @@ export type ClipboardItemVariant = (typeof clipboardItemVariants)[number];
 
 export type TabVariant = Exclude<ClipboardItemVariant, "empty">;
 export type MediaVariant = Extract<ClipboardItemVariant, "image" | "files">;
+
+export interface ClipboardHistoryItem extends TinyClipboardData {
+  id: string;
+  dateCopied: number;
+}

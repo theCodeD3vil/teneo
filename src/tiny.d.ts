@@ -623,7 +623,7 @@ declare interface Tiny {
     /** Call a backend api method; resolves with its return value. */
     call(method: string, params?: unknown): Promise<any>;
     /** Subscribe to backend push events (app.push / broadcasts). */
-    on(event: string, fn: (data: any) => void): void;
+    on(event: string, fn: (data: any) => void): () => void;
   };
 
   /** Like window.fetch, but the request runs in the backend (a native

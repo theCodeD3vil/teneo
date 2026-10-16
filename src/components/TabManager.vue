@@ -23,7 +23,9 @@ const defaultTab = tabValues[0];
       </div>
     </TabsList>
     <TabsContent value="all" class="mt-3 min-h-0 flex-1 bg-transparent!">
-      <AllTabContent />
+      <Suspense>
+        <AllTabContent />
+      </Suspense>
     </TabsContent>
   </Tabs>
 </template>

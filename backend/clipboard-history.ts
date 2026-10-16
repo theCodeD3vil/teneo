@@ -2,6 +2,7 @@
 // moment (the image's temp file, the source app) is saved to the data dir now.
 import { saveAppIcon } from "./app-icons";
 import { dataFolder, logError } from "./files";
+import { generateUUID } from "./utils/uuid-generatoe";
 
 /** Read the clipboard as a history item, or null for items history must skip. */
 export async function readClipboardItem(
@@ -29,7 +30,7 @@ async function saveClipboardImage(
 ): Promise<TinyClipboardData> {
   if (item.kind !== "image" || !item.image) return item;
   // changeCount restarts at boot, so the timestamp keeps names unique across reboots
-  const savedPath = `${await dataFolder(app, "images")}/${Date.now()}-${item.changeCount}.png`;
+  const savedPath = `${await dataFolder(app, "images")}/${generateUUID()}-${item.changeCount}.png`;
   await tjs.copyFile(item.image, savedPath);
   return { ...item, image: savedPath };
 }
