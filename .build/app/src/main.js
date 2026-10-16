@@ -175,10 +175,13 @@ async function openDatabase(app) {
         imageSize TEXT,
         path TEXT,
         value TEXT,
-        dateCopied INTEGER NOT NULL
+        dateCopied INTEGER NOT NULL,
+        sourceAppName TEXT,
+        sourceAppBundleId TEXT
       )
     `
   );
+  addSourceAppColumns(database);
   run(
     database,
     `
@@ -201,15 +204,19 @@ async function saveClipboardItem(item, app) {
   run(
     await initializeDatabase(app),
     `
-      INSERT INTO "CLIPBOARD_ITEMS" (id, kind, imageSize, path, value, dateCopied)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO "CLIPBOARD_ITEMS" (
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
     serializeImageSize(savedItem),
     serializePath(savedItem, app),
     serializeValue(savedItem),
-    savedItem.dateCopied
+    savedItem.dateCopied,
+    savedItem.sourceApp?.name ?? null,
+    savedItem.sourceApp?.bundleId ?? null
   );
   return savedItem;
 }
@@ -217,7 +224,7 @@ async function listClipboardItems(app) {
   const rows = all(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
       FROM "CLIPBOARD_ITEMS"
       ORDER BY dateCopied DESC
     `
@@ -248,6 +255,26 @@ function serializeValue(item) {
   if (item.kind === "color") return item.color;
   return null;
 }
+function addSourceAppColumns(database) {
+  const columnNames = new Set(
+    all(
+      database,
+      `PRAGMA table_info("CLIPBOARD_ITEMS")`
+    ).map((column) => column.name)
+  );
+  if (!columnNames.has("sourceAppName")) {
+    run(
+      database,
+      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppName TEXT`
+    );
+  }
+  if (!columnNames.has("sourceAppBundleId")) {
+    run(
+      database,
+      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppBundleId TEXT`
+    );
+  }
+}
 function rowToClipboardItem(row, app) {
   if (!isClipboardItemKind(row.kind) || !isValidDate(row.dateCopied)) {
     return null;
@@ -264,8 +291,15 @@ function rowToClipboardItem(row, app) {
     imageSize: row.kind === "image" ? parseImageSize(row.imageSize) : null,
     color: row.kind === "color" ? row.value : null,
     concealed: false,
-    sourceApp: null,
+    sourceApp: sourceAppFromRow(row),
     sourceURL: null
+  };
+}
+function sourceAppFromRow(row) {
+  if (row.sourceAppName == null && row.sourceAppBundleId == null) return null;
+  return {
+    name: row.sourceAppName,
+    bundleId: row.sourceAppBundleId
   };
 }
 function isClipboardItemKind(value) {

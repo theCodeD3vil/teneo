@@ -1,12 +1,36 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useClipboard } from "@/composables/useClipboard";
 import { omit } from "@/utils/helpers";
 
-import { clipboardItemVariants, type TabVariant } from "../types/clipboard";
+import {
+  clipboardItemVariants,
+  type ClipboardHistoryItem,
+  type TabVariant,
+} from "../types/clipboard";
 import AllTabContent from "./AllTabContent.vue";
 
 const tabValues: TabVariant[] = omit(clipboardItemVariants, "empty");
 const defaultTab = tabValues[0];
+const { clipboardItems, error, loading } = useClipboard();
+
+const itemsByTab = computed<Record<TabVariant, ClipboardHistoryItem[]>>(() => ({
+  all: clipboardItems.value,
+  files: clipboardItems.value.filter((item) => item.kind === "files"),
+  image: clipboardItems.value.filter((item) => item.kind === "image"),
+  color: clipboardItems.value.filter((item) => item.kind === "color"),
+  text: clipboardItems.value.filter((item) => item.kind === "text"),
+}));
+
+const emptyMessages: Record<TabVariant, string> = {
+  all: "No clipboard history yet.",
+  files: "No copied files yet.",
+  image: "No copied images yet.",
+  color: "No copied colors yet.",
+  text: "No copied text yet.",
+};
 </script>
 
 <template>
@@ -22,10 +46,16 @@ const defaultTab = tabValues[0];
         </TabsTrigger>
       </div>
     </TabsList>
-    <TabsContent value="all" class="mt-3 min-h-0 flex-1 bg-transparent!">
-      <Suspense>
-        <AllTabContent />
-      </Suspense>
+    <TabsContent
+      v-for="tabItem in tabValues"
+      :key="tabItem"
+      :value="tabItem"
+      class="mt-3 min-h-0 flex-1 bg-transparent!">
+      <AllTabContent
+        :items="itemsByTab[tabItem]"
+        :loading="loading"
+        :error="error"
+        :empty-message="emptyMessages[tabItem]" />
     </TabsContent>
   </Tabs>
 </template>

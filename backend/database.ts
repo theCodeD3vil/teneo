@@ -11,6 +11,12 @@ interface ClipboardItemRow {
   path: string | null;
   value: string | null;
   dateCopied: number;
+  sourceAppName: string | null;
+  sourceAppBundleId: string | null;
+}
+
+interface ClipboardItemColumn {
+  name: string;
 }
 
 export interface ClipboardHistoryItem extends TinyClipboardData {
@@ -38,10 +44,13 @@ async function openDatabase(app: TinyApp): Promise<Database> {
         imageSize TEXT,
         path TEXT,
         value TEXT,
-        dateCopied INTEGER NOT NULL
+        dateCopied INTEGER NOT NULL,
+        sourceAppName TEXT,
+        sourceAppBundleId TEXT
       )
     `,
   );
+  addSourceAppColumns(database);
   run(
     database,
     `
@@ -72,8 +81,10 @@ export async function saveClipboardItem(
   run(
     await initializeDatabase(app),
     `
-      INSERT INTO "CLIPBOARD_ITEMS" (id, kind, imageSize, path, value, dateCopied)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO "CLIPBOARD_ITEMS" (
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
@@ -81,6 +92,8 @@ export async function saveClipboardItem(
     serializePath(savedItem, app),
     serializeValue(savedItem),
     savedItem.dateCopied,
+    savedItem.sourceApp?.name ?? null,
+    savedItem.sourceApp?.bundleId ?? null,
   );
 
   return savedItem;
@@ -92,7 +105,7 @@ export async function listClipboardItems(
   const rows = all<ClipboardItemRow>(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
       FROM "CLIPBOARD_ITEMS"
       ORDER BY dateCopied DESC
     `,
@@ -131,6 +144,27 @@ function serializeValue(item: TinyClipboardData): string | null {
   return null;
 }
 
+function addSourceAppColumns(database: Database): void {
+  const columnNames = new Set(
+    all<ClipboardItemColumn>(
+      database,
+      `PRAGMA table_info("CLIPBOARD_ITEMS")`,
+    ).map((column) => column.name),
+  );
+  if (!columnNames.has("sourceAppName")) {
+    run(
+      database,
+      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppName TEXT`,
+    );
+  }
+  if (!columnNames.has("sourceAppBundleId")) {
+    run(
+      database,
+      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppBundleId TEXT`,
+    );
+  }
+}
+
 function rowToClipboardItem(
   row: ClipboardItemRow,
   app: TinyApp,
@@ -151,8 +185,18 @@ function rowToClipboardItem(
     imageSize: row.kind === "image" ? parseImageSize(row.imageSize) : null,
     color: row.kind === "color" ? row.value : null,
     concealed: false,
-    sourceApp: null,
+    sourceApp: sourceAppFromRow(row),
     sourceURL: null,
+  };
+}
+
+function sourceAppFromRow(
+  row: ClipboardItemRow,
+): TinyClipboardData["sourceApp"] {
+  if (row.sourceAppName == null && row.sourceAppBundleId == null) return null;
+  return {
+    name: row.sourceAppName,
+    bundleId: row.sourceAppBundleId,
   };
 }
 
