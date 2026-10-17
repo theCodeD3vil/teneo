@@ -1,3 +1,5 @@
+import { hasTypedText } from "@/utils/keyboard";
+
 const quickCopyItemNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 export type QuickCopyItemNumber = (typeof quickCopyItemNumbers)[number];
@@ -79,6 +81,7 @@ export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
   }
 
   if (hasNoModifiers(event)) {
+    if (isTextEditingKey(event)) return null;
     if (event.code === "Space") return { name: "previewSelectedItem" };
     if (event.key === "ArrowLeft") {
       return { name: "moveActiveTab", direction: -1 };
@@ -124,6 +127,15 @@ export function getHotkeyProgress(event: KeyboardEvent): HotkeyProgress | null {
   }
 
   return null;
+}
+
+// Once the search field has text, Space and ←/→ type and move the cursor instead
+function isTextEditingKey(event: KeyboardEvent): boolean {
+  const editsText =
+    event.code === "Space" ||
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight";
+  return editsText && hasTypedText(event.target);
 }
 
 function hasNoModifiers(event: KeyboardEvent): boolean {

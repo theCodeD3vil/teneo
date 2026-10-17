@@ -15,13 +15,6 @@ function focus(): void {
   searchInputContainer.value?.querySelector("input")?.focus();
 }
 
-function returnToKeyboardNavigation(event: KeyboardEvent): void {
-  if (event.key !== "Enter") return;
-
-  event.preventDefault();
-  searchInputContainer.value?.querySelector("input")?.blur();
-}
-
 defineExpose({ focus });
 </script>
 
@@ -32,7 +25,7 @@ defineExpose({ focus });
         v-model="searchQuery"
         placeholder="Search clipboard"
         class="text-sm font-light"
-        @keydown="returnToKeyboardNavigation" />
+        data-hotkeys />
       <InputGroupAddon>
         <SearchIcon />
       </InputGroupAddon>

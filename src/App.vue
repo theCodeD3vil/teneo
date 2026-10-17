@@ -37,6 +37,7 @@ async function toggleWindow() {
 
   tabManager.value?.activateFirstItem();
   await tiny.win.show();
+  searchInput.value?.focus();
 }
 
 async function isCursorOverTray(): Promise<boolean> {

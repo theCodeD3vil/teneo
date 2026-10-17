@@ -1,10 +1,10 @@
 import { onMounted, onUnmounted, ref } from "vue";
 
 import { getHotkeyProgress, type HotkeyProgress } from "@/constants/hotkeys";
-import { isEditableKeyboardTarget } from "@/utils/keyboard";
+import { blocksHotkeys } from "@/utils/keyboard";
 
 const partialHotkeyTimeout = 5_000;
-const completedHotkeyTimeout = 500;
+const completedHotkeyTimeout = 1500;
 
 export function useHotkeyPreview() {
   const hotkeyProgress = ref<HotkeyProgress | null>(null);
@@ -21,7 +21,7 @@ export function useHotkeyPreview() {
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (isEditableKeyboardTarget(event.target)) return;
+    if (blocksHotkeys(event.target)) return;
 
     const progress = getHotkeyProgress(event);
     if (!progress) return;

@@ -5,11 +5,11 @@ import {
   type HotkeyHandlers,
   type HotkeyMatch,
 } from "@/constants/hotkeys";
-import { isEditableKeyboardTarget } from "@/utils/keyboard";
+import { blocksHotkeys } from "@/utils/keyboard";
 
 export function useHotkeys(handlers: HotkeyHandlers): void {
   function handleKeydown(event: KeyboardEvent): void {
-    if (isEditableKeyboardTarget(event.target)) return;
+    if (blocksHotkeys(event.target)) return;
 
     const hotkey = getHotkeyMatch(event);
     if (!hotkey || !runHandler(hotkey, handlers)) return;
