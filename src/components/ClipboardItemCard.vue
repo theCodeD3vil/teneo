@@ -179,10 +179,17 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
               isImage ? 'object-cover' : 'object-contain',
             ])
           " />
-        <Icon
+        <div
           v-if="isCopying"
-          icon="hugeicons:tick-02"
-          class="text-success absolute inset-0 m-auto size-5" />
+          class="pointer-events-none absolute inset-0 rounded-md bg-gradient-to-br from-black/65 via-black/40 to-black/20" />
+        <Icon
+          v-if="isCopying && isImage"
+          icon="hugeicons:image-done-01"
+          class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
+        <Icon
+          v-if="isCopying && isFiles"
+          icon="hugeicons:file-verified"
+          class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
       </div>
       <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
         <Icon
