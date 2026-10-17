@@ -22,6 +22,8 @@ const props = defineProps<{
   quickPasteIndex?: number;
 }>();
 
+defineExpose({ copyAndHideWindow });
+
 const cardElement = ref<HTMLElement | null>(null);
 const isCopying = ref(false);
 let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -119,26 +121,37 @@ function handleQuickCopy(itemNumber: QuickCopyItemNumber): boolean {
   if (
     !props.supportsQuickPaste ||
     props.quickPasteIndex !== itemNumber ||
-    isPreviewMissing ||
-    isCopying.value
+    isPreviewMissing
   ) {
     return false;
   }
 
+  return copyItem(true);
+}
+
+function copyAndHideWindow(): boolean {
+  return copyItem(true);
+}
+
+function copyItem(hideWindow = false): boolean {
+  if (isPreviewMissing || isCopying.value) return false;
+
   const clipboardData = getClipboardDataForQuickCopy(props.itemDetails);
   if (!clipboardData) return false;
 
-  void copyToClipboard(clipboardData).catch(() => undefined);
+  void copyToClipboard(clipboardData, hideWindow).catch(() => undefined);
   return true;
 }
 
 async function copyToClipboard(
   clipboardData: TinyClipboardWrite,
+  hideWindow: boolean,
 ): Promise<void> {
   isCopying.value = true;
 
   try {
     await tiny.clipboard.write(clipboardData);
+    if (hideWindow) await tiny.win.hide();
   } finally {
     copyFinishedTimeout = setTimeout(() => {
       isCopying.value = false;
@@ -178,6 +191,7 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
 <template>
   <div
     ref="cardElement"
+    @click="copyAndHideWindow"
     :class="
       cn([
         'hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]',

@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import type { ComponentPublicInstance } from "vue";
 import AlertCircleIcon from "~icons/hugeicons/alert-circle";
 import ClipboardListIcon from "~icons/hugeicons/clipboard-list";
 import FileIcon from "~icons/hugeicons/file-01";
@@ -29,6 +30,40 @@ const props = withDefaults(
   }>(),
   { emptyMessage: "No clipboard history yet." },
 );
+
+type ClipboardItemCardReference = ComponentPublicInstance & {
+  copyAndHideWindow: () => boolean;
+};
+
+const cardReferences = new Map<string, ClipboardItemCardReference>();
+
+function setCardReference(
+  itemId: string,
+  card: Element | ComponentPublicInstance | null,
+): void {
+  if (isClipboardItemCardReference(card)) {
+    cardReferences.set(itemId, card);
+  } else {
+    cardReferences.delete(itemId);
+  }
+}
+
+function isClipboardItemCardReference(
+  card: Element | ComponentPublicInstance | null,
+): card is ClipboardItemCardReference {
+  return (
+    card !== null &&
+    "copyAndHideWindow" in card &&
+    typeof card.copyAndHideWindow === "function"
+  );
+}
+
+function copyActiveItem(itemId: string | null): boolean {
+  if (!itemId) return false;
+  return cardReferences.get(itemId)?.copyAndHideWindow() ?? false;
+}
+
+defineExpose({ copyActiveItem });
 </script>
 <template>
   <ScrollArea class="scroll-fade size-full scrollbar-none! rounded-md">
@@ -55,6 +90,7 @@ const props = withDefaults(
           <ClipboardItemCard
             v-for="(item, index) in props.items"
             :key="item.id"
+            :ref="(card) => setCardReference(item.id, card)"
             :item-details="item"
             :is-active="item.id === props.activeItemId"
             :quick-paste-index="index + 1"

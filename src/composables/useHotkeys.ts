@@ -47,5 +47,9 @@ function runHandler(hotkey: HotkeyMatch, handlers: HotkeyHandlers): boolean {
       const handler = handlers.moveActiveItem;
       return handler ? handler(hotkey.direction) !== false : false;
     }
+    case "copyActiveItem": {
+      const handler = handlers.copyActiveItem;
+      return handler ? handler() !== false : false;
+    }
   }
 }

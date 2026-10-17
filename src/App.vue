@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 
 import HomeFooter from "./components/HomeFooter.vue";
 import SearchInput from "./components/SearchInput.vue";
@@ -19,11 +19,9 @@ function setNextTab(tab: TabVariant | null): void {
 
 async function toggleWindow() {
   const windowState = await tiny.win.getState();
-  const isWindowVisible = windowState.visible;
   const trayPosition = await tiny.tray.position();
 
-  //hide the window if visible
-  if (isWindowVisible) {
+  if (windowState.visible) {
     await tiny.win.hide();
     return;
   }
@@ -41,10 +39,21 @@ async function toggleWindow() {
   await tiny.win.show();
 }
 
+function hideWindowOnBlur(): void {
+  void tiny.win.getState().then((windowState) => {
+    if (windowState.visible) return tiny.win.hide();
+  });
+}
+
 onMounted(() => {
+  window.addEventListener("blur", hideWindowOnBlur);
   tiny.tray.onClick(async () => {
     await toggleWindow();
   });
+});
+
+onUnmounted(() => {
+  window.removeEventListener("blur", hideWindowOnBlur);
 });
 const clipboardItemsCount = ref(0);
 

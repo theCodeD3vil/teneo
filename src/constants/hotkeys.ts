@@ -34,6 +34,11 @@ export const hotkeyDefinitions = {
     shortcut: "↑ / ↓",
     description: "Move between items",
   },
+  copyActiveItem: {
+    id: "copy-active-item",
+    shortcut: "Enter",
+    description: "Copy the active item",
+  },
 } as const;
 
 export type HotkeyName = keyof typeof hotkeyDefinitions;
@@ -44,7 +49,8 @@ export type HotkeyMatch =
   | { name: "pasteSelectedItem" }
   | { name: "focusSearch" }
   | { name: "moveActiveTab"; direction: NavigationDirection }
-  | { name: "moveActiveItem"; direction: NavigationDirection };
+  | { name: "moveActiveItem"; direction: NavigationDirection }
+  | { name: "copyActiveItem" };
 
 export type HotkeyPreviewKey =
   | { type: "modifier"; value: "command" | "option" | "control" | "shift" }
@@ -63,6 +69,7 @@ export type HotkeyHandlers = {
   focusSearch?: () => boolean | void;
   moveActiveTab?: (direction: NavigationDirection) => boolean | void;
   moveActiveItem?: (direction: NavigationDirection) => boolean | void;
+  copyActiveItem?: () => boolean | void;
 };
 
 export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
@@ -85,6 +92,7 @@ export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
     if (event.key === "ArrowDown") {
       return { name: "moveActiveItem", direction: 1 };
     }
+    if (event.key === "Enter") return { name: "copyActiveItem" };
   }
 
   if (!hasOnlyCommandModifier(event)) return null;
@@ -177,6 +185,12 @@ function progressFromHotkey(hotkey: HotkeyMatch): HotkeyProgress {
       return {
         hotkeyName: hotkey.name,
         keys: [{ type: "key", value: hotkey.direction === -1 ? "↑" : "↓" }],
+        state: "complete",
+      };
+    case "copyActiveItem":
+      return {
+        hotkeyName: hotkey.name,
+        keys: [{ type: "key", value: "Enter" }],
         state: "complete",
       };
   }

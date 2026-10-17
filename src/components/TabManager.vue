@@ -29,6 +29,7 @@ const tabValues: TabVariant[] = omit(clipboardItemVariants, "empty");
 const defaultTab = tabValues[0];
 const selectedTab = ref<TabVariant>(defaultTab);
 const activeItemId = ref<string | null>(null);
+const allTabContent = ref<InstanceType<typeof AllTabContent> | null>(null);
 const debouncedSearchQuery = ref("");
 const { clipboardItems, error, loading } = useClipboard();
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -107,7 +108,11 @@ function moveActiveItem(direction: -1 | 1): boolean {
   return true;
 }
 
-useHotkeys({ moveActiveTab, moveActiveItem });
+function copyActiveItem(): boolean {
+  return allTabContent.value?.copyActiveItem(activeItemId.value) ?? false;
+}
+
+useHotkeys({ moveActiveTab, moveActiveItem, copyActiveItem });
 
 watch(
   () => props.searchQuery,
@@ -164,6 +169,7 @@ onUnmounted(() => clearTimeout(searchDebounceTimeout));
       force-mount
       class="mt-3 min-h-0 flex-1 bg-transparent!">
       <AllTabContent
+        ref="allTabContent"
         :items="selectedItems"
         :tab="selectedTab"
         :active-item-id="activeItemId"
