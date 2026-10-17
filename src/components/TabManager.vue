@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClipboard } from "@/composables/useClipboard";
@@ -12,8 +12,13 @@ import {
 } from "../types/clipboard";
 import AllTabContent from "./AllTabContent.vue";
 
+const emit = defineEmits<{
+  (e: "tab-change", count: number): void;
+}>();
+
 const tabValues: TabVariant[] = omit(clipboardItemVariants, "empty");
 const defaultTab = tabValues[0];
+const selectedTab = ref<TabVariant>(defaultTab);
 const { clipboardItems, error, loading } = useClipboard();
 
 const itemsByTab = computed<Record<TabVariant, ClipboardHistoryItem[]>>(() => ({
@@ -31,12 +36,16 @@ const emptyMessages: Record<TabVariant, string> = {
   color: "No copied colors yet.",
   text: "No copied text yet.",
 };
+
+const selectedItems = computed(() => itemsByTab.value[selectedTab.value]);
+
+watch(selectedItems, (items) => emit("tab-change", items.length), {
+  immediate: true,
+});
 </script>
 
 <template>
-  <Tabs
-    class="min-h-0 w-full flex-1 bg-transparent!"
-    :default-value="defaultTab">
+  <Tabs v-model="selectedTab" class="min-h-0 w-full flex-1 bg-transparent!">
     <TabsList class="sticky top-0 w-full justify-start gap-x-3 bg-transparent!">
       <div v-for="tabItem in tabValues" :key="tabItem">
         <TabsTrigger

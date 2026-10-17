@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 
+import HomeFooter from "./components/HomeFooter.vue";
 import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
 import { PANEL_WIDTH } from "./constants/system";
@@ -33,11 +34,13 @@ onMounted(() => {
     await toggleWindow();
   });
 });
+const clipboardItemsCount = ref(0);
 </script>
 
 <template>
   <div class="flex h-screen flex-col gap-3 overflow-hidden bg-transparent! p-4">
     <SearchInput />
-    <TabManager />
+    <TabManager @tab-change="(e: number) => (clipboardItemsCount = e)" />
+    <HomeFooter :clipboard-items-count="clipboardItemsCount" />
   </div>
 </template>

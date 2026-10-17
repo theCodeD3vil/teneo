@@ -1,28 +1,14 @@
 import { Database } from "tjs:sqlite";
 
+import type {
+  ClipboardHistoryItem,
+  ClipboardItemColumn,
+  ClipboardItemKind,
+  ClipboardItemRow,
+} from "./types/clipboard";
 import { generateUUID } from "./utils/uuid-generatoe";
 
-type ClipboardItemKind = Exclude<TinyClipboardData["kind"], "empty">;
-
-interface ClipboardItemRow {
-  id: string;
-  kind: ClipboardItemKind;
-  imageSize: string | null;
-  path: string | null;
-  value: string | null;
-  dateCopied: number;
-  sourceAppName: string | null;
-  sourceAppBundleId: string | null;
-}
-
-interface ClipboardItemColumn {
-  name: string;
-}
-
-export interface ClipboardHistoryItem extends TinyClipboardData {
-  id: string;
-  dateCopied: number;
-}
+export type { ClipboardHistoryItem } from "./types/clipboard";
 
 let databasePromise: Promise<Database> | null = null;
 
@@ -192,7 +178,7 @@ function rowToClipboardItem(
 
 function sourceAppFromRow(
   row: ClipboardItemRow,
-): TinyClipboardData["sourceApp"] {
+): ClipboardHistoryItem["sourceApp"] {
   if (row.sourceAppName == null && row.sourceAppBundleId == null) return null;
   return {
     name: row.sourceAppName,

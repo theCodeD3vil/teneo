@@ -1,10 +1,12 @@
 <script lang="ts" setup>
 import { Icon } from "@iconify/vue";
+import { formatTimeAgo } from "@vueuse/core";
 
 import { cn } from "@/lib/utils";
+import type { ClipboardHistoryItem } from "@/types/clipboard";
 
 const props = defineProps<{
-  itemDetails: TinyClipboardData;
+  itemDetails: ClipboardHistoryItem;
   supportsQuickPaste?: boolean;
   quickPasteIndex?: number;
 }>();
@@ -81,6 +83,8 @@ const fileSize =
   isFiles && otherFileCount === 0 && preview?.size != null
     ? formatFileSize(preview.size)
     : null;
+
+const dateCopied = formatTimeAgo(new Date(props.itemDetails.dateCopied));
 
 /** Original filename from a browser copy's `<img src>` html, or null. */
 function imageNameFromHtml(html: string | null): string | null {
@@ -160,7 +164,7 @@ const imageName =
             >File no longer exists</span
           >
         </p>
-
+        <!-- image -->
         <p
           v-if="isImage"
           :class="
@@ -194,6 +198,10 @@ const imageName =
             <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 text-xs">{{ fileSize }}</span>
           </template>
+          <template v-if="itemDetails.dateCopied">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 text-xs">{{ dateCopied }}</span>
+          </template>
           <template v-if="isFiles && firstPath">
             <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 min-w-0 flex-1 truncate text-xs">
@@ -205,7 +213,7 @@ const imageName =
       <!-- actions + quick paste -->
       <div class="shrink-0 p-2">
         <div
-          class="bg-foreground/5 flex w-max items-center gap-0.5 rounded p-1"
+          class="bg-foreground/1 text-foreground/60 flex w-max items-center gap-0.5 rounded p-1"
           v-if="supportsQuickPaste">
           <Icon icon="hugeicons:command" />
           <span class="text-xs">{{ quickPasteIndex }}</span>
