@@ -780,7 +780,7 @@ async function onClipboardChange({ self }, app) {
 }
 async function init(app) {
   await initializeDatabase(app);
-  app.tray.set({ icon: "sf:sparkles.square.filled.on.square" });
+  app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
 }
 export {

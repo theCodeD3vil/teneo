@@ -214,7 +214,7 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
 <template>
   <div
     ref="cardElement"
-    @click="copyAndHideWindow"
+    @click="copyItem()"
     :class="
       cn([
         'hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]',

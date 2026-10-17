@@ -27,6 +27,6 @@ export async function onClipboardChange(
 
 export async function init(app: TinyApp) {
   await initializeDatabase(app);
-  app.tray.set({ icon: "sf:sparkles.square.filled.on.square" });
+  app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
 }

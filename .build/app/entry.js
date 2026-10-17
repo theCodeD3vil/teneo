@@ -2,7 +2,7 @@ import { createApp } from './bridge.js';
 import * as appMod from './src/main.js';
 
 const FRONTEND = "http://127.0.0.1:5173";
-const RESOURCES = null;
+const RESOURCES = "/Users/michaelnji/Projects/desktop-apps/teneo/resources";
 
 const app = await createApp({
   htmlPath: FRONTEND,
