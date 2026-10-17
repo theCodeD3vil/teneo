@@ -1,7 +1,9 @@
 <script lang="ts" setup>
 import { Icon } from "@iconify/vue";
 
+import { useHotkeys } from "@/composables/useHotkeys";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
+import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import { cn } from "@/lib/utils";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
 
@@ -105,6 +107,41 @@ const sourceAppName = props.itemDetails.sourceApp?.name;
 const imageName =
   imageNameFromHtml(props.itemDetails.html) ??
   (sourceAppName ? `Image from ${sourceAppName}` : "Image");
+
+function handleQuickCopy(itemNumber: QuickCopyItemNumber): boolean {
+  if (
+    !props.supportsQuickPaste ||
+    props.quickPasteIndex !== itemNumber ||
+    isPreviewMissing
+  ) {
+    return false;
+  }
+
+  const clipboardData = getClipboardDataForQuickCopy(props.itemDetails);
+  if (!clipboardData) return false;
+
+  void tiny.clipboard.write(clipboardData).catch(() => undefined);
+  return true;
+}
+
+function getClipboardDataForQuickCopy(
+  item: ClipboardHistoryItem,
+): TinyClipboardWrite | null {
+  switch (item.kind) {
+    case "text":
+      return item.text === null
+        ? null
+        : { text: item.text, html: item.html ?? undefined };
+    case "files":
+      return item.paths.length ? { paths: item.paths } : null;
+    case "image":
+      return item.image ? { image: item.image } : null;
+    case "color":
+      return item.color ? { color: item.color } : null;
+  }
+}
+
+useHotkeys({ copyItemByNumber: handleQuickCopy });
 </script>
 <template>
   <div
