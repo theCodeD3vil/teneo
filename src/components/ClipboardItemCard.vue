@@ -1,6 +1,13 @@
 <script lang="ts" setup>
-import { Icon } from "@iconify/vue";
 import { onUnmounted, ref } from "vue";
+import ClipboardIcon from "~icons/hugeicons/clipboard";
+import CommandIcon from "~icons/hugeicons/command";
+import FileIcon from "~icons/hugeicons/file-01";
+import FileVerifiedIcon from "~icons/hugeicons/file-verified";
+import ImageIcon from "~icons/hugeicons/image-01";
+import ImageDoneIcon from "~icons/hugeicons/image-done-01";
+import TextAlignLeftIcon from "~icons/hugeicons/text-align-left";
+import TickIcon from "~icons/hugeicons/tick-02";
 
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
@@ -16,19 +23,6 @@ const props = defineProps<{
 
 const isCopying = ref(false);
 let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
-
-function getClipboardIcon() {
-  switch (props.itemDetails.kind) {
-    case "text":
-      return "hugeicons:text-align-left";
-    case "files":
-      return "hugeicons:file-01";
-    case "image":
-      return "hugeicons:image-01";
-    default:
-      return "hugeicons:clipboard";
-  }
-}
 
 function getClipboardThemeClasses() {
   switch (props.itemDetails.kind) {
@@ -182,21 +176,21 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
         <div
           v-if="isCopying"
           class="pointer-events-none absolute inset-0 rounded-md bg-gradient-to-br from-black/65 via-black/40 to-black/20" />
-        <Icon
+        <ImageDoneIcon
           v-if="isCopying && isImage"
-          icon="hugeicons:image-done-01"
           class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
-        <Icon
+        <FileVerifiedIcon
           v-if="isCopying && isFiles"
-          icon="hugeicons:file-verified"
           class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
       </div>
       <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
-        <Icon
-          width="20"
-          height="20"
-          :icon="isCopying ? 'hugeicons:tick-02' : getClipboardIcon()"
-          :class="isCopying && 'text-success'" />
+        <TickIcon v-if="isCopying" class="text-success size-5" />
+        <TextAlignLeftIcon
+          v-else-if="itemDetails.kind === 'text'"
+          class="size-5" />
+        <FileIcon v-else-if="itemDetails.kind === 'files'" class="size-5" />
+        <ImageIcon v-else-if="itemDetails.kind === 'image'" class="size-5" />
+        <ClipboardIcon v-else class="size-5" />
       </div>
       <!-- main content -->
       <div class="min-w-0 flex-1 space-y-2">
@@ -289,7 +283,7 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
         <div
           class="bg-foreground/1 text-foreground/60 flex w-max items-center gap-0.5 rounded p-1"
           v-if="supportsQuickPaste">
-          <Icon icon="hugeicons:command" />
+          <CommandIcon />
           <span class="text-xs">{{ quickPasteIndex }}</span>
         </div>
       </div>
