@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { Icon } from "@iconify/vue";
+import { onUnmounted, ref } from "vue";
 
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
@@ -12,6 +13,9 @@ const props = defineProps<{
   supportsQuickPaste?: boolean;
   quickPasteIndex?: number;
 }>();
+
+const isCopying = ref(false);
+let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
 
 function getClipboardIcon() {
   switch (props.itemDetails.kind) {
@@ -112,7 +116,8 @@ function handleQuickCopy(itemNumber: QuickCopyItemNumber): boolean {
   if (
     !props.supportsQuickPaste ||
     props.quickPasteIndex !== itemNumber ||
-    isPreviewMissing
+    isPreviewMissing ||
+    isCopying.value
   ) {
     return false;
   }
@@ -120,8 +125,22 @@ function handleQuickCopy(itemNumber: QuickCopyItemNumber): boolean {
   const clipboardData = getClipboardDataForQuickCopy(props.itemDetails);
   if (!clipboardData) return false;
 
-  void tiny.clipboard.write(clipboardData).catch(() => undefined);
+  void copyToClipboard(clipboardData).catch(() => undefined);
   return true;
+}
+
+async function copyToClipboard(
+  clipboardData: TinyClipboardWrite,
+): Promise<void> {
+  isCopying.value = true;
+
+  try {
+    await tiny.clipboard.write(clipboardData);
+  } finally {
+    copyFinishedTimeout = setTimeout(() => {
+      isCopying.value = false;
+    }, 1500);
+  }
 }
 
 function getClipboardDataForQuickCopy(
@@ -142,24 +161,35 @@ function getClipboardDataForQuickCopy(
 }
 
 useHotkeys({ copyItemByNumber: handleQuickCopy });
+
+onUnmounted(() => clearTimeout(copyFinishedTimeout));
 </script>
 <template>
   <div
     class="hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]">
     <div class="flex items-start gap-4">
       <!-- media -->
-      <img
-        v-if="previewUrl"
-        :src="previewUrl"
-        :alt="isImage ? imageName : fileName"
-        :class="
-          cn([
-            'size-9 shrink-0 rounded-md',
-            isImage ? 'object-cover' : 'object-contain',
-          ])
-        " />
+      <div v-if="previewUrl" class="relative size-9 shrink-0">
+        <img
+          :src="previewUrl"
+          :alt="isImage ? imageName : fileName"
+          :class="
+            cn([
+              'size-full rounded-md',
+              isImage ? 'object-cover' : 'object-contain',
+            ])
+          " />
+        <Icon
+          v-if="isCopying"
+          icon="hugeicons:tick-02"
+          class="text-success absolute inset-0 m-auto size-5" />
+      </div>
       <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
-        <Icon width="20" height="20" :icon="getClipboardIcon()" />
+        <Icon
+          width="20"
+          height="20"
+          :icon="isCopying ? 'hugeicons:tick-02' : getClipboardIcon()"
+          :class="isCopying && 'text-success'" />
       </div>
       <!-- main content -->
       <div class="min-w-0 flex-1 space-y-2">
