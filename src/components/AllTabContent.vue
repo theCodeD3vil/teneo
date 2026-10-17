@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { ComponentPublicInstance } from "vue";
+import { computed, type ComponentPublicInstance } from "vue";
 import AlertCircleIcon from "~icons/hugeicons/alert-circle";
 import ClipboardListIcon from "~icons/hugeicons/clipboard-list";
 import FileIcon from "~icons/hugeicons/file-01";
@@ -35,7 +35,54 @@ type ClipboardItemCardReference = ComponentPublicInstance & {
   copyAndHideWindow: () => boolean;
 };
 
+interface ClipboardItemGroup {
+  key: number;
+  label: string;
+  items: Array<{ item: ClipboardHistoryItem; index: number }>;
+}
+
 const cardReferences = new Map<string, ClipboardItemCardReference>();
+const dayInMilliseconds = 24 * 60 * 60 * 1000;
+
+const groupedItems = computed<ClipboardItemGroup[]>(() => {
+  const groups = new Map<number, ClipboardItemGroup>();
+
+  for (const [index, item] of props.items.entries()) {
+    const dayStart = getDayStart(item.dateCopied);
+    const existingGroup = groups.get(dayStart);
+
+    if (existingGroup) {
+      existingGroup.items.push({ item, index });
+      continue;
+    }
+
+    groups.set(dayStart, {
+      key: dayStart,
+      label: getDayLabel(dayStart),
+      items: [{ item, index }],
+    });
+  }
+
+  return [...groups.values()].sort((first, second) => second.key - first.key);
+});
+
+function getDayStart(timestamp: number): number {
+  const date = new Date(timestamp);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
+}
+
+function getDayLabel(dayStart: number): string {
+  const todayStart = getDayStart(Date.now());
+  const daysAgo = Math.round((todayStart - dayStart) / dayInMilliseconds);
+
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+  return `${daysAgo} days ago`;
+}
 
 function setCardReference(
   itemId: string,
@@ -86,15 +133,25 @@ defineExpose({ copyActiveItem });
     <!-- each card awaits its source-app icon in setup, so it only renders inside Suspense -->
     <Suspense v-else>
       <div>
-        <div v-if="props.items.length" class="flex flex-col gap-4">
-          <ClipboardItemCard
-            v-for="(item, index) in props.items"
-            :key="item.id"
-            :ref="(card) => setCardReference(item.id, card)"
-            :item-details="item"
-            :is-active="item.id === props.activeItemId"
-            :quick-paste-index="index + 1"
-            :supports-quick-paste="index + 1 < 10" />
+        <div v-if="props.items.length" class="flex flex-col gap-5">
+          <section
+            v-for="group in groupedItems"
+            :key="group.key"
+            class="space-y-2">
+            <h2 class="text-foreground/50 px-1 text-xs font-medium">
+              {{ group.label }}
+            </h2>
+            <div class="flex flex-col gap-4">
+              <ClipboardItemCard
+                v-for="{ item, index } in group.items"
+                :key="item.id"
+                :ref="(card) => setCardReference(item.id, card)"
+                :item-details="item"
+                :is-active="item.id === props.activeItemId"
+                :quick-paste-index="index + 1"
+                :supports-quick-paste="index + 1 < 10" />
+            </div>
+          </section>
         </div>
         <Empty v-else>
           <EmptyHeader>
