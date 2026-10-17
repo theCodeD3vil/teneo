@@ -13,11 +13,9 @@ export default defineConfig({
     Icons({ compiler: "vue3" }),
     MagicRegExpTransformPlugin.vite(),
   ],
-  // absolute repo path, so mock clipboard files point at real files on any machine
-  define: { __PROJECT_ROOT__: JSON.stringify(__dirname) },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 });

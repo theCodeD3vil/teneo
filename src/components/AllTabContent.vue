@@ -31,9 +31,13 @@ const props = withDefaults(
   { emptyMessage: "No clipboard history yet." },
 );
 
-type ClipboardItemCardReference = ComponentPublicInstance & {
-  copyAndHideWindow: () => boolean;
-};
+type ClipboardItemCardAction =
+  | "copyAndHideWindow"
+  | "pasteAndHideWindow"
+  | "previewItem";
+
+type ClipboardItemCardReference = ComponentPublicInstance &
+  Record<ClipboardItemCardAction, () => boolean>;
 
 interface ClipboardItemGroup {
   key: number;
@@ -105,12 +109,22 @@ function isClipboardItemCardReference(
   );
 }
 
-function copyActiveItem(itemId: string | null): boolean {
+function runCardAction(
+  itemId: string | null,
+  action: ClipboardItemCardAction,
+): boolean {
   if (!itemId) return false;
-  return cardReferences.get(itemId)?.copyAndHideWindow() ?? false;
+  return cardReferences.get(itemId)?.[action]() ?? false;
 }
 
-defineExpose({ copyActiveItem });
+defineExpose({
+  copyActiveItem: (itemId: string | null) =>
+    runCardAction(itemId, "copyAndHideWindow"),
+  pasteActiveItem: (itemId: string | null) =>
+    runCardAction(itemId, "pasteAndHideWindow"),
+  previewActiveItem: (itemId: string | null) =>
+    runCardAction(itemId, "previewItem"),
+});
 </script>
 <template>
   <ScrollArea class="scroll-fade size-full scrollbar-none! rounded-md">

@@ -7,7 +7,7 @@ import type {
   ClipboardItemRow,
 } from "./types/clipboard";
 import { clipboardHistoryChangedEvent } from "./types/clipboard";
-import { generateUUID } from "./utils/uuid-generatoe";
+import { generateUUID } from "./utils/uuid-generator";
 
 export type { ClipboardHistoryItem } from "./types/clipboard";
 

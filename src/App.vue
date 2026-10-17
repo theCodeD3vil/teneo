@@ -39,10 +39,24 @@ async function toggleWindow() {
   await tiny.win.show();
 }
 
-function hideWindowOnBlur(): void {
-  void tiny.win.getState().then((windowState) => {
-    if (windowState.visible) return tiny.win.hide();
-  });
+async function isCursorOverTray(): Promise<boolean> {
+  const [trayPosition, mouse] = await Promise.all([
+    tiny.tray.position(),
+    tiny.app.mousePosition(),
+  ]);
+  if (!trayPosition) return false;
+  return (
+    mouse.x >= trayPosition.x &&
+    mouse.x <= trayPosition.x + trayPosition.width &&
+    mouse.y >= trayPosition.y &&
+    mouse.y <= trayPosition.y + trayPosition.height
+  );
+}
+
+async function hideWindowOnBlur(): Promise<void> {
+  const windowState = await tiny.win.getState();
+  // Clicking the tray icon also blurs the window; the tray click handles closing
+  if (windowState.visible && !(await isCursorOverTray())) await tiny.win.hide();
 }
 
 onMounted(() => {

@@ -3,7 +3,7 @@
 import { saveAppIcon } from "./app-icons";
 import { normalizeClipboardColor } from "./color";
 import { dataFolder, logError } from "./files";
-import { generateUUID } from "./utils/uuid-generatoe";
+import { generateUUID } from "./utils/uuid-generator";
 
 /** Read the clipboard as a history item, or null for items history must skip. */
 export async function readClipboardItem(

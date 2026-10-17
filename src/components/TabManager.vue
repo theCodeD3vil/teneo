@@ -112,7 +112,21 @@ function copyActiveItem(): boolean {
   return allTabContent.value?.copyActiveItem(activeItemId.value) ?? false;
 }
 
-useHotkeys({ moveActiveTab, moveActiveItem, copyActiveItem });
+function pasteActiveItem(): boolean {
+  return allTabContent.value?.pasteActiveItem(activeItemId.value) ?? false;
+}
+
+function previewActiveItem(): boolean {
+  return allTabContent.value?.previewActiveItem(activeItemId.value) ?? false;
+}
+
+useHotkeys({
+  moveActiveTab,
+  moveActiveItem,
+  copyActiveItem,
+  pasteSelectedItem: pasteActiveItem,
+  previewSelectedItem: previewActiveItem,
+});
 
 watch(
   () => props.searchQuery,

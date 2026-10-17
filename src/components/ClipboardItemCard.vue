@@ -22,7 +22,7 @@ const props = defineProps<{
   quickPasteIndex?: number;
 }>();
 
-defineExpose({ copyAndHideWindow });
+defineExpose({ copyAndHideWindow, pasteAndHideWindow, previewItem });
 
 const cardElement = ref<HTMLElement | null>(null);
 const isCopying = ref(false);
@@ -133,25 +133,48 @@ function copyAndHideWindow(): boolean {
   return copyItem(true);
 }
 
-function copyItem(hideWindow = false): boolean {
+function pasteAndHideWindow(): boolean {
+  return copyItem(true, true);
+}
+
+/** Quick Look the copied file(s) or image; text and colors have no file to show. */
+function previewItem(): boolean {
+  if (isPreviewMissing || !previewPath) return false;
+
+  void tiny.macos
+    .quickLook(isFiles ? props.itemDetails.paths : [previewPath])
+    .catch(() => undefined);
+  return true;
+}
+
+function copyItem(hideWindow = false, paste = false): boolean {
   if (isPreviewMissing || isCopying.value) return false;
 
   const clipboardData = getClipboardDataForQuickCopy(props.itemDetails);
   if (!clipboardData) return false;
 
-  void copyToClipboard(clipboardData, hideWindow).catch(() => undefined);
+  void copyToClipboard(clipboardData, hideWindow, paste).catch(() => undefined);
   return true;
+}
+
+// Posting ⌘V needs the Accessibility permission; ask for it when it is missing.
+async function pasteIntoFrontmostApp(): Promise<void> {
+  const { trusted } = await tiny.app.paste();
+  if (!trusted) await tiny.app.permissions.request("accessibility");
 }
 
 async function copyToClipboard(
   clipboardData: TinyClipboardWrite,
   hideWindow: boolean,
+  paste: boolean,
 ): Promise<void> {
   isCopying.value = true;
 
   try {
     await tiny.clipboard.write(clipboardData);
     if (hideWindow) await tiny.win.hide();
+    // after the hide, focus is back in the app the user was typing in
+    if (paste) await pasteIntoFrontmostApp();
   } finally {
     copyFinishedTimeout = setTimeout(() => {
       isCopying.value = false;
