@@ -158,6 +158,11 @@ async function saveClipboardImage(item, app) {
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/database.ts
 import { Database } from "tjs:sqlite";
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/clipboard.ts
+var clipboardHistoryChangedEvent = "clipboard-history-changed";
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/database.ts
 var databasePromise = null;
 function initializeDatabase(app) {
   databasePromise ??= openDatabase(app);
@@ -218,7 +223,11 @@ async function saveClipboardItem(item, app) {
     savedItem.sourceApp?.name ?? null,
     savedItem.sourceApp?.bundleId ?? null
   );
+  notifyClipboardHistoryChanged(app);
   return savedItem;
+}
+function notifyClipboardHistoryChanged(app) {
+  app.push(clipboardHistoryChangedEvent);
 }
 async function listClipboardItems(app) {
   const rows = all(
@@ -376,7 +385,7 @@ var api = {
 async function onClipboardChange({ self }, app) {
   if (self) return;
   const item = await readClipboardItem(app);
-  if (item) app.push("clipboard-item", await saveClipboardItem(item, app));
+  if (item) await saveClipboardItem(item, app);
 }
 async function init(app) {
   await initializeDatabase(app);

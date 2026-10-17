@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { Icon } from "@iconify/vue";
-import { formatTimeAgo } from "@vueuse/core";
 
+import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
 import { cn } from "@/lib/utils";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
 
@@ -84,7 +84,7 @@ const fileSize =
     ? formatFileSize(preview.size)
     : null;
 
-const dateCopied = formatTimeAgo(new Date(props.itemDetails.dateCopied));
+const dateCopied = useRelativeTimeAgo(props.itemDetails.dateCopied);
 
 /** Original filename from a browser copy's `<img src>` html, or null. */
 function imageNameFromHtml(html: string | null): string | null {

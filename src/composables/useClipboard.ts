@@ -1,97 +1,126 @@
-import { onMounted, onUnmounted, ref } from "vue";
+import {
+  type QueryClient,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/vue-query";
+import { computed, onMounted, onUnmounted } from "vue";
 
-import type { ClipboardHistoryItem } from "@/types/clipboard";
+import {
+  clipboardHistoryChangedEvent,
+  type ClipboardHistoryItem,
+} from "@/types/clipboard";
 
-// Module state is a singleton for every component in one webview window.
-// Separate native windows receive their own store and sync through backend push events.
-const clipboardItems = ref<ClipboardHistoryItem[]>([]);
-const error = ref<Error | null>(null);
-const loading = ref(false);
-const pendingItems: ClipboardHistoryItem[] = [];
-let historyLoaded = false;
+export const clipboardItemsQueryKey = ["clipboard-items"] as const;
+const clipboardItemsCacheDuration = 5 * 60 * 1000;
+const clipboardItemsQueryOptions = {
+  queryKey: clipboardItemsQueryKey,
+  queryFn: fetchClipboardItems,
+  staleTime: clipboardItemsCacheDuration,
+  gcTime: clipboardItemsCacheDuration,
+};
+
 let consumerCount = 0;
-let unsubscribeFromClipboardItems: (() => void) | undefined;
+let historyChangeVersion = 0;
+let loadPromise: Promise<ClipboardHistoryItem[]> | undefined;
+let stopStoreTimeout: ReturnType<typeof setTimeout> | undefined;
+let unsubscribeFromClipboardHistory: (() => void) | undefined;
 
 export function useClipboard() {
+  const queryClient = useQueryClient();
+  const clipboardQuery = useQuery({
+    ...clipboardItemsQueryOptions,
+    enabled: false,
+  });
+  const clipboardItems = computed(() => clipboardQuery.data.value ?? []);
+
   onMounted(() => {
     consumerCount += 1;
-    if (consumerCount === 1) startClipboardStore();
+    if (stopStoreTimeout) {
+      clearTimeout(stopStoreTimeout);
+      stopStoreTimeout = undefined;
+    }
+    if (consumerCount === 1) startClipboardStore(queryClient);
   });
 
   onUnmounted(() => {
     consumerCount = Math.max(0, consumerCount - 1);
-    if (consumerCount === 0) stopClipboardStore();
+    if (consumerCount === 0) scheduleClipboardStoreStop();
   });
 
-  return { clipboardItems, error, loading, loadClipboardItems };
+  return {
+    clipboardItems,
+    error: clipboardQuery.error,
+    loading: clipboardQuery.isPending,
+    loadClipboardItems: () => loadClipboardItems(queryClient),
+  };
 }
 
-function startClipboardStore(): void {
-  historyLoaded = false;
-  clipboardItems.value = [];
-  unsubscribeFromClipboardItems = tiny.api.on("clipboard-item", (item) => {
-    if (!isClipboardHistoryItem(item)) return;
-    if (!historyLoaded) {
-      pendingItems.push(item);
-      return;
-    }
-    addClipboardItem(item);
+function startClipboardStore(queryClient: QueryClient): void {
+  if (!unsubscribeFromClipboardHistory) {
+    unsubscribeFromClipboardHistory = tiny.api.on(
+      clipboardHistoryChangedEvent,
+      () => {
+        historyChangeVersion += 1;
+        void queryClient.invalidateQueries({
+          queryKey: clipboardItemsQueryKey,
+          refetchType: "none",
+        });
+
+        if (consumerCount > 0) void loadClipboardItems(queryClient);
+      },
+    );
+  }
+  void loadClipboardItems(queryClient);
+}
+
+function scheduleClipboardStoreStop(): void {
+  stopStoreTimeout = setTimeout(() => {
+    unsubscribeFromClipboardHistory?.();
+    unsubscribeFromClipboardHistory = undefined;
+    stopStoreTimeout = undefined;
+  }, clipboardItemsCacheDuration);
+}
+
+function loadClipboardItems(
+  queryClient: QueryClient,
+): Promise<ClipboardHistoryItem[]> {
+  loadPromise ??= fetchClipboardItemsFromDatabase(queryClient).finally(() => {
+    loadPromise = undefined;
   });
-  void loadClipboardItems();
+  return loadPromise;
 }
 
-function stopClipboardStore(): void {
-  unsubscribeFromClipboardItems?.();
-  unsubscribeFromClipboardItems = undefined;
-  pendingItems.length = 0;
-  historyLoaded = false;
-}
-
-async function loadClipboardItems(): Promise<ClipboardHistoryItem[]> {
-  loading.value = true;
-  error.value = null;
-
+async function fetchClipboardItemsFromDatabase(
+  queryClient: QueryClient,
+): Promise<ClipboardHistoryItem[]> {
   try {
-    const apiResult: unknown = await tiny.api.call("clipboardItems");
-    const savedItems = Array.isArray(apiResult)
-      ? apiResult.filter(isClipboardHistoryItem)
-      : [];
-    clipboardItems.value = mergeClipboardItems(
-      pendingItems.splice(0),
-      historyLoaded ? clipboardItems.value : [],
-      savedItems,
-    );
-  } catch (reason) {
-    error.value = toError(reason);
-    clipboardItems.value = mergeClipboardItems(
-      pendingItems.splice(0),
-      clipboardItems.value,
-    );
-  } finally {
-    historyLoaded = true;
-    loading.value = false;
-  }
+    while (true) {
+      const versionBeforeFetch = historyChangeVersion;
+      const savedItems = await queryClient.fetchQuery(
+        clipboardItemsQueryOptions,
+      );
 
-  return clipboardItems.value;
-}
+      if (versionBeforeFetch === historyChangeVersion) return savedItems;
 
-function addClipboardItem(item: ClipboardHistoryItem): void {
-  error.value = null;
-  clipboardItems.value = mergeClipboardItems([item], clipboardItems.value);
-}
-
-function mergeClipboardItems(
-  ...itemGroups: ClipboardHistoryItem[][]
-): ClipboardHistoryItem[] {
-  const itemsById = new Map<string, ClipboardHistoryItem>();
-  for (const items of itemGroups) {
-    for (const item of items) {
-      if (!itemsById.has(item.id)) itemsById.set(item.id, item);
+      await queryClient.invalidateQueries({
+        queryKey: clipboardItemsQueryKey,
+        refetchType: "none",
+      });
     }
+  } catch {
+    const cachedItems =
+      queryClient.getQueryData<ClipboardHistoryItem[]>(
+        clipboardItemsQueryKey,
+      ) ?? [];
+    return cachedItems;
   }
-  return [...itemsById.values()].sort(
-    (firstItem, secondItem) => secondItem.dateCopied - firstItem.dateCopied,
-  );
+}
+
+async function fetchClipboardItems(): Promise<ClipboardHistoryItem[]> {
+  const apiResult: unknown = await tiny.api.call("clipboardItems");
+  return Array.isArray(apiResult)
+    ? apiResult.filter(isClipboardHistoryItem)
+    : [];
 }
 
 function isClipboardHistoryItem(value: unknown): value is ClipboardHistoryItem {
@@ -105,10 +134,4 @@ function isClipboardHistoryItem(value: unknown): value is ClipboardHistoryItem {
       item.kind === "files" ||
       item.kind === "color")
   );
-}
-
-function toError(reason: unknown): Error {
-  return reason instanceof Error
-    ? reason
-    : new Error("Could not load clipboard history");
 }

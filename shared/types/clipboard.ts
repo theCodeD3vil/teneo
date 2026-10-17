@@ -1,5 +1,8 @@
 export type ClipboardItemKind = "files" | "image" | "color" | "text";
 
+/** Backend event emitted after any committed clipboard-history mutation. */
+export const clipboardHistoryChangedEvent = "clipboard-history-changed";
+
 export interface ClipboardImageSize {
   width: number;
   height: number;

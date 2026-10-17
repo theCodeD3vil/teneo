@@ -1,3 +1,4 @@
+export { clipboardHistoryChangedEvent } from "../../shared/types/clipboard";
 import type {
   ClipboardHistoryItem,
   ClipboardItemKind,

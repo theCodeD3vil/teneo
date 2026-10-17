@@ -1,3 +1,4 @@
+import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { createApp } from "vue";
 
 import "./style.css";
@@ -11,4 +12,6 @@ const syncTheme = () =>
 syncTheme();
 prefersDark.addEventListener("change", syncTheme);
 
-createApp(App).mount("#app");
+const app = createApp(App);
+app.use(VueQueryPlugin, { queryClient: new QueryClient() });
+app.mount("#app");

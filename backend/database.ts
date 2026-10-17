@@ -6,6 +6,7 @@ import type {
   ClipboardItemKind,
   ClipboardItemRow,
 } from "./types/clipboard";
+import { clipboardHistoryChangedEvent } from "./types/clipboard";
 import { generateUUID } from "./utils/uuid-generatoe";
 
 export type { ClipboardHistoryItem } from "./types/clipboard";
@@ -81,8 +82,14 @@ export async function saveClipboardItem(
     savedItem.sourceApp?.name ?? null,
     savedItem.sourceApp?.bundleId ?? null,
   );
+  notifyClipboardHistoryChanged(app);
 
   return savedItem;
+}
+
+/** Call after every committed clipboard-history insert, update, or deletion. */
+export function notifyClipboardHistoryChanged(app: TinyApp): void {
+  app.push(clipboardHistoryChangedEvent);
 }
 
 export async function listClipboardItems(

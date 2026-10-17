@@ -2,7 +2,8 @@
 import type { ContextMenuSubTriggerProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { ArrowRight01Icon } from '@hugeicons/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import {
   ContextMenuSubTrigger,
@@ -28,6 +29,6 @@ const forwardedProps = useForwardProps(delegatedProps)
     )"
   >
     <slot />
-    <ArrowRight01Icon class="cn-rtl-flip ml-auto" />
+    <HugeiconsIcon :icon="ArrowRight01Icon" class="cn-rtl-flip ml-auto" />
   </ContextMenuSubTrigger>
 </template>

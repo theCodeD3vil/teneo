@@ -22,7 +22,7 @@ export async function onClipboardChange(
 ) {
   if (self) return; // our own write, e.g. pasting a history item back
   const item = await readClipboardItem(app);
-  if (item) app.push("clipboard-item", await saveClipboardItem(item, app));
+  if (item) await saveClipboardItem(item, app);
 }
 
 export async function init(app: TinyApp) {
