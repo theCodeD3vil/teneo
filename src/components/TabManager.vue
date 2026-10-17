@@ -56,15 +56,14 @@ watch(selectedItems, (items) => emit("tab-change", items.length), {
       </div>
     </TabsList>
     <TabsContent
-      v-for="tabItem in tabValues"
-      :key="tabItem"
-      :value="tabItem"
+      :value="selectedTab"
+      force-mount
       class="mt-3 min-h-0 flex-1 bg-transparent!">
       <AllTabContent
-        :items="itemsByTab[tabItem]"
+        :items="selectedItems"
         :loading="loading"
         :error="error"
-        :empty-message="emptyMessages[tabItem]" />
+        :empty-message="emptyMessages[selectedTab]" />
     </TabsContent>
   </Tabs>
 </template>

@@ -1,6 +1,7 @@
 // Turns a clipboard change into a history item. Anything that only exists for a
 // moment (the image's temp file, the source app) is saved to the data dir now.
 import { saveAppIcon } from "./app-icons";
+import { normalizeClipboardColor } from "./color";
 import { dataFolder, logError } from "./files";
 import { generateUUID } from "./utils/uuid-generatoe";
 
@@ -19,7 +20,7 @@ export async function readClipboardItem(
       logError(`saving icon for ${bundleId} failed:`, error),
     );
   }
-  return saveClipboardImage(item, app);
+  return normalizeClipboardColor(await saveClipboardImage(item, app));
 }
 
 /** Copy a clipboard image out of its temp file, which is replaced on the next

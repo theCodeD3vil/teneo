@@ -1,7 +1,7 @@
 {
   "name": "teneo",
   "title": "Teneo",
-  "size": "560x420",
+  "size": "560x640",
   "id": "com.michael.teneo",
   "version": "0.1.0",
   "backend": "backend/main.ts",

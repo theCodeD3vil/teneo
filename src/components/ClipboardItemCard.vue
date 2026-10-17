@@ -109,7 +109,7 @@ const imageName =
 <template>
   <div
     class="hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]">
-    <div class="flex items-center gap-4">
+    <div class="flex items-start gap-4">
       <!-- media -->
       <img
         v-if="previewUrl"
