@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
+import ArrowLeftIcon from "~icons/hugeicons/arrow-left-01";
+import ArrowRightIcon from "~icons/hugeicons/arrow-right-01";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClipboard } from "@/composables/useClipboard";
+import { useHotkeys } from "@/composables/useHotkeys";
 import { omit } from "@/utils/helpers";
 
 import {
@@ -11,15 +14,24 @@ import {
   type TabVariant,
 } from "../types/clipboard";
 import AllTabContent from "./AllTabContent.vue";
+import Kbd from "./ui/kbd/Kbd.vue";
+
+const props = defineProps<{
+  searchQuery: string;
+}>();
 
 const emit = defineEmits<{
   (e: "tab-change", count: number): void;
+  (e: "tab-navigation", nextTab: TabVariant | null): void;
 }>();
 
 const tabValues: TabVariant[] = omit(clipboardItemVariants, "empty");
 const defaultTab = tabValues[0];
 const selectedTab = ref<TabVariant>(defaultTab);
+const activeItemId = ref<string | null>(null);
+const debouncedSearchQuery = ref("");
 const { clipboardItems, error, loading } = useClipboard();
+let searchDebounceTimeout: ReturnType<typeof setTimeout> | undefined;
 
 const itemsByTab = computed<Record<TabVariant, ClipboardHistoryItem[]>>(() => ({
   all: clipboardItems.value,
@@ -37,11 +49,98 @@ const emptyMessages: Record<TabVariant, string> = {
   text: "No copied text yet.",
 };
 
-const selectedItems = computed(() => itemsByTab.value[selectedTab.value]);
+const selectedItems = computed(() => getItemsForTab(selectedTab.value));
 
-watch(selectedItems, (items) => emit("tab-change", items.length), {
-  immediate: true,
+function getItemsForTab(tab: TabVariant): ClipboardHistoryItem[] {
+  const items = itemsByTab.value[tab];
+  const searchQuery = debouncedSearchQuery.value;
+
+  return searchQuery
+    ? items.filter((item) => matchesSearchQuery(item, searchQuery))
+    : items;
+}
+
+function matchesSearchQuery(
+  item: ClipboardHistoryItem,
+  searchQuery: string,
+): boolean {
+  return [
+    item.text,
+    item.html,
+    item.color,
+    item.paths.join(" "),
+    item.sourceApp?.name,
+    item.sourceURL,
+  ].some((value) => value?.toLowerCase().includes(searchQuery));
+}
+
+function activateFirstItem(): void {
+  selectedTab.value = defaultTab;
+  activeItemId.value = getItemsForTab(defaultTab)[0]?.id ?? null;
+}
+
+function moveActiveTab(direction: -1 | 1): boolean {
+  const nextTabIndex = tabValues.indexOf(selectedTab.value) + direction;
+  const nextTab = tabValues[nextTabIndex];
+  emit("tab-navigation", nextTab ?? null);
+  if (!nextTab) return false;
+
+  selectedTab.value = nextTab;
+  activeItemId.value = getItemsForTab(nextTab)[0]?.id ?? null;
+  return true;
+}
+
+function moveActiveItem(direction: -1 | 1): boolean {
+  const items = selectedItems.value;
+  if (!items.length) return false;
+
+  const currentItemIndex = items.findIndex(
+    (item) => item.id === activeItemId.value,
+  );
+  const nextItemIndex = Math.min(
+    Math.max(currentItemIndex + direction, 0),
+    items.length - 1,
+  );
+  const nextItem = items[nextItemIndex] ?? items[0];
+
+  activeItemId.value = nextItem.id;
+  return true;
+}
+
+useHotkeys({ moveActiveTab, moveActiveItem });
+
+watch(
+  () => props.searchQuery,
+  (searchQuery) => {
+    clearTimeout(searchDebounceTimeout);
+    searchDebounceTimeout = setTimeout(() => {
+      debouncedSearchQuery.value = searchQuery.trim().toLowerCase();
+    }, 200);
+  },
+  { immediate: true },
+);
+
+watch(selectedTab, () => {
+  activeItemId.value = selectedItems.value[0]?.id ?? null;
 });
+
+watch(
+  selectedItems,
+  (items) => {
+    emit("tab-change", items.length);
+
+    if (!items.some((item) => item.id === activeItemId.value)) {
+      activeItemId.value = items[0]?.id ?? null;
+    }
+  },
+  {
+    immediate: true,
+  },
+);
+
+defineExpose({ activateFirstItem });
+
+onUnmounted(() => clearTimeout(searchDebounceTimeout));
 </script>
 
 <template>
@@ -54,6 +153,11 @@ watch(selectedItems, (items) => emit("tab-change", items.length), {
           {{ tabItem }}
         </TabsTrigger>
       </div>
+      <div class="text-foreground/60 ml-auto flex items-center gap-1 text-xs">
+        <Kbd class="bg-foreground/10"> <ArrowLeftIcon /> </Kbd>
+        <Kbd class="bg-foreground/10"> <ArrowRightIcon /> </Kbd>
+        tabs
+      </div>
     </TabsList>
     <TabsContent
       :value="selectedTab"
@@ -61,6 +165,8 @@ watch(selectedItems, (items) => emit("tab-change", items.length), {
       class="mt-3 min-h-0 flex-1 bg-transparent!">
       <AllTabContent
         :items="selectedItems"
+        :tab="selectedTab"
+        :active-item-id="activeItemId"
         :loading="loading"
         :error="error"
         :empty-message="emptyMessages[selectedTab]" />

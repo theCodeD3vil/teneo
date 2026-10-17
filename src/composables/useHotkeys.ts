@@ -39,5 +39,13 @@ function runHandler(hotkey: HotkeyMatch, handlers: HotkeyHandlers): boolean {
       const handler = handlers.focusSearch;
       return handler ? handler() !== false : false;
     }
+    case "moveActiveTab": {
+      const handler = handlers.moveActiveTab;
+      return handler ? handler(hotkey.direction) !== false : false;
+    }
+    case "moveActiveItem": {
+      const handler = handlers.moveActiveItem;
+      return handler ? handler(hotkey.direction) !== false : false;
+    }
   }
 }

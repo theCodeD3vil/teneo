@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import ClipboardIcon from "~icons/hugeicons/clipboard";
 import CommandIcon from "~icons/hugeicons/command";
 import FileIcon from "~icons/hugeicons/file-01";
@@ -17,10 +17,12 @@ import type { ClipboardHistoryItem } from "@/types/clipboard";
 
 const props = defineProps<{
   itemDetails: ClipboardHistoryItem;
+  isActive?: boolean;
   supportsQuickPaste?: boolean;
   quickPasteIndex?: number;
 }>();
 
+const cardElement = ref<HTMLElement | null>(null);
 const isCopying = ref(false);
 let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -163,11 +165,25 @@ function getClipboardDataForQuickCopy(
 
 useHotkeys({ copyItemByNumber: handleQuickCopy });
 
+function scrollActiveCardIntoView(): void {
+  if (props.isActive) {
+    cardElement.value?.scrollIntoView({ block: "nearest" });
+  }
+}
+
+onMounted(scrollActiveCardIntoView);
 onUnmounted(() => clearTimeout(copyFinishedTimeout));
+watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
 </script>
 <template>
   <div
-    class="hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]">
+    ref="cardElement"
+    :class="
+      cn([
+        'hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]',
+        props.isActive && 'bg-foreground/5',
+      ])
+    ">
     <div class="flex items-start gap-4">
       <!-- media -->
       <div v-if="previewUrl" class="relative size-9 shrink-0">

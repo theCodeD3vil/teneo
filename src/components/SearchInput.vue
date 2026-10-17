@@ -9,9 +9,17 @@ import {
 } from "@/components/ui/input-group";
 
 const searchInputContainer = ref<HTMLElement | null>(null);
+const searchQuery = defineModel<string>({ default: "" });
 
 function focus(): void {
   searchInputContainer.value?.querySelector("input")?.focus();
+}
+
+function returnToKeyboardNavigation(event: KeyboardEvent): void {
+  if (event.key !== "Enter") return;
+
+  event.preventDefault();
+  searchInputContainer.value?.querySelector("input")?.blur();
 }
 
 defineExpose({ focus });
@@ -21,8 +29,10 @@ defineExpose({ focus });
   <div ref="searchInputContainer" class="w-full gap-6">
     <InputGroup variant="transparent">
       <InputGroupInput
+        v-model="searchQuery"
         placeholder="Search clipboard"
-        class="text-sm font-light" />
+        class="text-sm font-light"
+        @keydown="returnToKeyboardNavigation" />
       <InputGroupAddon>
         <SearchIcon />
       </InputGroupAddon>

@@ -1,6 +1,7 @@
 const quickCopyItemNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 export type QuickCopyItemNumber = (typeof quickCopyItemNumbers)[number];
+export type NavigationDirection = -1 | 1;
 
 export const hotkeyDefinitions = {
   previewSelectedItem: {
@@ -23,6 +24,16 @@ export const hotkeyDefinitions = {
     shortcut: "⌘ /",
     description: "Focus the search field",
   },
+  moveActiveTab: {
+    id: "move-active-tab",
+    shortcut: "← / →",
+    description: "Move between tabs",
+  },
+  moveActiveItem: {
+    id: "move-active-item",
+    shortcut: "↑ / ↓",
+    description: "Move between items",
+  },
 } as const;
 
 export type HotkeyName = keyof typeof hotkeyDefinitions;
@@ -31,13 +42,16 @@ export type HotkeyMatch =
   | { name: "previewSelectedItem" }
   | { name: "copyItemByNumber"; itemNumber: QuickCopyItemNumber }
   | { name: "pasteSelectedItem" }
-  | { name: "focusSearch" };
+  | { name: "focusSearch" }
+  | { name: "moveActiveTab"; direction: NavigationDirection }
+  | { name: "moveActiveItem"; direction: NavigationDirection };
 
 export type HotkeyPreviewKey =
   | { type: "modifier"; value: "command" | "option" | "control" | "shift" }
   | { type: "key"; value: string };
 
 export type HotkeyProgress = {
+  hotkeyName: HotkeyName | null;
   keys: HotkeyPreviewKey[];
   state: "partial" | "complete";
 };
@@ -47,13 +61,30 @@ export type HotkeyHandlers = {
   copyItemByNumber?: (itemNumber: QuickCopyItemNumber) => boolean | void;
   pasteSelectedItem?: () => boolean | void;
   focusSearch?: () => boolean | void;
+  moveActiveTab?: (direction: NavigationDirection) => boolean | void;
+  moveActiveItem?: (direction: NavigationDirection) => boolean | void;
 };
 
 export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
-  if (event.defaultPrevented || event.isComposing || event.repeat) return null;
+  if (event.defaultPrevented || event.isComposing) return null;
+  if (event.repeat && event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+    return null;
+  }
 
-  if (hasNoModifiers(event) && event.code === "Space") {
-    return { name: "previewSelectedItem" };
+  if (hasNoModifiers(event)) {
+    if (event.code === "Space") return { name: "previewSelectedItem" };
+    if (event.key === "ArrowLeft") {
+      return { name: "moveActiveTab", direction: -1 };
+    }
+    if (event.key === "ArrowRight") {
+      return { name: "moveActiveTab", direction: 1 };
+    }
+    if (event.key === "ArrowUp") {
+      return { name: "moveActiveItem", direction: -1 };
+    }
+    if (event.key === "ArrowDown") {
+      return { name: "moveActiveItem", direction: 1 };
+    }
   }
 
   if (!hasOnlyCommandModifier(event)) return null;
@@ -73,10 +104,12 @@ export function getHotkeyProgress(event: KeyboardEvent): HotkeyProgress | null {
   if (event.defaultPrevented || event.isComposing || event.repeat) return null;
 
   const hotkey = getHotkeyMatch(event);
+  if (hotkey?.name === "moveActiveItem") return null;
   if (hotkey) return progressFromHotkey(hotkey);
 
   if (event.key === "Meta" && hasOnlyCommandModifier(event)) {
     return {
+      hotkeyName: null,
       keys: [{ type: "modifier", value: "command" }],
       state: "partial",
     };
@@ -102,9 +135,14 @@ function isQuickCopyItemNumber(
 function progressFromHotkey(hotkey: HotkeyMatch): HotkeyProgress {
   switch (hotkey.name) {
     case "previewSelectedItem":
-      return { keys: [{ type: "key", value: "Space" }], state: "complete" };
+      return {
+        hotkeyName: hotkey.name,
+        keys: [{ type: "key", value: "Space" }],
+        state: "complete",
+      };
     case "copyItemByNumber":
       return {
+        hotkeyName: hotkey.name,
         keys: [
           { type: "modifier", value: "command" },
           { type: "key", value: String(hotkey.itemNumber) },
@@ -113,6 +151,7 @@ function progressFromHotkey(hotkey: HotkeyMatch): HotkeyProgress {
       };
     case "pasteSelectedItem":
       return {
+        hotkeyName: hotkey.name,
         keys: [
           { type: "modifier", value: "command" },
           { type: "key", value: "V" },
@@ -121,10 +160,23 @@ function progressFromHotkey(hotkey: HotkeyMatch): HotkeyProgress {
       };
     case "focusSearch":
       return {
+        hotkeyName: hotkey.name,
         keys: [
           { type: "modifier", value: "command" },
           { type: "key", value: "/" },
         ],
+        state: "complete",
+      };
+    case "moveActiveTab":
+      return {
+        hotkeyName: hotkey.name,
+        keys: [{ type: "key", value: hotkey.direction === -1 ? "←" : "→" }],
+        state: "complete",
+      };
+    case "moveActiveItem":
+      return {
+        hotkeyName: hotkey.name,
+        keys: [{ type: "key", value: hotkey.direction === -1 ? "↑" : "↓" }],
         state: "complete",
       };
   }
