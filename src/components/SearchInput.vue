@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import SearchIcon from "~icons/hugeicons/search-01";
 
 import {
@@ -6,10 +7,18 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+
+const searchInputContainer = ref<HTMLElement | null>(null);
+
+function focus(): void {
+  searchInputContainer.value?.querySelector("input")?.focus();
+}
+
+defineExpose({ focus });
 </script>
 
 <template>
-  <div class="w-full gap-6">
+  <div ref="searchInputContainer" class="w-full gap-6">
     <InputGroup variant="transparent">
       <InputGroupInput
         placeholder="Search clipboard"

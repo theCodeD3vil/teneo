@@ -4,7 +4,10 @@ import { onMounted, ref } from "vue";
 import HomeFooter from "./components/HomeFooter.vue";
 import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
+import { useHotkeys } from "./composables/useHotkeys";
 import { PANEL_WIDTH } from "./constants/system";
+
+const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
 
 async function toggleWindow() {
   const windowState = await tiny.win.getState();
@@ -35,11 +38,17 @@ onMounted(() => {
   });
 });
 const clipboardItemsCount = ref(0);
+
+useHotkeys({
+  focusSearch: () => {
+    searchInput.value?.focus();
+  },
+});
 </script>
 
 <template>
   <div class="flex h-screen flex-col gap-3 overflow-hidden bg-transparent! p-4">
-    <SearchInput />
+    <SearchInput ref="searchInput" />
     <TabManager @tab-change="(e: number) => (clipboardItemsCount = e)" />
     <HomeFooter :clipboard-items-count="clipboardItemsCount" />
   </div>

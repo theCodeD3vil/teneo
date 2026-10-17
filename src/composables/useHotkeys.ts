@@ -5,10 +5,11 @@ import {
   type HotkeyHandlers,
   type HotkeyMatch,
 } from "@/constants/hotkeys";
+import { isEditableKeyboardTarget } from "@/utils/keyboard";
 
 export function useHotkeys(handlers: HotkeyHandlers): void {
   function handleKeydown(event: KeyboardEvent): void {
-    if (isEditableTarget(event.target)) return;
+    if (isEditableKeyboardTarget(event.target)) return;
 
     const hotkey = getHotkeyMatch(event);
     if (!hotkey || !runHandler(hotkey, handlers)) return;
@@ -18,15 +19,6 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
 
   onMounted(() => window.addEventListener("keydown", handleKeydown));
   onUnmounted(() => window.removeEventListener("keydown", handleKeydown));
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  );
 }
 
 function runHandler(hotkey: HotkeyMatch, handlers: HotkeyHandlers): boolean {
@@ -41,6 +33,10 @@ function runHandler(hotkey: HotkeyMatch, handlers: HotkeyHandlers): boolean {
     }
     case "pasteSelectedItem": {
       const handler = handlers.pasteSelectedItem;
+      return handler ? handler() !== false : false;
+    }
+    case "focusSearch": {
+      const handler = handlers.focusSearch;
       return handler ? handler() !== false : false;
     }
   }

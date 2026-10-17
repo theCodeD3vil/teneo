@@ -24,6 +24,13 @@ const props = defineProps<{
 const isCopying = ref(false);
 let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
 
+const copyFeedbackTransition = {
+  enterActiveClass: "transition-all duration-200 ease-out",
+  enterFromClass: "translate-y-1 opacity-0 scale-95",
+  leaveActiveClass: "transition-all duration-150 ease-in",
+  leaveToClass: "-translate-y-1 opacity-0 scale-95",
+};
+
 function getClipboardThemeClasses() {
   switch (props.itemDetails.kind) {
     case "text":
@@ -176,21 +183,25 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
         <div
           v-if="isCopying"
           class="pointer-events-none absolute inset-0 rounded-md bg-gradient-to-br from-black/65 via-black/40 to-black/20" />
-        <ImageDoneIcon
-          v-if="isCopying && isImage"
-          class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
-        <FileVerifiedIcon
-          v-if="isCopying && isFiles"
-          class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
+        <Transition v-bind="copyFeedbackTransition">
+          <ImageDoneIcon
+            v-if="isCopying && isImage"
+            class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
+          <FileVerifiedIcon
+            v-else-if="isCopying && isFiles"
+            class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
+        </Transition>
       </div>
       <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
-        <TickIcon v-if="isCopying" class="text-success size-5" />
-        <TextAlignLeftIcon
-          v-else-if="itemDetails.kind === 'text'"
-          class="size-5" />
-        <FileIcon v-else-if="itemDetails.kind === 'files'" class="size-5" />
-        <ImageIcon v-else-if="itemDetails.kind === 'image'" class="size-5" />
-        <ClipboardIcon v-else class="size-5" />
+        <Transition v-bind="copyFeedbackTransition" mode="out-in">
+          <TickIcon v-if="isCopying" class="text-success size-5" />
+          <TextAlignLeftIcon
+            v-else-if="itemDetails.kind === 'text'"
+            class="size-5" />
+          <FileIcon v-else-if="itemDetails.kind === 'files'" class="size-5" />
+          <ImageIcon v-else-if="itemDetails.kind === 'image'" class="size-5" />
+          <ClipboardIcon v-else class="size-5" />
+        </Transition>
       </div>
       <!-- main content -->
       <div class="min-w-0 flex-1 space-y-2">
