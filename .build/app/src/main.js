@@ -531,7 +531,10 @@ var defaultSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
   excludedApps: [],
-  openPanelShortcut: ""
+  openPanelShortcut: "",
+  historyDuration: "forever",
+  maximumItems: 0,
+  maximumStorage: 0
 };
 var openPanelHotkeyId = "open-panel";
 var settingsChangedEvent = "settings-changed";
@@ -731,6 +734,82 @@ async function saveClipboardItem(item, app) {
   notifyClipboardHistoryChanged(app);
   return savedItem;
 }
+var deletionCondition = `
+  dateCopied < ? OR id NOT IN (
+    SELECT id FROM "CLIPBOARD_ITEMS" ORDER BY dateCopied DESC LIMIT ?
+  )
+`;
+async function countClipboardItemsToDelete(app, copiedBefore, keepNewest) {
+  const [result] = all(
+    await initializeDatabase(app),
+    `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    copiedBefore,
+    keepNewest
+  );
+  return result?.count ?? 0;
+}
+async function deleteClipboardItems(app, copiedBefore, keepNewest) {
+  const database = await initializeDatabase(app);
+  const deletedRows = all(
+    database,
+    `SELECT kind, path FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    copiedBefore,
+    keepNewest
+  );
+  if (deletedRows.length === 0) return;
+  run(
+    database,
+    `DELETE FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    copiedBefore,
+    keepNewest
+  );
+  notifyClipboardHistoryChanged(app);
+  for (const row of deletedRows) {
+    const imagePath = row.kind === "image" ? restoreImagePath(row.path, app) : null;
+    if (imagePath) {
+      await tjs.remove(imagePath).catch(
+        (error) => logError(`deleting ${imagePath} failed:`, error)
+      );
+    }
+  }
+}
+async function listClipboardItemSizes(app) {
+  const rows = all(
+    await initializeDatabase(app),
+    `
+      SELECT kind, path,
+        ifnull(length(CAST(value AS BLOB)), 0) +
+        ifnull(length(CAST(path AS BLOB)), 0) AS rowBytes
+      FROM "CLIPBOARD_ITEMS"
+      ORDER BY dateCopied DESC
+    `
+  );
+  return Promise.all(
+    rows.map(async (row) => {
+      const imagePath = row.kind === "image" ? restoreImagePath(row.path, app) : null;
+      const imageBytes = imagePath ? await tjs.stat(imagePath).then(
+        (stat) => stat.size,
+        () => 0
+      ) : 0;
+      return { kind: row.kind, bytes: row.rowBytes + imageBytes };
+    })
+  );
+}
+async function countClipboardMedia(app) {
+  const [counts] = all(
+    await initializeDatabase(app),
+    `
+      SELECT
+        COUNT(*) FILTER (WHERE kind = 'image') AS imageCount,
+        SUM(CASE WHEN kind = 'files' THEN json_array_length(path) END) AS fileCount
+      FROM "CLIPBOARD_ITEMS"
+    `
+  );
+  return {
+    imageCount: counts?.imageCount ?? 0,
+    fileCount: counts?.fileCount ?? 0
+  };
+}
 function notifyClipboardHistoryChanged(app) {
   app.push(clipboardHistoryChangedEvent);
 }
@@ -854,13 +933,49 @@ function run(database, query, ...values) {
     statement.finalize();
   }
 }
-function all(database, query) {
+function all(database, query, ...values) {
   const statement = database.prepare(query);
   try {
-    return statement.all();
+    return statement.all(...values);
   } finally {
     statement.finalize();
   }
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/data-usage.ts
+async function getDataFolderUsage(app) {
+  const [size, itemSizes, counts] = await Promise.all([
+    getFolderSize(app.paths.data),
+    listClipboardItemSizes(app),
+    countClipboardMedia(app)
+  ]);
+  const clipboardSizeByKind = { text: 0, image: 0, files: 0, color: 0 };
+  for (const { kind, bytes } of itemSizes) {
+    if (kind in clipboardSizeByKind) {
+      clipboardSizeByKind[kind] += bytes;
+    }
+  }
+  return { size, clipboardSizeByKind, ...counts };
+}
+async function getFolderSize(folder) {
+  let size = 0;
+  let entries;
+  try {
+    entries = await tjs.readDir(folder);
+  } catch {
+    return 0;
+  }
+  for await (const entry of entries) {
+    const path = `${folder}/${entry.name}`;
+    size += entry.isDirectory ? await getFolderSize(path) : (
+      // a file deleted mid-walk (e.g. by history trimming) counts as 0
+      await tjs.stat(path).then(
+        (stat) => stat.size,
+        () => 0
+      )
+    );
+  }
+  return size;
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
@@ -896,6 +1011,58 @@ function syncOpenPanelShortcut(app) {
 function pauseOpenPanelShortcut(paused, app) {
   isPaused = paused === true;
   syncOpenPanelShortcut(app);
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/history-limits.ts
+var day = 24 * 60 * 60 * 1e3;
+var historyDurations = {
+  day,
+  week: 7 * day,
+  month: 30 * day,
+  year: 365 * day,
+  forever: null
+};
+var trimInterval = 60 * 60 * 1e3;
+async function trimClipboardHistory(app) {
+  const { copiedBefore, keepNewest } = await getTrimLimits(app, getSettings());
+  await deleteClipboardItems(app, copiedBefore, keepNewest);
+}
+async function countItemsDeletedBy(changes, app) {
+  const settings = { ...getSettings(), ...pickSettings(changes) };
+  const { copiedBefore, keepNewest } = await getTrimLimits(app, settings);
+  return countClipboardItemsToDelete(app, copiedBefore, keepNewest);
+}
+async function getTrimLimits(app, { historyDuration, maximumItems, maximumStorage }) {
+  const keepFor = historyDurations[historyDuration] ?? null;
+  const keepNewest = Math.min(
+    maximumItems > 0 ? Math.floor(maximumItems) : Infinity,
+    maximumStorage > 0 ? await countItemsWithinStorage(app, maximumStorage) : Infinity
+  );
+  return {
+    copiedBefore: keepFor === null ? 0 : Date.now() - keepFor,
+    keepNewest: Number.isFinite(keepNewest) ? keepNewest : -1
+  };
+}
+async function countItemsWithinStorage(app, maximumStorage) {
+  const itemSizes = await listClipboardItemSizes(app);
+  let usedBytes = 0;
+  let count = 0;
+  for (const { bytes } of itemSizes) {
+    usedBytes += bytes;
+    if (usedBytes > maximumStorage) break;
+    count += 1;
+  }
+  return Math.max(count, 1);
+}
+function clearClipboardHistory(app) {
+  return deleteClipboardItems(app, 0, 0);
+}
+function startTrimmingClipboardHistory(app) {
+  const trim = () => trimClipboardHistory(app).catch(
+    (error) => logError("trimming clipboard history failed:", error)
+  );
+  void trim();
+  setInterval(trim, trimInterval);
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/windows.ts
@@ -962,13 +1129,19 @@ var api = {
   updateSettings: async (changes, app) => {
     const settings = await updateSettings(changes, app);
     syncOpenPanelShortcut(app);
+    await trimClipboardHistory(app);
     return settings;
-  }
+  },
+  clearHistory: (_parameters, app) => clearClipboardHistory(app),
+  countItemsDeletedBy: ({ changes }, app) => countItemsDeletedBy(changes, app),
+  dataFolderUsage: (_parameters, app) => getDataFolderUsage(app)
 };
 async function onClipboardChange({ self }, app) {
   if (self) return;
   const item = await readClipboardItem(app);
-  if (item) await saveClipboardItem(item, app);
+  if (!item) return;
+  await saveClipboardItem(item, app);
+  await trimClipboardHistory(app);
 }
 function onWindowClosed(windowId, app) {
   handleSettingsWindowClosed(windowId, app);
@@ -978,6 +1151,7 @@ async function init(app) {
   await loadSettings(app);
   syncOpenPanelShortcut(app);
   await initializeDatabase(app);
+  startTrimmingClipboardHistory(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
 }

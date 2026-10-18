@@ -2,6 +2,7 @@
 // Every api method is callable from the page: await tiny.api.call('hello', {...})
 import { getAppIconUrl } from "./app-icons";
 import { readClipboardItem } from "./clipboard-history";
+import { getDataFolderUsage } from "./data-usage";
 import {
   initializeDatabase,
   listClipboardItems,
@@ -13,6 +14,12 @@ import {
   pauseOpenPanelShortcut,
   syncOpenPanelShortcut,
 } from "./global-shortcut";
+import {
+  clearClipboardHistory,
+  countItemsDeletedBy,
+  startTrimmingClipboardHistory,
+  trimClipboardHistory,
+} from "./history-limits";
 import { getSettings, loadSettings, updateSettings } from "./settings";
 import {
   handleSettingsWindowClosed,
@@ -35,8 +42,12 @@ export const api: Record<string, TinyApiHandler> = {
   updateSettings: async (changes, app) => {
     const settings = await updateSettings(changes, app);
     syncOpenPanelShortcut(app);
+    await trimClipboardHistory(app); // a tighter history limit applies now
     return settings;
   },
+  clearHistory: (_parameters, app) => clearClipboardHistory(app),
+  countItemsDeletedBy: ({ changes }, app) => countItemsDeletedBy(changes, app),
+  dataFolderUsage: (_parameters, app) => getDataFolderUsage(app),
 };
 
 // Defining this handler makes tinyjs start watching the clipboard.
@@ -46,7 +57,9 @@ export async function onClipboardChange(
 ) {
   if (self) return; // our own write, e.g. pasting a history item back
   const item = await readClipboardItem(app);
-  if (item) await saveClipboardItem(item, app);
+  if (!item) return;
+  await saveClipboardItem(item, app);
+  await trimClipboardHistory(app); // keeps "Maximum items" as copies come in
 }
 
 export function onWindowClosed(windowId: string, app: TinyApp) {
@@ -59,6 +72,7 @@ export async function init(app: TinyApp) {
   await loadSettings(app);
   syncOpenPanelShortcut(app);
   await initializeDatabase(app);
+  startTrimmingClipboardHistory(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
 }

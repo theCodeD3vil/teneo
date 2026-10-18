@@ -10,13 +10,25 @@ export interface AppSettings {
   /** global shortcut that opens the panel, as a tinyjs combo such as
    *  "ctrl+opt+v"; "" = none */
   openPanelShortcut: string;
+  /** history items older than this are deleted */
+  historyDuration: HistoryDuration;
+  /** most items kept, the oldest deleted first; 0 = no limit */
+  maximumItems: number;
+  /** most bytes clipboard history may take, the oldest deleted first;
+   *  0 = no limit */
+  maximumStorage: number;
 }
+
+export type HistoryDuration = "day" | "week" | "month" | "year" | "forever";
 
 export const defaultSettings: AppSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
   excludedApps: [],
   openPanelShortcut: "",
+  historyDuration: "forever",
+  maximumItems: 0,
+  maximumStorage: 0,
 };
 
 /** tinyjs hotkey id of the open-panel shortcut; presses arrive as a

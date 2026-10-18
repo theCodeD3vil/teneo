@@ -19,5 +19,9 @@ defineProps<{
       <!-- the control: switch, select, button… -->
       <slot />
     </div>
+    <!-- full-width extra below the row, e.g. a progress bar -->
+    <div v-if="$slots.footer" class="px-3 pb-2.5">
+      <slot name="footer" />
+    </div>
   </fieldset>
 </template>

@@ -1,5 +1,6 @@
 import { Database } from "tjs:sqlite";
 
+import { logError } from "./files";
 import type {
   ClipboardHistoryItem,
   ClipboardItemColumn,
@@ -85,6 +86,119 @@ export async function saveClipboardItem(
   notifyClipboardHistoryChanged(app);
 
   return savedItem;
+}
+
+// Matches items copied before ?1 (ms) or beyond the newest ?2 (-1 = no limit)
+const deletionCondition = `
+  dateCopied < ? OR id NOT IN (
+    SELECT id FROM "CLIPBOARD_ITEMS" ORDER BY dateCopied DESC LIMIT ?
+  )
+`;
+
+/** How many items deleteClipboardItems would delete with these limits. */
+export async function countClipboardItemsToDelete(
+  app: TinyApp,
+  copiedBefore: number,
+  keepNewest: number,
+): Promise<number> {
+  const [result] = all<{ count: number }>(
+    await initializeDatabase(app),
+    `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    copiedBefore,
+    keepNewest,
+  );
+  return result?.count ?? 0;
+}
+
+/** Delete items copied before `copiedBefore` (ms) or beyond the newest
+ *  `keepNewest` (-1 = no limit), along with their saved images. */
+export async function deleteClipboardItems(
+  app: TinyApp,
+  copiedBefore: number,
+  keepNewest: number,
+): Promise<void> {
+  const database = await initializeDatabase(app);
+  // Read and delete with no await in between (sqlite is sync), so an item
+  // saved meanwhile can't be deleted without its image path being read
+  const deletedRows = all<Pick<ClipboardItemRow, "kind" | "path">>(
+    database,
+    `SELECT kind, path FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    copiedBefore,
+    keepNewest,
+  );
+  if (deletedRows.length === 0) return;
+  run(
+    database,
+    `DELETE FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    copiedBefore,
+    keepNewest,
+  );
+  notifyClipboardHistoryChanged(app);
+
+  // Images go after their rows, so history never points at a missing file
+  for (const row of deletedRows) {
+    const imagePath =
+      row.kind === "image" ? restoreImagePath(row.path, app) : null;
+    if (imagePath) {
+      await tjs
+        .remove(imagePath)
+        .catch((error: unknown) =>
+          logError(`deleting ${imagePath} failed:`, error),
+        );
+    }
+  }
+}
+
+/** Bytes each history item takes, newest first: its text, color or file
+ *  list, plus its saved image. This is what the storage limit counts. */
+export async function listClipboardItemSizes(
+  app: TinyApp,
+): Promise<Array<{ kind: string; bytes: number }>> {
+  const rows = all<
+    Pick<ClipboardItemRow, "kind" | "path"> & { rowBytes: number }
+  >(
+    await initializeDatabase(app),
+    `
+      SELECT kind, path,
+        ifnull(length(CAST(value AS BLOB)), 0) +
+        ifnull(length(CAST(path AS BLOB)), 0) AS rowBytes
+      FROM "CLIPBOARD_ITEMS"
+      ORDER BY dateCopied DESC
+    `,
+  );
+  return Promise.all(
+    rows.map(async (row) => {
+      const imagePath =
+        row.kind === "image" ? restoreImagePath(row.path, app) : null;
+      // a missing image file takes no space
+      const imageBytes = imagePath
+        ? await tjs.stat(imagePath).then(
+            (stat: { size: number }) => stat.size,
+            () => 0,
+          )
+        : 0;
+      return { kind: row.kind, bytes: row.rowBytes + imageBytes };
+    }),
+  );
+}
+
+/** How many images, and how many copied files, history holds. */
+export async function countClipboardMedia(
+  app: TinyApp,
+): Promise<{ imageCount: number; fileCount: number }> {
+  const [counts] = all<{ imageCount: number; fileCount: number | null }>(
+    await initializeDatabase(app),
+    `
+      SELECT
+        COUNT(*) FILTER (WHERE kind = 'image') AS imageCount,
+        SUM(CASE WHEN kind = 'files' THEN json_array_length(path) END) AS fileCount
+      FROM "CLIPBOARD_ITEMS"
+    `,
+  );
+  return {
+    imageCount: counts?.imageCount ?? 0,
+    fileCount: counts?.fileCount ?? 0,
+  };
 }
 
 /** Call after every committed clipboard-history insert, update, or deletion. */
@@ -249,10 +363,10 @@ function run(database: Database, query: string, ...values: unknown[]): void {
   }
 }
 
-function all<T>(database: Database, query: string): T[] {
+function all<T>(database: Database, query: string, ...values: unknown[]): T[] {
   const statement = database.prepare(query);
   try {
-    return statement.all() as T[];
+    return statement.all(...values) as T[];
   } finally {
     statement.finalize();
   }
