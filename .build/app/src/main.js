@@ -1241,6 +1241,7 @@ async function init(app) {
   await initializeDatabase(app);
   startTrimmingClipboardHistory(app);
   app.setHideOnClose(true);
+  app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
 }
 export {
