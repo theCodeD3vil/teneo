@@ -48,7 +48,11 @@ var APP_FOLDERS = [
   "/System/Library/CoreServices",
   `${tjs.env.HOME}/Applications`
 ];
+var BUNDLE_ID_PATTERN = /^[\w.-]+$/;
 var installedApps;
+function isValidBundleId(bundleId) {
+  return BUNDLE_ID_PATTERN.test(bundleId);
+}
 async function findAppPath(bundleId) {
   return await findAppWithSpotlight(bundleId) ?? (await getInstalledApps()).get(bundleId);
 }
@@ -101,10 +105,9 @@ function readBundleId(appPath) {
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/app-icons.ts
 var ICON_SIZE = 32;
-var BUNDLE_ID_PATTERN = /^[\w.-]+$/;
 var iconUrls = /* @__PURE__ */ new Map();
 async function saveAppIcon(bundleId, app) {
-  if (!BUNDLE_ID_PATTERN.test(bundleId)) return null;
+  if (!isValidBundleId(bundleId)) return null;
   const iconPath = `${await dataFolder(app, "icons")}/${bundleId}.png`;
   if (await fileExists(iconPath)) return iconPath;
   const appPath = await findAppPath(bundleId);
@@ -523,15 +526,122 @@ function splitWhitespace(value) {
   return values;
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/settings.ts
+var defaultSettings = {
+  pasteOnEnter: false,
+  ignorePasswords: true,
+  excludedApps: []
+};
+var settingsChangedEvent = "settings-changed";
+function pickSettings(value) {
+  if (typeof value !== "object" || value === null) return {};
+  const settings = {};
+  for (const key of Object.keys(defaultSettings)) {
+    const setting = value[key];
+    const defaultSetting = defaultSettings[key];
+    const isValid = Array.isArray(defaultSetting) ? Array.isArray(setting) && setting.every((entry) => typeof entry === "string") : typeof setting === typeof defaultSetting;
+    if (isValid) settings[key] = setting;
+  }
+  return settings;
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/settings.ts
+var settingsStoreKey = "settings";
+var currentSettings = { ...defaultSettings };
+async function loadSettings(app) {
+  const storedSettings = await app.store.get(settingsStoreKey);
+  currentSettings = { ...defaultSettings, ...pickSettings(storedSettings) };
+}
+function getSettings() {
+  return currentSettings;
+}
+async function updateSettings(changes, app) {
+  currentSettings = { ...currentSettings, ...pickSettings(changes) };
+  await app.store.set(settingsStoreKey, currentSettings);
+  app.push(settingsChangedEvent, currentSettings);
+  return currentSettings;
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/excluded-apps.ts
+var passwordManagerBundleIds = [
+  "me.proton.pass.electron",
+  // Proton Pass
+  "com.apple.Passwords",
+  "com.apple.keychainaccess",
+  "com.1password.1password",
+  "com.agilebits.onepassword7",
+  "com.bitwarden.desktop",
+  "org.keepassxc.keepassxc"
+];
+function isExcludedApp(bundleId) {
+  return passwordManagerBundleIds.includes(bundleId) || getSettings().excludedApps.includes(bundleId);
+}
+async function listExcludedApps(app) {
+  const addedBundleIds = getSettings().excludedApps.filter(isValidBundleId);
+  const candidates = [
+    ...passwordManagerBundleIds.map((bundleId) => ({
+      bundleId,
+      addedByUser: false
+    })),
+    ...addedBundleIds.map((bundleId) => ({ bundleId, addedByUser: true }))
+  ];
+  const excludedApps = await Promise.all(
+    candidates.map(async ({ bundleId, addedByUser }) => {
+      const appPath = await findAppPath(bundleId);
+      if (!appPath && !addedByUser) return null;
+      return {
+        bundleId,
+        addedByUser,
+        name: appPath ? getAppName(appPath) : bundleId,
+        iconUrl: await getAppIconUrl(bundleId, app)
+      };
+    })
+  );
+  return excludedApps.filter((excludedApp) => excludedApp !== null);
+}
+var chooseAppScript = [
+  "activate",
+  'POSIX path of (choose file with prompt "Choose an app to ignore" of type {"com.apple.application-bundle"} default location (path to applications folder))'
+];
+async function chooseAppToExclude(app) {
+  const appPath = await runCommand([
+    "/usr/bin/osascript",
+    ...chooseAppScript.flatMap((line) => ["-e", line])
+  ]);
+  if (appPath) await excludeApp(appPath, app);
+}
+async function excludeApp(appPath, app) {
+  appPath = appPath.replace(/\/$/, "");
+  if (!appPath.endsWith(".app")) throw new Error("Choose an app to ignore");
+  const bundleId = await readBundleId(appPath);
+  if (!isValidBundleId(bundleId)) {
+    throw new Error(`Couldn't read the app id of ${getAppName(appPath)}`);
+  }
+  if (isExcludedApp(bundleId)) return;
+  await updateSettings(
+    { excludedApps: [...getSettings().excludedApps, bundleId] },
+    app
+  );
+}
+function getAppName(appPath) {
+  return (appPath.split("/").pop() ?? appPath).replace(/\.app$/, "");
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/utils/uuid-generator.ts
 function generateUUID() {
   return crypto.randomUUID();
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/clipboard-history.ts
+function isFromPasswordManager(item) {
+  if (item.concealed) return true;
+  const bundleId = item.sourceApp?.bundleId;
+  return bundleId != null && isExcludedApp(bundleId);
+}
 async function readClipboardItem(app) {
   const item = await app.clipboard.read();
-  if (item.concealed || item.kind === "empty") return null;
+  if (item.kind === "empty") return null;
+  if (getSettings().ignorePasswords && isFromPasswordManager(item)) return null;
   const bundleId = item.sourceApp?.bundleId;
   if (bundleId) {
     await saveAppIcon(bundleId, app).catch(
@@ -821,9 +931,13 @@ function handleSettingsWindowClosed(windowId, app) {
 var api = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
+  chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
+  excludedApps: (_parameters, app) => listExcludedApps(app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
-  openSettings: (_parameters, app) => openSettingsWindow(app)
+  openSettings: (_parameters, app) => openSettingsWindow(app),
+  settings: () => getSettings(),
+  updateSettings: (changes, app) => updateSettings(changes, app)
 };
 async function onClipboardChange({ self }, app) {
   if (self) return;
@@ -834,6 +948,7 @@ function onWindowClosed(windowId, app) {
   handleSettingsWindowClosed(windowId, app);
 }
 async function init(app) {
+  await loadSettings(app);
   await initializeDatabase(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);

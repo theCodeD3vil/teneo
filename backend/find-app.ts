@@ -11,7 +11,13 @@ const APP_FOLDERS = [
   "/System/Library/CoreServices",
   `${tjs.env.HOME}/Applications`,
 ];
+// bundle ids go into a Spotlight query and file names, so only bundle-id characters pass
+const BUNDLE_ID_PATTERN = /^[\w.-]+$/;
 let installedApps: Promise<Map<string, string>> | undefined;
+
+export function isValidBundleId(bundleId: string): boolean {
+  return BUNDLE_ID_PATTERN.test(bundleId);
+}
 
 /** The .app path for bundleId, or undefined if it isn't installed.
  *  bundleId must already be validated: it goes into a Spotlight query. */
@@ -76,7 +82,8 @@ async function scanFolderForApps(
   }
 }
 
-function readBundleId(appPath: string): Promise<string> {
+/** The app's bundle id from its Info.plist, or "" if it can't be read. */
+export function readBundleId(appPath: string): Promise<string> {
   return runCommand([
     "/usr/bin/plutil",
     "-extract",

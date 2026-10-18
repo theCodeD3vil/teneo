@@ -6,6 +6,7 @@ import ArrowRightIcon from "~icons/hugeicons/arrow-right-01";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClipboard } from "@/composables/useClipboard";
 import { useHotkeys } from "@/composables/useHotkeys";
+import { useSettings } from "@/composables/useSettings";
 import { omit } from "@/utils/helpers";
 
 import {
@@ -31,6 +32,7 @@ const activeItemId = ref<string | null>(null);
 const allTabContent = ref<InstanceType<typeof AllTabContent> | null>(null);
 const debouncedSearchQuery = ref("");
 const { clipboardItems, error, loading } = useClipboard();
+const { settings } = useSettings();
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | undefined;
 
 const itemsByTab = computed<Record<TabVariant, ClipboardHistoryItem[]>>(() => ({
@@ -107,6 +109,7 @@ function moveActiveItem(direction: -1 | 1): boolean {
 }
 
 function copyActiveItem(): boolean {
+  if (settings.value.pasteOnEnter) return pasteActiveItem();
   return allTabContent.value?.copyActiveItem(activeItemId.value) ?? false;
 }
 

@@ -1,36 +1,40 @@
 <script lang="ts" setup>
 import { useEventListener } from "@vueuse/core";
-import { onMounted, ref } from "vue";
-import TickIcon from "~icons/hugeicons/tick-02";
+import { computed, onMounted, ref } from "vue";
 
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { useSettings } from "@/composables/useSettings";
 
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
 // UI only for now: not persisted or wired to the backend yet
-const launchAtLogin = ref(false);
 const checkForUpdates = ref(false);
-const pasteOnEnter = ref(false);
-const ignorePasswords = ref(true);
 const playCopySound = ref(false);
 
-// Accessibility lets Teneo post ⌘V to paste into other apps
-const accessibilityStatus = ref<TinyPermissionStatus | null>(null);
+const { settings, updateSettings } = useSettings();
 
-async function refreshAccessibilityStatus(): Promise<void> {
-  accessibilityStatus.value = await tiny.app.permissions.check("accessibility");
+const pasteOnEnter = computed({
+  get: () => settings.value.pasteOnEnter,
+  set: (enabled) => updateSettings({ pasteOnEnter: enabled }),
+});
+
+// Launch at login is system state (a login item), not a stored setting
+const launchAtLoginStatus = ref<TinyLoginStatus | null>(null);
+const launchAtLogin = computed({
+  get: () => launchAtLoginStatus.value === "enabled",
+  set: async (enabled) => {
+    launchAtLoginStatus.value = await tiny.app.launchAtLogin.set(enabled);
+  },
+});
+
+async function refreshLaunchAtLoginStatus(): Promise<void> {
+  launchAtLoginStatus.value = await tiny.app.launchAtLogin.get();
 }
 
-async function requestAccessibility(): Promise<void> {
-  await tiny.app.permissions.request("accessibility");
-  await refreshAccessibilityStatus();
-}
-
-onMounted(refreshAccessibilityStatus);
-// Access is granted in System Settings, so re-check when the user comes back
-useEventListener(window, "focus", refreshAccessibilityStatus);
+onMounted(refreshLaunchAtLoginStatus);
+// Login items are approved in System Settings, so re-check when the user comes back
+useEventListener(window, "focus", refreshLaunchAtLoginStatus);
 </script>
 
 <template>
@@ -38,10 +42,19 @@ useEventListener(window, "focus", refreshAccessibilityStatus);
     <SettingsSection>
       <template #section-title>Startup</template>
 
-      <SettingsField>
+      <SettingsField
+        :disabled="
+          !launchAtLoginStatus || launchAtLoginStatus === 'unsupported'
+        ">
         <template #label>Launch at login</template>
         <template #description>
-          Start Teneo when you log in to your Mac
+          <template v-if="launchAtLoginStatus === 'requires-approval'">
+            Allow Teneo in System Settings › General › Login Items
+          </template>
+          <template v-else-if="launchAtLoginStatus === 'unsupported'">
+            Only available in the installed app
+          </template>
+          <template v-else>Start Teneo when you log in to your Mac</template>
         </template>
         <Switch v-model="launchAtLogin" />
       </SettingsField>
@@ -64,38 +77,9 @@ useEventListener(window, "focus", refreshAccessibilityStatus);
         <Switch v-model="pasteOnEnter" />
       </SettingsField>
 
-      <SettingsField>
-        <template #label>Ignore passwords</template>
-        <template #description>
-          Skip items password managers mark as sensitive
-        </template>
-        <Switch v-model="ignorePasswords" />
-      </SettingsField>
-
       <SettingsField disabled>
         <template #label>Play sound when copying</template>
         <Switch v-model="playCopySound" />
-      </SettingsField>
-    </SettingsSection>
-
-    <SettingsSection>
-      <template #section-title>Permissions</template>
-
-      <SettingsField>
-        <template #label>Accessibility</template>
-        <template #description>Needed to paste into other apps</template>
-        <span
-          v-if="accessibilityStatus === 'granted'"
-          class="text-success flex items-center gap-1 text-sm">
-          <TickIcon /> Granted
-        </span>
-        <Button
-          v-else-if="accessibilityStatus"
-          variant="outline"
-          size="sm"
-          @click="requestAccessibility">
-          Grant access
-        </Button>
       </SettingsField>
     </SettingsSection>
   </div>

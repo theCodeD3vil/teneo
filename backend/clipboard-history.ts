@@ -2,16 +2,25 @@
 // moment (the image's temp file, the source app) is saved to the data dir now.
 import { saveAppIcon } from "./app-icons";
 import { normalizeClipboardColor } from "./color";
+import { isExcludedApp } from "./excluded-apps";
 import { dataFolder, logError } from "./files";
+import { getSettings } from "./settings";
 import { generateUUID } from "./utils/uuid-generator";
+
+function isFromPasswordManager(item: TinyClipboardData): boolean {
+  // concealed = the org.nspasteboard marker well-behaved password managers set
+  if (item.concealed) return true;
+  const bundleId = item.sourceApp?.bundleId;
+  return bundleId != null && isExcludedApp(bundleId);
+}
 
 /** Read the clipboard as a history item, or null for items history must skip. */
 export async function readClipboardItem(
   app: TinyApp,
 ): Promise<TinyClipboardData | null> {
   const item = await app.clipboard.read();
-  // concealed = password managers; history apps must not keep these
-  if (item.concealed || item.kind === "empty") return null;
+  if (item.kind === "empty") return null;
+  if (getSettings().ignorePasswords && isFromPasswordManager(item)) return null;
 
   const bundleId = item.sourceApp?.bundleId;
   if (bundleId) {

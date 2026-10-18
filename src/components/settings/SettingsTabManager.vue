@@ -4,16 +4,19 @@ import HardDriveIcon from "~icons/hugeicons/hard-drive";
 import InformationCircleIcon from "~icons/hugeicons/information-circle";
 import KeyboardIcon from "~icons/hugeicons/keyboard";
 import SettingsIcon from "~icons/hugeicons/settings-02";
+import ShieldIcon from "~icons/hugeicons/shield-01";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import AboutTab from "./AboutTab.vue";
 import GeneralTab from "./GeneralTab.vue";
 import HotkeysTab from "./HotkeysTab.vue";
+import SecurityTab from "./SecurityTab.vue";
 import StorageTab from "./StorageTab.vue";
 
 const settingsTabs = [
   { value: "general", icon: SettingsIcon, content: GeneralTab },
+  { value: "security", icon: ShieldIcon, content: SecurityTab },
   { value: "hotkeys", icon: KeyboardIcon, content: HotkeysTab },
   { value: "storage", icon: HardDriveIcon, content: StorageTab },
   { value: "about", icon: InformationCircleIcon, content: AboutTab },

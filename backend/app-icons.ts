@@ -1,11 +1,9 @@
 // Source-app icons. Each icon is saved to the data dir the first time its app is
 // seen, so history keeps showing it even after the app is uninstalled.
 import { dataFolder, fileExists, logError, pngDataUrl } from "./files";
-import { findAppPath } from "./find-app";
+import { findAppPath, isValidBundleId } from "./find-app";
 
 const ICON_SIZE = 32;
-// bundleId goes into a Spotlight query and a file name, so only bundle-id characters pass
-const BUNDLE_ID_PATTERN = /^[\w.-]+$/;
 // one promise per app, so cards asking for the same icon at once share one lookup
 const iconUrls = new Map<string, Promise<string | null>>();
 
@@ -14,7 +12,7 @@ export async function saveAppIcon(
   bundleId: string,
   app: TinyApp,
 ): Promise<string | null> {
-  if (!BUNDLE_ID_PATTERN.test(bundleId)) return null;
+  if (!isValidBundleId(bundleId)) return null;
   const iconPath = `${await dataFolder(app, "icons")}/${bundleId}.png`;
   if (await fileExists(iconPath)) return iconPath;
   const appPath = await findAppPath(bundleId);

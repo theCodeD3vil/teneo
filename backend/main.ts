@@ -7,7 +7,9 @@ import {
   listClipboardItems,
   saveClipboardItem,
 } from "./database";
+import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
 import { getFilePreview } from "./file-previews";
+import { getSettings, loadSettings, updateSettings } from "./settings";
 import {
   handleSettingsWindowClosed,
   hidePanel,
@@ -17,9 +19,13 @@ import {
 export const api: Record<string, TinyApiHandler> = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
+  chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
+  excludedApps: (_parameters, app) => listExcludedApps(app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
+  settings: () => getSettings(),
+  updateSettings: (changes, app) => updateSettings(changes, app),
 };
 
 // Defining this handler makes tinyjs start watching the clipboard.
@@ -37,6 +43,7 @@ export function onWindowClosed(windowId: string, app: TinyApp) {
 }
 
 export async function init(app: TinyApp) {
+  await loadSettings(app);
   await initializeDatabase(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
