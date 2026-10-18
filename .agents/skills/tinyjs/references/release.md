@@ -88,12 +88,29 @@ per-arch `mac` block when you ship separate Apple Silicon / Intel builds),
 Windows the `win` block, Linux the per-arch `linux` blocks:
 
 ```json
-{ "version": "1.2.0", "url": "…/app-1.2.0-macos-arm64.zip", "sha256": "…", "notes": "…",
-  "mac":   { "arm64":  { "url": "…-macos-arm64.zip",  "sha256": "…" },
-             "x86_64": { "url": "…-macos-x86_64.zip", "sha256": "…" } },
-  "win":   { "version": "1.2.0", "url": "…-win.zip", "sha256": "…" },
-  "linux": { "x86_64": { "version": "1.2.0", "url": "…-linux-x86_64.tar.gz", "sha256": "…" },
-             "arm64":  { "version": "1.2.0", "url": "…-linux-arm64.tar.gz", "sha256": "…" } } }
+{
+  "version": "1.2.0",
+  "url": "…/app-1.2.0-macos-arm64.zip",
+  "sha256": "…",
+  "notes": "…",
+  "mac": {
+    "arm64": { "url": "…-macos-arm64.zip", "sha256": "…" },
+    "x86_64": { "url": "…-macos-x86_64.zip", "sha256": "…" }
+  },
+  "win": { "version": "1.2.0", "url": "…-win.zip", "sha256": "…" },
+  "linux": {
+    "x86_64": {
+      "version": "1.2.0",
+      "url": "…-linux-x86_64.tar.gz",
+      "sha256": "…"
+    },
+    "arm64": {
+      "version": "1.2.0",
+      "url": "…-linux-arm64.tar.gz",
+      "sha256": "…"
+    }
+  }
+}
 ```
 
 - **Merge, never overwrite**: each platform's updater reads only its own

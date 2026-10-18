@@ -7,15 +7,16 @@ description: Build and modify tinyjs desktop apps — tiny macOS (and beta Windo
 
 tinyjs (https://tinyjs.app, repo tarwin/tinyjsapp) makes ~6 MB desktop apps:
 a **txiki.js backend** (full system access: files, sockets, processes, FFI)
-+ a **native webview window** — WKWebView on macOS, WebView2 on Windows,
-WebKitGTK 4.1 on Linux (both beta). They talk over a private socket — no
-HTTP server, no ports. The page has no direct system access: everything
-privileged crosses `tiny.api` (which the tinyjs.json `"api"` gate can
-narrow), which is why anything interpolated into `innerHTML` must be
-escaped. Two launcher-side paths skip that crossing, both limited to the
-app's own pages and the origins `"api"` trusts: `tiny.proxyURL`'s
-`tiny-media://` proxy (cross-origin http(s) reads, macOS + Linux;
-`media.proxy`) and mic/camera (`media.microphone` / `media.camera`).
+
+- a **native webview window** — WKWebView on macOS, WebView2 on Windows,
+  WebKitGTK 4.1 on Linux (both beta). They talk over a private socket — no
+  HTTP server, no ports. The page has no direct system access: everything
+  privileged crosses `tiny.api` (which the tinyjs.json `"api"` gate can
+  narrow), which is why anything interpolated into `innerHTML` must be
+  escaped. Two launcher-side paths skip that crossing, both limited to the
+  app's own pages and the origins `"api"` trusts: `tiny.proxyURL`'s
+  `tiny-media://` proxy (cross-origin http(s) reads, macOS + Linux;
+  `media.proxy`) and mic/camera (`media.microphone` / `media.camera`).
 
 Current release: 0.50.1. App floors: macOS 15+ — a default build opens only
 on the build Mac's CPU (`build --arch arm64|x86_64` or `--universal` for the
@@ -24,14 +25,14 @@ other); Windows 10/11 (WebView2); Linux glibc 2.35+ (Ubuntu 22.04 / Debian 12
 
 ## Read the reference for the job at hand
 
-| doing | read |
-|---|---|
-| any API beyond the basics below (windows, menus, tray, clipboard, audio, permissions, system…) | references/api.md |
-| per-OS support, Windows/Linux quirks, capability gating | references/platforms.md |
-| starting a tray app, desktop pet/overlay, media app, document app, site wrapper, agent app | references/recipes.md |
-| shipping: build/sign/notarize, per-OS packaging, auto-update manifests | references/release.md |
-| porting from Electron (API map, what won't work) | references/electron-migration.md |
-| deciding where code runs, wire/binary payloads, throttling, memory | references/performance.md |
+| doing                                                                                          | read                             |
+| ---------------------------------------------------------------------------------------------- | -------------------------------- |
+| any API beyond the basics below (windows, menus, tray, clipboard, audio, permissions, system…) | references/api.md                |
+| per-OS support, Windows/Linux quirks, capability gating                                        | references/platforms.md          |
+| starting a tray app, desktop pet/overlay, media app, document app, site wrapper, agent app     | references/recipes.md            |
+| shipping: build/sign/notarize, per-OS packaging, auto-update manifests                         | references/release.md            |
+| porting from Electron (API map, what won't work)                                               | references/electron-migration.md |
+| deciding where code runs, wire/binary payloads, throttling, memory                             | references/performance.md        |
 
 ## Commands
 
@@ -141,13 +142,16 @@ statements have run/all/finalize only, no get(), run() returns void).
 ## Frontend essentials
 
 ```js
-await tiny.api.call('method', { params });    // -> backend api.<method>
-const off = tiny.api.on('event', fn);         // <- app.push; returns unsubscribe
-audio.src = tiny.fileURL(path);   // ALWAYS this, never 'file://' + path
-                                  // (breaks on Windows drive letters)
-const r = await tiny.fetch(url, opts);        // backend-proxied, no CORS/CSP
-tiny.win.open('settings', { page: 'settings.html', size: '420x300',
-                            chrome: { frame: false } });
+await tiny.api.call("method", { params }); // -> backend api.<method>
+const off = tiny.api.on("event", fn); // <- app.push; returns unsubscribe
+audio.src = tiny.fileURL(path); // ALWAYS this, never 'file://' + path
+// (breaks on Windows drive letters)
+const r = await tiny.fetch(url, opts); // backend-proxied, no CORS/CSP
+tiny.win.open("settings", {
+  page: "settings.html",
+  size: "420x300",
+  chrome: { frame: false },
+});
 // chrome/x/y/minSize in open() (or tinyjs.json "chrome" for main) apply
 // BEFORE first paint — a late setChrome flashes the default window.
 ```

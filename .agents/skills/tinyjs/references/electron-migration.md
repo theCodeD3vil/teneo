@@ -25,36 +25,36 @@ architecture, not the code.
 
 ## API mapping
 
-| Electron | tinyjs |
-|---|---|
-| `new BrowserWindow(opts)` | `tinyjs.json` (main window) / `tiny.win.open(id, { page, size, chrome, x, y })` — chrome/x/y in `open()` apply before first paint |
-| `ipcMain.handle` + `ipcRenderer.invoke` | `export const api = { method: async (params, app) => … }` + `tiny.api.call('method', params)` |
-| `webContents.send` → renderer listener | `app.push('event', data)` + `tiny.api.on('event', fn)` |
-| preload script / `contextBridge` | not needed — `tiny` is injected into every page automatically |
-| `Tray` | `tiny.tray.set({ title, icon, menu })` (`'sf:<name>'` icons on macOS, `'emoji:<glyph>'` on Windows) |
-| `Menu.setApplicationMenu` | `tiny.menu.set(spec)` — shows in EVERY window on all three OSes; `tiny.win.menu.*` for per-window |
-| `role: 'editMenu'` / `role: 'copy'` etc. | `{ role: 'edit', items: [{ role: 'standard' }, …] }` — stock items by role: `undo` `redo` `cut` `copy` `paste` `selectAll`, or `standard` for all six. macOS adds an Edit menu even if you don't; `standard: false` removes it (⌘C/⌘V keep working) |
-| `globalShortcut` | `tiny.hotkey.register(id, 'cmd+shift+k')` (`cmd` = Ctrl on win/linux) |
-| `dialog.showOpenDialog` etc. | `tiny.dialog.openFile/openFiles/pickFolder/saveFile/alert/confirm/prompt` |
-| `shell.openExternal/showItemInFolder/trashItem` | `tiny.app.shell.open/reveal/trash` |
-| `app.getPath(name)` | `tiny.app.paths()` / backend `app.paths` (plain object) |
-| `safeStorage` / keytar | `tiny.app.secrets.get/set/delete` (Keychain / Credential Manager / Secret Service) |
-| `autoUpdater` (+ electron-updater) | `"update": { url, auto }` in tinyjs.json + `tinyjs publish`; `update.check()` / `update.install()` |
-| `nativeTheme` | `tiny.theme.get()/on()` |
-| `screen.getAllDisplays` | `tiny.app.screens()` |
-| `clipboard` | `tiny.clipboard.read/write/watch` (richer: sourceApp, concealed marker, files) |
-| `new Notification` | `tiny.notify(title, body, { actions })` |
-| `powerSaveBlocker` | `tiny.app.power.preventSleep(reason)` (auto-released on exit) |
-| `app.setLoginItemSettings` | `tiny.app.launchAtLogin.set(v)` |
-| `app.setBadgeCount` | `tiny.app.badge('3')` |
-| `app.requestSingleInstanceLock` | automatic — second launch forwards its argv/deep-link to the running copy |
-| `app.setAsDefaultProtocolClient` | `"urlScheme"` in tinyjs.json + `onOpenUrl` |
-| file associations (builder config) | `"fileExtensions"` + `onOpenFiles`; `"openFolders": true` |
-| `webContents.executeJavaScript` | backend `app.window(id).eval(js)` |
-| `webContents.printToPDF` | `tiny.win.printToPDF(path)` (routes to the calling window) |
-| `desktopCapturer` | `tiny.app.captureScreen(screenId)` / `tiny.macos.recorder` (macOS) |
-| `BrowserWindow` flags: frame, transparent, alwaysOnTop, ignoreMouseEvents | `chrome: { frame, transparent }`, `setAlwaysOnTop`, `setClickThrough`, `setLevel('desktop'|'floating'|'overlay')` |
-| `session.webRequest` / CORS dances | `tiny.fetch(url, opts)` — backend-proxied, no CORS/CSP; `{ stream: true }` for endless bodies; `tiny.proxyURL(url)` to get cross-origin streams into Web Audio untainted |
+| Electron                                                                  | tinyjs                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new BrowserWindow(opts)`                                                 | `tinyjs.json` (main window) / `tiny.win.open(id, { page, size, chrome, x, y })` — chrome/x/y in `open()` apply before first paint                                                                                                                   |
+| `ipcMain.handle` + `ipcRenderer.invoke`                                   | `export const api = { method: async (params, app) => … }` + `tiny.api.call('method', params)`                                                                                                                                                       |
+| `webContents.send` → renderer listener                                    | `app.push('event', data)` + `tiny.api.on('event', fn)`                                                                                                                                                                                              |
+| preload script / `contextBridge`                                          | not needed — `tiny` is injected into every page automatically                                                                                                                                                                                       |
+| `Tray`                                                                    | `tiny.tray.set({ title, icon, menu })` (`'sf:<name>'` icons on macOS, `'emoji:<glyph>'` on Windows)                                                                                                                                                 |
+| `Menu.setApplicationMenu`                                                 | `tiny.menu.set(spec)` — shows in EVERY window on all three OSes; `tiny.win.menu.*` for per-window                                                                                                                                                   |
+| `role: 'editMenu'` / `role: 'copy'` etc.                                  | `{ role: 'edit', items: [{ role: 'standard' }, …] }` — stock items by role: `undo` `redo` `cut` `copy` `paste` `selectAll`, or `standard` for all six. macOS adds an Edit menu even if you don't; `standard: false` removes it (⌘C/⌘V keep working) |
+| `globalShortcut`                                                          | `tiny.hotkey.register(id, 'cmd+shift+k')` (`cmd` = Ctrl on win/linux)                                                                                                                                                                               |
+| `dialog.showOpenDialog` etc.                                              | `tiny.dialog.openFile/openFiles/pickFolder/saveFile/alert/confirm/prompt`                                                                                                                                                                           |
+| `shell.openExternal/showItemInFolder/trashItem`                           | `tiny.app.shell.open/reveal/trash`                                                                                                                                                                                                                  |
+| `app.getPath(name)`                                                       | `tiny.app.paths()` / backend `app.paths` (plain object)                                                                                                                                                                                             |
+| `safeStorage` / keytar                                                    | `tiny.app.secrets.get/set/delete` (Keychain / Credential Manager / Secret Service)                                                                                                                                                                  |
+| `autoUpdater` (+ electron-updater)                                        | `"update": { url, auto }` in tinyjs.json + `tinyjs publish`; `update.check()` / `update.install()`                                                                                                                                                  |
+| `nativeTheme`                                                             | `tiny.theme.get()/on()`                                                                                                                                                                                                                             |
+| `screen.getAllDisplays`                                                   | `tiny.app.screens()`                                                                                                                                                                                                                                |
+| `clipboard`                                                               | `tiny.clipboard.read/write/watch` (richer: sourceApp, concealed marker, files)                                                                                                                                                                      |
+| `new Notification`                                                        | `tiny.notify(title, body, { actions })`                                                                                                                                                                                                             |
+| `powerSaveBlocker`                                                        | `tiny.app.power.preventSleep(reason)` (auto-released on exit)                                                                                                                                                                                       |
+| `app.setLoginItemSettings`                                                | `tiny.app.launchAtLogin.set(v)`                                                                                                                                                                                                                     |
+| `app.setBadgeCount`                                                       | `tiny.app.badge('3')`                                                                                                                                                                                                                               |
+| `app.requestSingleInstanceLock`                                           | automatic — second launch forwards its argv/deep-link to the running copy                                                                                                                                                                           |
+| `app.setAsDefaultProtocolClient`                                          | `"urlScheme"` in tinyjs.json + `onOpenUrl`                                                                                                                                                                                                          |
+| file associations (builder config)                                        | `"fileExtensions"` + `onOpenFiles`; `"openFolders": true`                                                                                                                                                                                           |
+| `webContents.executeJavaScript`                                           | backend `app.window(id).eval(js)`                                                                                                                                                                                                                   |
+| `webContents.printToPDF`                                                  | `tiny.win.printToPDF(path)` (routes to the calling window)                                                                                                                                                                                          |
+| `desktopCapturer`                                                         | `tiny.app.captureScreen(screenId)` / `tiny.macos.recorder` (macOS)                                                                                                                                                                                  |
+| `BrowserWindow` flags: frame, transparent, alwaysOnTop, ignoreMouseEvents | `chrome: { frame, transparent }`, `setAlwaysOnTop`, `setClickThrough`, `setLevel('desktop'                                                                                                                                                          | 'floating' | 'overlay')` |
+| `session.webRequest` / CORS dances                                        | `tiny.fetch(url, opts)` — backend-proxied, no CORS/CSP; `{ stream: true }` for endless bodies; `tiny.proxyURL(url)` to get cross-origin streams into Web Audio untainted                                                                            |
 
 ## No equivalent — design around
 

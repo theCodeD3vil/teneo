@@ -222,14 +222,14 @@ platforms; `capabilities()` reports `jsDialogs`, `downloads`, `navigation`,
 
 ```js
 // PAGE side
-await tiny.win.find('needle', { forward: true, matchCase: false });
+await tiny.win.find("needle", { forward: true, matchCase: false });
 // -> { found, matches, activeMatch }  — call again to step; stopFind() clears
 await tiny.win.stopFind();
-tiny.api.on('navigate', (e) => {});   // { window, kind, url, error? }
-tiny.api.on('download', (d) => {});   // { id, url, filename, path, state, bytes?, total? }
-tiny.api.on('popup', (p) => {});      // { window, url, action }
+tiny.api.on("navigate", (e) => {}); // { window, kind, url, error? }
+tiny.api.on("download", (d) => {}); // { id, url, filename, path, state, bytes?, total? }
+tiny.api.on("popup", (p) => {}); // { window, url, action }
 const caps = await tiny.system.capabilities();
-caps.api;                             // { gated, denied: [...] } for THIS origin
+caps.api; // { gated, denied: [...] } for THIS origin
 ```
 
 ```js
@@ -294,21 +294,23 @@ tiny.app.onNotificationAction(({ id, action, reply }) => ...);
 // ── tiny.audio.sampler — sampled SFX mixer (0.34.0). One per app: every
 // window AND the backend (app.audio.sampler) drive the SAME mixer/state.
 const s = tiny.audio.sampler;
-await s.load('coo', '/abs/path/coo.mp3');    // or ArrayBuffer/view/Blob —
-   // bytes are spilled to the app cache ONCE and read from disk, never
-   // streamed over the bridge. Load by path when you can. wav/mp3/flac
-   // guaranteed everywhere. Re-loading a name replaces it. A path must
-   // have an audio extension AND start like an audio file
-   // (wav/aiff/caf/ogg/opus/flac/mp3/aac/m4a/mp4/webm) or load() rejects
-   // — the sampler isn't a file reader.
-const v = await s.play('coo', { vol: 0.8, pan: -0.3, rate: 1.06, loop: false });
-   // vol linear 0..1; pan −1..1 EQUAL-POWER (StereoPanner's law — same
-   // numbers, same sound on all three OSes); rate = playbackRate-style ratio
-   // (pitch+speed). 32 voices; past that the OLDEST is stolen — play() never
-   // rejects for "too many" (it does for an unknown name).
-v.set({ pan: 0.1 });          // live, no restart
-v.stop();                     // short fade, no click
-s.stopAll(); s.master(0.5); s.unload('coo');   // unload CUTS its voices
+await s.load("coo", "/abs/path/coo.mp3"); // or ArrayBuffer/view/Blob —
+// bytes are spilled to the app cache ONCE and read from disk, never
+// streamed over the bridge. Load by path when you can. wav/mp3/flac
+// guaranteed everywhere. Re-loading a name replaces it. A path must
+// have an audio extension AND start like an audio file
+// (wav/aiff/caf/ogg/opus/flac/mp3/aac/m4a/mp4/webm) or load() rejects
+// — the sampler isn't a file reader.
+const v = await s.play("coo", { vol: 0.8, pan: -0.3, rate: 1.06, loop: false });
+// vol linear 0..1; pan −1..1 EQUAL-POWER (StereoPanner's law — same
+// numbers, same sound on all three OSes); rate = playbackRate-style ratio
+// (pitch+speed). 32 voices; past that the OLDEST is stolen — play() never
+// rejects for "too many" (it does for an unknown name).
+v.set({ pan: 0.1 }); // live, no restart
+v.stop(); // short fade, no click
+s.stopAll();
+s.master(0.5);
+s.unload("coo"); // unload CUTS its voices
 // Backends: capabilities().sampler is 'native' (Linux: launcher decodes with
 // miniaudio, mixes on PipeWire's RT loop — immune to page load and missing
 // GStreamer plugins) or 'page' (mac/win: Web Audio in the MAIN window's
@@ -328,11 +330,17 @@ s.stopAll(); s.master(0.5); s.unload('coo');   // unload CUTS its voices
 // Linux (Web Audio to destination crackles there — that's why the native
 // chain exists).
 const eq = caps.audioFilters ? tiny.audio : tiny.audio.pageChain(ctx);
-if (eq.input) { src.connect(eq.input); eq.output.connect(ctx.destination); }
-await eq.filters([{ type: 'gain', gain: 1 },            // linear preamp
-  { type: 'peaking', freq: 60, q: 1.1, gain: 4 }]);     // biquads: gain in dB
-eq.filter(1, { freq: 60, gain: -3 });   // retune in place (slider drags)
-await eq.balance(-0.2); await eq.clear();
+if (eq.input) {
+  src.connect(eq.input);
+  eq.output.connect(ctx.destination);
+}
+await eq.filters([
+  { type: "gain", gain: 1 }, // linear preamp
+  { type: "peaking", freq: 60, q: 1.1, gain: 4 },
+]); // biquads: gain in dB
+eq.filter(1, { freq: 60, gain: -3 }); // retune in place (slider drags)
+await eq.balance(-0.2);
+await eq.clear();
 // Types: peaking lowshelf highshelf lowpass highpass bandpass notch allpass
 // + gain (linear). Limits: 15 filters on Linux (PipeWire truncates above),
 // 32 on macOS. pageChain: shelf q and per-filter gainR ignored.
@@ -342,10 +350,11 @@ await eq.balance(-0.2); await eq.clear();
 // in tinyjs.json ("audioTapReason": "why" overrides the macOS prompt text).
 // macOS / Windows ('system') / Linux ('system'; 'app' approximated by
 // system mix). Post-filter where a chain is active.
-await tiny.audioTap.start({ scope: 'app', interval: 80 });
+await tiny.audioTap.start({ scope: "app", interval: 80 });
 tiny.audioTap.on(({ pcm, sampleRate, channels, frames, t }) => {
-  const bin = atob(pcm), n = bin.length >> 1;   // base64 -> interleaved LE Int16
-});                                              // tiny.audioTap.stop()
+  const bin = atob(pcm),
+    n = bin.length >> 1; // base64 -> interleaved LE Int16
+}); // tiny.audioTap.stop()
 // macOS: auth is deferred to the FIRST start(); prompts "System Audio
 // Recording" even for scope 'app'; under `tinyjs dev` the grant belongs to
 // the terminal. Denial = silent chunks, not an error.
@@ -354,10 +363,11 @@ tiny.audioTap.on(({ pcm, sampleRate, channels, frames, t }) => {
 // cross-origin <audio> is silent by spec; proxyURL streams through the
 // native layer with permissive CORS so it's untainted. App's own pages only;
 // another origin needs "media.proxy" in its "api".origins key.
-audio.crossOrigin = 'anonymous';
-audio.src = tiny.proxyURL('https://host/stream.mp3');
+audio.crossOrigin = "anonymous";
+audio.src = tiny.proxyURL("https://host/stream.mp3");
 
-await tiny.app.beep(); await tiny.app.playSound('Ping');
+await tiny.app.beep();
+await tiny.app.playSound("Ping");
 // playSound: system sound name, file path, or the portable meanings
 // 'info'|'success'|'alert'|'error' (nearest native equivalent per OS).
 ```
@@ -385,8 +395,10 @@ await tiny.app.thumbnail(path, size?);  // png for ANY path (macOS/Windows:
 ## Store / secrets / sqlite
 
 ```js
-await tiny.store.set('key', anyJsonValue); await tiny.store.get('key');
-await tiny.store.delete('key'); await tiny.store.all();
+await tiny.store.set("key", anyJsonValue);
+await tiny.store.get("key");
+await tiny.store.delete("key");
+await tiny.store.all();
 // per-app data dir; fine for settings. Query-shaped data -> sqlite (BACKEND
 // ONLY: the page has no tjs global / tjs:* imports; expose api functions):
 //   import { Database } from 'tjs:sqlite';
@@ -395,13 +407,13 @@ await tiny.store.delete('key'); await tiny.store.all();
 // sqlite is fully SYNC (never await); statements have only run/all/finalize —
 // no get() (use .all()[0]) — and run() returns void: for the insert id use
 // 'INSERT ... RETURNING id' via .all(), not a better-sqlite3-style return.
-await tiny.app.secrets.set(key, value);  // Keychain / Credential Manager /
-await tiny.app.secrets.get(key);         // Secret Service. Tokens go HERE,
-await tiny.app.secrets.delete(key);      // never tiny.store. get -> string|null.
+await tiny.app.secrets.set(key, value); // Keychain / Credential Manager /
+await tiny.app.secrets.get(key); // Secret Service. Tokens go HERE,
+await tiny.app.secrets.delete(key); // never tiny.store. get -> string|null.
 // dev gotcha: macOS files the ACL against the BINARY — a secret saved by
 // `tinyjs dev` prompts once when the built app first reads it. Windows caps
 // a value at 2560 UTF-8 bytes (rejects up front, named).
-await tiny.app.authenticate(reason);  // Touch ID / Windows Hello -> true|false;
+await tiny.app.authenticate(reason); // Touch ID / Windows Hello -> true|false;
 // false covers cancel AND unavailable; Linux always false (no identity check
 // exists) — gate on it and the gate fails closed.
 ```
@@ -481,30 +493,30 @@ await tiny.app.spotlight(q);    // file search -> paths (mac; linux via locate)
 ## App surface (icon/badge/progress/presence)
 
 ```js
-tiny.app.badge('3');                     // '' clears. mac/win; Linux via the
-   // Unity LauncherEntry protocol — BUILT apps only (signal addresses the
-   // .desktop entry) and only docks that implement it (KDE, Ubuntu Dock,
-   // Dash-to-Dock — not vanilla GNOME Shell); capabilities() reports per
-   // session. app.progress rides the same protocol on Linux.
-tiny.app.progress(0.4);                  // determinate bar on Dock/taskbar;
-                                         // null clears; composes with icon()
+tiny.app.badge("3"); // '' clears. mac/win; Linux via the
+// Unity LauncherEntry protocol — BUILT apps only (signal addresses the
+// .desktop entry) and only docks that implement it (KDE, Ubuntu Dock,
+// Dash-to-Dock — not vanilla GNOME Shell); capabilities() reports per
+// session. app.progress rides the same protocol on Linux.
+tiny.app.progress(0.4); // determinate bar on Dock/taskbar;
+// null clears; composes with icon()
 tiny.app.attention({ critical: false }); // bounce/flash until activated
-tiny.app.icon(pngPath);                  // '' resets (canvas -> live tile);
-   // linux: X11 sessions only (Wayland has nowhere to put it) — same for
-   // attention and presence there
-tiny.app.presence('menubar');            // hide from Dock ('normal' back)
-await tiny.app.launchAtLogin.get();      // 'enabled'|'disabled'|
-await tiny.app.launchAtLogin.set(true);  // 'requires-approval'|'unsupported'
-                                         // (packaged apps; dev -> unsupported)
-await tiny.app.info();  // { version, tinyjs, runtime }
+tiny.app.icon(pngPath); // '' resets (canvas -> live tile);
+// linux: X11 sessions only (Wayland has nowhere to put it) — same for
+// attention and presence there
+tiny.app.presence("menubar"); // hide from Dock ('normal' back)
+await tiny.app.launchAtLogin.get(); // 'enabled'|'disabled'|
+await tiny.app.launchAtLogin.set(true); // 'requires-approval'|'unsupported'
+// (packaged apps; dev -> unsupported)
+await tiny.app.info(); // { version, tinyjs, runtime }
 ```
 
 ## Permissions
 
 ```js
-await tiny.app.permissions.check('accessibility');   // 'granted'|'denied'|
-                                                     // 'undetermined'|'unsupported'
-await tiny.app.permissions.request('accessibility'); // prompts / opens Settings
+await tiny.app.permissions.check("accessibility"); // 'granted'|'denied'|
+// 'undetermined'|'unsupported'
+await tiny.app.permissions.request("accessibility"); // prompts / opens Settings
 // names: accessibility | screen | notifications | microphone | camera |
 //        automation[:<bundle-id>]
 ```
