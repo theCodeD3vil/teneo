@@ -20,7 +20,8 @@ export const api: Record<string, TinyApiHandler> = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
-  excludedApps: (_parameters, app) => listExcludedApps(app),
+  excludedApps: ({ addedBundleIds }, app) =>
+    listExcludedApps(addedBundleIds, app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),

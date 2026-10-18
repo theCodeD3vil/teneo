@@ -576,8 +576,10 @@ var passwordManagerBundleIds = [
 function isExcludedApp(bundleId) {
   return passwordManagerBundleIds.includes(bundleId) || getSettings().excludedApps.includes(bundleId);
 }
-async function listExcludedApps(app) {
-  const addedBundleIds = getSettings().excludedApps.filter(isValidBundleId);
+async function listExcludedApps(requestedBundleIds, app) {
+  const addedBundleIds = Array.isArray(requestedBundleIds) ? requestedBundleIds.filter(
+    (bundleId) => typeof bundleId === "string" && isValidBundleId(bundleId)
+  ) : [];
   const candidates = [
     ...passwordManagerBundleIds.map((bundleId) => ({
       bundleId,
@@ -932,7 +934,7 @@ var api = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
-  excludedApps: (_parameters, app) => listExcludedApps(app),
+  excludedApps: ({ addedBundleIds }, app) => listExcludedApps(addedBundleIds, app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),

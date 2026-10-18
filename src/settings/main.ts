@@ -1,3 +1,4 @@
+import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { createApp } from "vue";
 
 import "../style.css";
@@ -6,4 +7,6 @@ import SettingsApp from "./SettingsApp.vue";
 
 syncThemeWithSystem();
 
-createApp(SettingsApp).mount("#app");
+const app = createApp(SettingsApp);
+app.use(VueQueryPlugin, { queryClient: new QueryClient() });
+app.mount("#app");

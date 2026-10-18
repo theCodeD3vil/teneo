@@ -26,9 +26,19 @@ export function isExcludedApp(bundleId: string): boolean {
 }
 
 /** Built-in password managers installed on this Mac, plus every app the user
- *  added (even if it has since been uninstalled, so it can still be removed). */
-export async function listExcludedApps(app: TinyApp): Promise<ExcludedApp[]> {
-  const addedBundleIds = getSettings().excludedApps.filter(isValidBundleId);
+ *  added (even if it has since been uninstalled, so it can still be removed).
+ *  The page passes the added apps it knows about, so the list always matches
+ *  the settings it asked with, even if a change is still on its way here. */
+export async function listExcludedApps(
+  requestedBundleIds: unknown,
+  app: TinyApp,
+): Promise<ExcludedApp[]> {
+  const addedBundleIds = Array.isArray(requestedBundleIds)
+    ? requestedBundleIds.filter(
+        (bundleId): bundleId is string =>
+          typeof bundleId === "string" && isValidBundleId(bundleId),
+      )
+    : [];
   const candidates = [
     ...passwordManagerBundleIds.map((bundleId) => ({
       bundleId,

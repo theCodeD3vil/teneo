@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { useEventListener } from "@vueuse/core";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import AddIcon from "~icons/hugeicons/add-01";
 import CancelIcon from "~icons/hugeicons/cancel-01";
 import TickIcon from "~icons/hugeicons/tick-02";
@@ -18,9 +18,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { useExcludedApps } from "@/composables/useExcludedApps";
 import { useSettings } from "@/composables/useSettings";
 
-import type { ExcludedApp } from "../../../shared/types/settings";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
@@ -56,39 +56,14 @@ function keepPasswordsInHistory(): void {
   void updateSettings({ ignorePasswords: false });
 }
 
-// null until the backend has looked up which apps are installed
-const excludedApps = ref<ExcludedApp[] | null>(null);
-let latestExcludedAppsLoad = 0;
-
-async function loadExcludedApps(): Promise<void> {
-  const load = ++latestExcludedAppsLoad;
-  const apps: ExcludedApp[] = await tiny.api.call("excludedApps");
-  // an older, slower load must not overwrite a newer list
-  if (load === latestExcludedAppsLoad) excludedApps.value = apps;
-}
-
-// Re-list when an app is added or removed, from this window or another
-watch(() => settings.value.excludedApps.join(","), loadExcludedApps, {
-  immediate: true,
-});
-
-// true while the app picker is open, so a second click can't open another
-const isChoosingApp = ref(false);
-
-async function chooseAppToExclude(): Promise<void> {
-  isChoosingApp.value = true;
-  try {
-    await tiny.api.call("chooseAppToExclude");
-  } finally {
-    isChoosingApp.value = false;
-  }
-}
-
-function removeExcludedApp(bundleId: string): void {
-  void updateSettings({
-    excludedApps: settings.value.excludedApps.filter((id) => id !== bundleId),
-  });
-}
+const {
+  excludedApps,
+  excludedAppsError,
+  chooseAppToExclude,
+  isChoosingApp,
+  chooseAppError,
+  removeExcludedApp,
+} = useExcludedApps();
 </script>
 
 <template>
@@ -126,7 +101,12 @@ function removeExcludedApp(bundleId: string): void {
       </SettingsField>
 
       <p
-        v-if="!excludedApps"
+        v-if="excludedAppsError && !excludedApps"
+        class="text-destructive px-3 py-2.5 text-sm">
+        Couldn't look up password managers
+      </p>
+      <p
+        v-else-if="!excludedApps"
         class="text-foreground/60 flex items-center gap-2 px-3 py-2.5 text-sm">
         <Spinner />
         Looking for password managers…
@@ -161,7 +141,10 @@ function removeExcludedApp(bundleId: string): void {
         </Button>
       </SettingsField>
 
-      <div class="flex justify-end px-3 py-2">
+      <div class="flex items-center justify-end gap-3 px-3 py-2">
+        <p v-if="chooseAppError" class="text-destructive mr-auto text-xs">
+          {{ chooseAppError.message }}
+        </p>
         <Button
           variant="outline"
           size="sm"
