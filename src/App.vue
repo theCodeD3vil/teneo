@@ -6,16 +6,10 @@ import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
 import { useHotkeys } from "./composables/useHotkeys";
 import { PANEL_WIDTH } from "./constants/system";
-import type { TabVariant } from "./types/clipboard";
 
 const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const tabManager = ref<InstanceType<typeof TabManager> | null>(null);
-const nextTab = ref<TabVariant | null>(null);
 const searchQuery = ref("");
-
-function setNextTab(tab: TabVariant | null): void {
-  nextTab.value = tab;
-}
 
 async function toggleWindow() {
   const windowState = await tiny.win.getState();
@@ -85,10 +79,7 @@ useHotkeys({
     <TabManager
       ref="tabManager"
       :search-query="searchQuery"
-      @tab-change="(e: number) => (clipboardItemsCount = e)"
-      @tab-navigation="setNextTab" />
-    <HomeFooter
-      :clipboard-items-count="clipboardItemsCount"
-      :next-tab="nextTab" />
+      @tab-change="(e: number) => (clipboardItemsCount = e)" />
+    <HomeFooter :clipboard-items-count="clipboardItemsCount" />
   </div>
 </template>

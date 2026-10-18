@@ -115,7 +115,9 @@ export function getHotkeyProgress(event: KeyboardEvent): HotkeyProgress | null {
   if (event.defaultPrevented || event.isComposing || event.repeat) return null;
 
   const hotkey = getHotkeyMatch(event);
-  if (hotkey?.name === "moveActiveItem") return null;
+  if (hotkey?.name === "moveActiveItem" || hotkey?.name === "moveActiveTab") {
+    return null;
+  }
   if (hotkey) return progressFromHotkey(hotkey);
 
   if (event.key === "Meta" && hasOnlyCommandModifier(event)) {
@@ -152,7 +154,9 @@ function isQuickCopyItemNumber(
   return quickCopyItemNumbers.includes(itemNumber as QuickCopyItemNumber);
 }
 
-function progressFromHotkey(hotkey: HotkeyMatch): HotkeyProgress {
+function progressFromHotkey(
+  hotkey: Exclude<HotkeyMatch, { name: "moveActiveTab" | "moveActiveItem" }>,
+): HotkeyProgress {
   switch (hotkey.name) {
     case "previewSelectedItem":
       return {
@@ -185,18 +189,6 @@ function progressFromHotkey(hotkey: HotkeyMatch): HotkeyProgress {
           { type: "modifier", value: "command" },
           { type: "key", value: "/" },
         ],
-        state: "complete",
-      };
-    case "moveActiveTab":
-      return {
-        hotkeyName: hotkey.name,
-        keys: [{ type: "key", value: hotkey.direction === -1 ? "←" : "→" }],
-        state: "complete",
-      };
-    case "moveActiveItem":
-      return {
-        hotkeyName: hotkey.name,
-        keys: [{ type: "key", value: hotkey.direction === -1 ? "↑" : "↓" }],
         state: "complete",
       };
     case "copyActiveItem":

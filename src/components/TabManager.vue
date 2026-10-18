@@ -22,7 +22,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "tab-change", count: number): void;
-  (e: "tab-navigation", nextTab: TabVariant | null): void;
 }>();
 
 const tabValues: TabVariant[] = omit(clipboardItemVariants, "empty");
@@ -83,7 +82,6 @@ function activateFirstItem(): void {
 function moveActiveTab(direction: -1 | 1): boolean {
   const nextTabIndex = tabValues.indexOf(selectedTab.value) + direction;
   const nextTab = tabValues[nextTabIndex];
-  emit("tab-navigation", nextTab ?? null);
   if (!nextTab) return false;
 
   selectedTab.value = nextTab;
