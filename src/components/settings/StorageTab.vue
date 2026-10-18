@@ -1,3 +1,28 @@
+<script lang="ts" setup>
+import { ref } from "vue";
+
+import { Button } from "@/components/ui/button";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
+
+import SettingsField from "./SettingsField.vue";
+import SettingsSection from "./SettingsSection.vue";
+
+type StorageDuration = "day" | "week" | "month" | "year" | "forever";
+const durationOptions: { value: StorageDuration; label: string }[] = [
+  { value: "day", label: "1 day" },
+  { value: "week", label: "1 week" },
+  { value: "month", label: "1 month" },
+  { value: "year", label: "1 year" },
+  { value: "forever", label: "forever" },
+];
+
+// UI only for now: not persisted or wired to the backend yet
+const historyDuration = ref("forever");
+const maximumItems = ref("unlimited");
+</script>
 <template>
   <div class="mx-auto grid max-w-xl gap-y-6">
     <SettingsSection>
@@ -6,11 +31,14 @@
       <SettingsField>
         <template #label>Keep history for</template>
         <template #description>Older items are deleted automatically</template>
-        <NativeSelect v-model="historyDuration" size="sm">
-          <NativeSelectOption value="day">1 day</NativeSelectOption>
-          <NativeSelectOption value="week">1 week</NativeSelectOption>
-          <NativeSelectOption value="month">1 month</NativeSelectOption>
-          <NativeSelectOption value="forever">Forever</NativeSelectOption>
+        <NativeSelect class="capitalize!" v-model="historyDuration" size="sm">
+          <NativeSelectOption
+            class="capitalize!"
+            v-for="duration in durationOptions"
+            :value="duration.value"
+            :key="duration.value"
+            >{{ duration.label }}</NativeSelectOption
+          >
         </NativeSelect>
       </SettingsField>
 
@@ -29,7 +57,7 @@
     <SettingsSection>
       <template #section-title>Data</template>
 
-      <SettingsField>
+      <SettingsField disabled>
         <template #label>Data folder</template>
         <template #description>
           Where Teneo keeps your history and saved images
@@ -45,20 +73,3 @@
     </SettingsSection>
   </div>
 </template>
-
-<script lang="ts" setup>
-import { ref } from "vue";
-
-import { Button } from "@/components/ui/button";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/components/ui/native-select";
-
-import SettingsField from "./SettingsField.vue";
-import SettingsSection from "./SettingsSection.vue";
-
-// UI only for now: not persisted or wired to the backend yet
-const historyDuration = ref("forever");
-const maximumItems = ref("unlimited");
-</script>
