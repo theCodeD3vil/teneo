@@ -24,6 +24,7 @@ export default defineConfig({
       input: {
         main: path.resolve(import.meta.dirname, "index.html"),
         settings: path.resolve(import.meta.dirname, "settings.html"),
+        setup: path.resolve(import.meta.dirname, "setup.html"),
       },
     },
   },

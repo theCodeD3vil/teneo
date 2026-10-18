@@ -1065,8 +1065,19 @@ function startTrimmingClipboardHistory(app) {
   setInterval(trim, trimInterval);
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/windows.ts
+var showPanelEvent = "show-panel";
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/windows.ts
 var settingsWindowId = "settings";
+var setupWindowId = "setup";
+var dockWindowIds = [settingsWindowId, setupWindowId];
+var windowChrome = {
+  frame: false,
+  windowControls: true,
+  transparent: true,
+  vibrancy: "popover"
+};
 async function isSettingsWindowOpen(app) {
   return (await app.windows()).includes(settingsWindowId);
 }
@@ -1091,10 +1102,20 @@ async function hidePanel(app) {
   await waitForFocusToLeave(app, teneoProcessId);
   app.window(settingsWindowId).show({ activate: false });
 }
-async function openSettingsWindow(app) {
-  app.window("main").hide({ app: false });
+function showInDock(app) {
   app.presence("normal");
   if (tjs.env.TINYJS_ICON) app.icon(tjs.env.TINYJS_ICON);
+}
+async function leaveDockUnlessWindowOpen(app, closedWindowId) {
+  const openWindowIds = await app.windows();
+  const isOtherWindowOpen = dockWindowIds.some(
+    (windowId) => windowId !== closedWindowId && openWindowIds.includes(windowId)
+  );
+  if (!isOtherWindowOpen) app.presence("menubar");
+}
+async function openSettingsWindow(app) {
+  app.window("main").hide({ app: false });
+  showInDock(app);
   if (await isSettingsWindowOpen(app)) {
     app.window(settingsWindowId).show();
     return;
@@ -1103,16 +1124,39 @@ async function openSettingsWindow(app) {
     page: "settings.html",
     title: "Settings",
     size: "820x520",
-    chrome: {
-      frame: false,
-      windowControls: true,
-      transparent: true,
-      vibrancy: "popover"
-    }
+    chrome: windowChrome
   });
 }
-function handleSettingsWindowClosed(windowId, app) {
-  if (windowId === settingsWindowId) app.presence("menubar");
+function openSetupWindow(app) {
+  showInDock(app);
+  app.openWindow(setupWindowId, {
+    page: "setup.html",
+    title: "Welcome to Teneo",
+    size: "560x560",
+    chrome: windowChrome
+  });
+  app.window(setupWindowId).show();
+}
+async function closeSetupWindow(app) {
+  app.window(setupWindowId).close();
+  await leaveDockUnlessWindowOpen(app, setupWindowId);
+  app.window("main").push(showPanelEvent);
+}
+async function handleWindowClosed(windowId, app) {
+  if (dockWindowIds.includes(windowId)) {
+    await leaveDockUnlessWindowOpen(app, windowId);
+  }
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/setup.ts
+var setupCompleteStoreKey = "setupComplete";
+async function openSetupOnFirstLaunch(app) {
+  if (await app.store.get(setupCompleteStoreKey)) return;
+  openSetupWindow(app);
+}
+async function finishSetup(app) {
+  await app.store.set(setupCompleteStoreKey, true);
+  await closeSetupWindow(app);
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/main.ts
@@ -1124,6 +1168,7 @@ var api = {
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
+  finishSetup: (_parameters, app) => finishSetup(app),
   pauseOpenPanelShortcut: ({ paused }, app) => pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
@@ -1144,7 +1189,7 @@ async function onClipboardChange({ self }, app) {
   await trimClipboardHistory(app);
 }
 function onWindowClosed(windowId, app) {
-  handleSettingsWindowClosed(windowId, app);
+  void handleWindowClosed(windowId, app);
   pauseOpenPanelShortcut(false, app);
 }
 async function init(app) {
@@ -1154,6 +1199,7 @@ async function init(app) {
   startTrimmingClipboardHistory(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
+  await openSetupOnFirstLaunch(app);
 }
 export {
   api,

@@ -1,6 +1,5 @@
 <script lang="ts" setup>
-import { useEventListener } from "@vueuse/core";
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import AddIcon from "~icons/hugeicons/add-01";
 import CancelIcon from "~icons/hugeicons/cancel-01";
 import TickIcon from "~icons/hugeicons/tick-02";
@@ -18,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
 import { useExcludedApps } from "@/composables/useExcludedApps";
 import { useSettings } from "@/composables/useSettings";
 
@@ -26,21 +26,8 @@ import SettingsSection from "./SettingsSection.vue";
 
 const { settings, updateSettings } = useSettings();
 
-// Accessibility lets Teneo post ⌘V to paste into other apps
-const accessibilityStatus = ref<TinyPermissionStatus | null>(null);
-
-async function refreshAccessibilityStatus(): Promise<void> {
-  accessibilityStatus.value = await tiny.app.permissions.check("accessibility");
-}
-
-async function requestAccessibility(): Promise<void> {
-  await tiny.app.permissions.request("accessibility");
-  await refreshAccessibilityStatus();
-}
-
-onMounted(refreshAccessibilityStatus);
-// Access is granted in System Settings, so re-check when the user comes back
-useEventListener(window, "focus", refreshAccessibilityStatus);
+const { status: accessibilityStatus, request: requestAccessibility } =
+  useAccessibilityPermission();
 
 // Turning this off keeps passwords in history, so it asks first
 const isPasswordWarningOpen = ref(false);

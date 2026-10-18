@@ -21,11 +21,8 @@ import {
   trimClipboardHistory,
 } from "./history-limits";
 import { getSettings, loadSettings, updateSettings } from "./settings";
-import {
-  handleSettingsWindowClosed,
-  hidePanel,
-  openSettingsWindow,
-} from "./windows";
+import { finishSetup, openSetupOnFirstLaunch } from "./setup";
+import { handleWindowClosed, hidePanel, openSettingsWindow } from "./windows";
 
 export const api: Record<string, TinyApiHandler> = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
@@ -36,6 +33,7 @@ export const api: Record<string, TinyApiHandler> = {
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
+  finishSetup: (_parameters, app) => finishSetup(app),
   pauseOpenPanelShortcut: ({ paused }, app) =>
     pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
@@ -63,7 +61,7 @@ export async function onClipboardChange(
 }
 
 export function onWindowClosed(windowId: string, app: TinyApp) {
-  handleSettingsWindowClosed(windowId, app);
+  void handleWindowClosed(windowId, app);
   // settings may close mid-recording; bring the shortcut back
   pauseOpenPanelShortcut(false, app);
 }
@@ -75,4 +73,5 @@ export async function init(app: TinyApp) {
   startTrimmingClipboardHistory(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
+  await openSetupOnFirstLaunch(app);
 }

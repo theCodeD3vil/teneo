@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from "vue";
 
 import { openPanelHotkeyId } from "../shared/types/settings";
+import { showPanelEvent } from "../shared/types/windows";
 import HomeFooter from "./components/HomeFooter.vue";
 import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
@@ -15,12 +16,15 @@ const searchQuery = ref("");
 
 async function toggleWindow() {
   const windowState = await tiny.win.getState();
-  const trayPosition = await tiny.tray.position();
-
   if (windowState.visible) {
     await tiny.api.call("hidePanel");
     return;
   }
+  await showWindow();
+}
+
+async function showWindow() {
+  const trayPosition = await tiny.tray.position();
 
   //exit if we cant get the menubar icon position
   if (!trayPosition) return;
@@ -64,6 +68,8 @@ async function hideWindowOnBlur(): Promise<void> {
 let unsubscribeFromHotkeys: (() => void) | undefined;
 // Packaged builds check for updates shortly after launch ("update" in tinyjs.json)
 let unsubscribeFromUpdates: (() => void) | undefined;
+// Sent when the user finishes the first-launch setup window
+let unsubscribeFromShowPanel: (() => void) | undefined;
 
 onMounted(() => {
   window.addEventListener("blur", hideWindowOnBlur);
@@ -77,12 +83,14 @@ onMounted(() => {
     "update-available",
     promptToInstallUpdate,
   );
+  unsubscribeFromShowPanel = tiny.api.on(showPanelEvent, showWindow);
 });
 
 onUnmounted(() => {
   window.removeEventListener("blur", hideWindowOnBlur);
   unsubscribeFromHotkeys?.();
   unsubscribeFromUpdates?.();
+  unsubscribeFromShowPanel?.();
 });
 const clipboardItemsCount = ref(0);
 

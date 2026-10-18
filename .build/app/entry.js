@@ -38,7 +38,7 @@ const app = await createApp({
   apiAccess: null,
   inject: null,
   chrome: {"windowControls":false,"frame":false,"vibrancy":"popover","transparent":true},
-  update: null,
+  update: {"url":"https://github.com/theCodeD3vil/teneo/releases/latest/download/manifest.json","auto":"launch"},
   activation: "accessory",
   mainWindow: true,
   readAccess: null,

@@ -1,4 +1,17 @@
+import { showPanelEvent } from "../shared/types/windows";
+
 const settingsWindowId = "settings";
+const setupWindowId = "setup";
+// Teneo shows a Dock icon while either of these is open
+const dockWindowIds = [settingsWindowId, setupWindowId];
+
+// Same frame and material as the panel
+const windowChrome: TinyChromeOptions = {
+  frame: false,
+  windowControls: true,
+  transparent: true,
+  vibrancy: "popover",
+};
 
 async function isSettingsWindowOpen(app: TinyApp): Promise<boolean> {
   return (await app.windows()).includes(settingsWindowId);
@@ -47,13 +60,29 @@ export async function hidePanel(app: TinyApp): Promise<void> {
   app.window(settingsWindowId).show({ activate: false });
 }
 
-export async function openSettingsWindow(app: TinyApp): Promise<void> {
-  app.window("main").hide({ app: false });
-  // Show the Dock icon (the app icon, icon.png) while settings is open
+// Show the Dock icon (the app icon, icon.png)
+function showInDock(app: TinyApp): void {
   app.presence("normal");
   // Dev runs aren't a .app, so the new Dock tile shows a generic icon until
   // the project icon is re-applied. Only `tinyjs dev` sets TINYJS_ICON.
   if (tjs.env.TINYJS_ICON) app.icon(tjs.env.TINYJS_ICON);
+}
+
+async function leaveDockUnlessWindowOpen(
+  app: TinyApp,
+  closedWindowId: string,
+): Promise<void> {
+  const openWindowIds = await app.windows();
+  const isOtherWindowOpen = dockWindowIds.some(
+    (windowId) =>
+      windowId !== closedWindowId && openWindowIds.includes(windowId),
+  );
+  if (!isOtherWindowOpen) app.presence("menubar");
+}
+
+export async function openSettingsWindow(app: TinyApp): Promise<void> {
+  app.window("main").hide({ app: false });
+  showInDock(app);
 
   if (await isSettingsWindowOpen(app)) {
     app.window(settingsWindowId).show();
@@ -64,18 +93,36 @@ export async function openSettingsWindow(app: TinyApp): Promise<void> {
     page: "settings.html",
     title: "Settings",
     size: "820x520",
-    chrome: {
-      frame: false,
-      windowControls: true,
-      transparent: true,
-      vibrancy: "popover",
-    },
+    chrome: windowChrome,
   });
 }
 
-export function handleSettingsWindowClosed(
+export function openSetupWindow(app: TinyApp): void {
+  showInDock(app);
+  app.openWindow(setupWindowId, {
+    page: "setup.html",
+    title: "Welcome to Teneo",
+    size: "560x560",
+    chrome: windowChrome,
+  });
+  // An app launched without a Dock icon doesn't come to the front by itself
+  app.window(setupWindowId).show();
+}
+
+/** Close the setup window, then open the panel under the menu bar icon. */
+export async function closeSetupWindow(app: TinyApp): Promise<void> {
+  app.window(setupWindowId).close();
+  // Leave the Dock before the panel shows, so the switch can't take its focus
+  await leaveDockUnlessWindowOpen(app, setupWindowId);
+  // The panel positions itself under the tray icon, so it opens itself
+  app.window("main").push(showPanelEvent);
+}
+
+export async function handleWindowClosed(
   windowId: string,
   app: TinyApp,
-): void {
-  if (windowId === settingsWindowId) app.presence("menubar");
+): Promise<void> {
+  if (dockWindowIds.includes(windowId)) {
+    await leaveDockUnlessWindowOpen(app, windowId);
+  }
 }
