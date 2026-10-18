@@ -82,5 +82,7 @@ export async function init(app: TinyApp) {
   await initializeDatabase(app);
   startTrimmingClipboardHistory(app);
   app.setHideOnClose(true);
+  // Open the panel on the current Space, over full-screen apps too
+  app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
 }
