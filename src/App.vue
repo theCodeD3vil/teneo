@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 
+import { openPanelHotkeyId } from "../shared/types/settings";
 import HomeFooter from "./components/HomeFooter.vue";
 import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
@@ -58,15 +59,22 @@ async function hideWindowOnBlur(): Promise<void> {
   }
 }
 
+// The global shortcut set in Settings › Hotkeys toggles the panel like the tray icon
+let unsubscribeFromHotkeys: (() => void) | undefined;
+
 onMounted(() => {
   window.addEventListener("blur", hideWindowOnBlur);
   tiny.tray.onClick(async () => {
     await toggleWindow();
   });
+  unsubscribeFromHotkeys = tiny.api.on("hotkey", ({ id }: { id: string }) => {
+    if (id === openPanelHotkeyId) void toggleWindow();
+  });
 });
 
 onUnmounted(() => {
   window.removeEventListener("blur", hideWindowOnBlur);
+  unsubscribeFromHotkeys?.();
 });
 const clipboardItemsCount = ref(0);
 

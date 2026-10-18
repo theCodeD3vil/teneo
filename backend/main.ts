@@ -9,6 +9,10 @@ import {
 } from "./database";
 import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
 import { getFilePreview } from "./file-previews";
+import {
+  pauseOpenPanelShortcut,
+  syncOpenPanelShortcut,
+} from "./global-shortcut";
 import { getSettings, loadSettings, updateSettings } from "./settings";
 import {
   handleSettingsWindowClosed,
@@ -25,8 +29,14 @@ export const api: Record<string, TinyApiHandler> = {
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
+  pauseOpenPanelShortcut: ({ paused }, app) =>
+    pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
-  updateSettings: (changes, app) => updateSettings(changes, app),
+  updateSettings: async (changes, app) => {
+    const settings = await updateSettings(changes, app);
+    syncOpenPanelShortcut(app);
+    return settings;
+  },
 };
 
 // Defining this handler makes tinyjs start watching the clipboard.
@@ -41,10 +51,13 @@ export async function onClipboardChange(
 
 export function onWindowClosed(windowId: string, app: TinyApp) {
   handleSettingsWindowClosed(windowId, app);
+  // settings may close mid-recording; bring the shortcut back
+  pauseOpenPanelShortcut(false, app);
 }
 
 export async function init(app: TinyApp) {
   await loadSettings(app);
+  syncOpenPanelShortcut(app);
   await initializeDatabase(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);

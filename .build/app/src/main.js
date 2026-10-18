@@ -530,8 +530,10 @@ function splitWhitespace(value) {
 var defaultSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
-  excludedApps: []
+  excludedApps: [],
+  openPanelShortcut: ""
 };
+var openPanelHotkeyId = "open-panel";
 var settingsChangedEvent = "settings-changed";
 function pickSettings(value) {
   if (typeof value !== "object" || value === null) return {};
@@ -879,6 +881,23 @@ async function getFilePreview(path, app) {
   }
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/global-shortcut.ts
+var SHORTCUT_PATTERN = /^[a-z0-9+]+$/;
+var registeredShortcut = "";
+var isPaused = false;
+function syncOpenPanelShortcut(app) {
+  const shortcut = isPaused ? "" : getSettings().openPanelShortcut;
+  const validShortcut = SHORTCUT_PATTERN.test(shortcut) ? shortcut : "";
+  if (validShortcut === registeredShortcut) return;
+  if (registeredShortcut) app.hotkey.unregister(openPanelHotkeyId);
+  if (validShortcut) app.hotkey.register(openPanelHotkeyId, validShortcut);
+  registeredShortcut = validShortcut;
+}
+function pauseOpenPanelShortcut(paused, app) {
+  isPaused = paused === true;
+  syncOpenPanelShortcut(app);
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/windows.ts
 var settingsWindowId = "settings";
 async function isSettingsWindowOpen(app) {
@@ -938,8 +957,13 @@ var api = {
   filePreview: ({ path }, app) => getFilePreview(path, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
+  pauseOpenPanelShortcut: ({ paused }, app) => pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
-  updateSettings: (changes, app) => updateSettings(changes, app)
+  updateSettings: async (changes, app) => {
+    const settings = await updateSettings(changes, app);
+    syncOpenPanelShortcut(app);
+    return settings;
+  }
 };
 async function onClipboardChange({ self }, app) {
   if (self) return;
@@ -948,9 +972,11 @@ async function onClipboardChange({ self }, app) {
 }
 function onWindowClosed(windowId, app) {
   handleSettingsWindowClosed(windowId, app);
+  pauseOpenPanelShortcut(false, app);
 }
 async function init(app) {
   await loadSettings(app);
+  syncOpenPanelShortcut(app);
   await initializeDatabase(app);
   app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);

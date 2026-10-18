@@ -5,8 +5,15 @@
 
       <SettingsField>
         <template #label>Open Teneo</template>
-        <template #description>Show the clipboard panel from any app</template>
-        <Button variant="outline" size="sm">Record shortcut</Button>
+        <template #description>
+          <span v-if="recordingError" class="text-destructive">
+            {{ recordingError }}
+          </span>
+          <template v-else>Show the clipboard panel from any app</template>
+        </template>
+        <ShortcutRecorder
+          v-model="openPanelShortcut"
+          @error="recordingError = $event" />
       </SettingsField>
     </SettingsSection>
 
@@ -26,10 +33,22 @@
 </template>
 
 <script lang="ts" setup>
-import { Button } from "@/components/ui/button";
+import { computed, ref } from "vue";
+
 import { Kbd } from "@/components/ui/kbd";
+import { useSettings } from "@/composables/useSettings";
 import { hotkeyDefinitions } from "@/constants/hotkeys";
 
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
+import ShortcutRecorder from "./ShortcutRecorder.vue";
+
+const { settings, updateSettings } = useSettings();
+
+const openPanelShortcut = computed({
+  get: () => settings.value.openPanelShortcut,
+  set: (shortcut) => updateSettings({ openPanelShortcut: shortcut }),
+});
+
+const recordingError = ref<string | null>(null);
 </script>

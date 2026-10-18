@@ -7,13 +7,21 @@ export interface AppSettings {
   /** bundle ids of apps the user added to the ignore list; known password
    *  managers are built in and never stored here */
   excludedApps: string[];
+  /** global shortcut that opens the panel, as a tinyjs combo such as
+   *  "ctrl+opt+v"; "" = none */
+  openPanelShortcut: string;
 }
 
 export const defaultSettings: AppSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
   excludedApps: [],
+  openPanelShortcut: "",
 };
+
+/** tinyjs hotkey id of the open-panel shortcut; presses arrive as a
+ *  "hotkey" event carrying this id */
+export const openPanelHotkeyId = "open-panel";
 
 /** An app whose copies are kept out of clipboard history. */
 export interface ExcludedApp {
