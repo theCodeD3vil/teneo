@@ -51,6 +51,9 @@ export async function openSettingsWindow(app: TinyApp): Promise<void> {
   app.window("main").hide({ app: false });
   // Show the Dock icon (the app icon, icon.png) while settings is open
   app.presence("normal");
+  // Dev runs aren't a .app, so the new Dock tile shows a generic icon until
+  // the project icon is re-applied. Only `tinyjs dev` sets TINYJS_ICON.
+  if (tjs.env.TINYJS_ICON) app.icon(tjs.env.TINYJS_ICON);
 
   if (await isSettingsWindowOpen(app)) {
     app.window(settingsWindowId).show();

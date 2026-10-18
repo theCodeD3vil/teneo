@@ -796,6 +796,7 @@ async function hidePanel(app) {
 async function openSettingsWindow(app) {
   app.window("main").hide({ app: false });
   app.presence("normal");
+  if (tjs.env.TINYJS_ICON) app.icon(tjs.env.TINYJS_ICON);
   if (await isSettingsWindowOpen(app)) {
     app.window(settingsWindowId).show();
     return;
