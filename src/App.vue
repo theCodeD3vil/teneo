@@ -7,6 +7,7 @@ import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
 import { useHotkeys } from "./composables/useHotkeys";
 import { PANEL_WIDTH } from "./constants/system";
+import { promptToInstallUpdate } from "./utils/updates";
 
 const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const tabManager = ref<InstanceType<typeof TabManager> | null>(null);
@@ -61,6 +62,8 @@ async function hideWindowOnBlur(): Promise<void> {
 
 // The global shortcut set in Settings › Hotkeys toggles the panel like the tray icon
 let unsubscribeFromHotkeys: (() => void) | undefined;
+// Packaged builds check for updates shortly after launch ("update" in tinyjs.json)
+let unsubscribeFromUpdates: (() => void) | undefined;
 
 onMounted(() => {
   window.addEventListener("blur", hideWindowOnBlur);
@@ -70,11 +73,16 @@ onMounted(() => {
   unsubscribeFromHotkeys = tiny.api.on("hotkey", ({ id }: { id: string }) => {
     if (id === openPanelHotkeyId) void toggleWindow();
   });
+  unsubscribeFromUpdates = tiny.api.on(
+    "update-available",
+    promptToInstallUpdate,
+  );
 });
 
 onUnmounted(() => {
   window.removeEventListener("blur", hideWindowOnBlur);
   unsubscribeFromHotkeys?.();
+  unsubscribeFromUpdates?.();
 });
 const clipboardItemsCount = ref(0);
 
