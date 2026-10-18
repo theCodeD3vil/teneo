@@ -2,6 +2,7 @@ import { showPanelEvent } from "../shared/types/windows";
 
 const settingsWindowId = "settings";
 export const setupWindowId = "setup";
+const updateWindowId = "update";
 // Teneo shows a Dock icon while either of these is open
 const dockWindowIds = [settingsWindowId, setupWindowId];
 
@@ -121,6 +122,43 @@ export async function openSetupWindow(app: TinyApp): Promise<void> {
   }
   // An app launched without a Dock icon doesn't come to the front by itself
   app.window(setupWindowId).show();
+}
+
+let availableUpdate: TinyUpdateInfo | null = null;
+
+// The page reads this once it loads
+export function getAvailableUpdate(): TinyUpdateInfo | null {
+  return availableUpdate;
+}
+
+/** Ask to install an update, in Teneo's own window rather than a native alert. */
+export async function openUpdateWindow(
+  update: TinyUpdateInfo,
+  app: TinyApp,
+): Promise<void> {
+  availableUpdate = update;
+  if (!(await isWindowOpen(app, updateWindowId))) {
+    app.openWindow(updateWindowId, {
+      page: "update.html",
+      title: `Teneo ${update.latest} is available`,
+      size: "480x460",
+      chrome: { ...windowChrome, windowControls: false },
+    });
+    // Like an alert: above other apps, and on any Space or full-screen app
+    app.window(updateWindowId).setLevel("floating");
+    app.window(updateWindowId).setAllSpaces(true);
+  }
+  app.window(updateWindowId).show();
+}
+
+export async function closeUpdateWindow(app: TinyApp): Promise<void> {
+  app.window(updateWindowId).close();
+  const isOnScreen = await Promise.all(
+    dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId)),
+  );
+  // Focus moves to Settings or setup by itself; otherwise hand it back to
+  // the app the user was in. A bare hide() on main hides the whole app.
+  if (!isOnScreen.includes(true)) app.window("main").hide();
 }
 
 export async function closeSetupWindow(app: TinyApp): Promise<void> {
