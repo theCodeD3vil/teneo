@@ -102,16 +102,22 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/notes.md"
 
-      # One runner builds both CPUs; each publish merges its zip into one
-      # manifest.json. Apple's timestamp server, which codesign calls, drops
-      # the odd request, hence one retry per command.
+      # One runner builds both CPUs. Each publish builds the app, its dmg and
+      # its zip, and merges the zip into one manifest.json. The frontend
+      # build (Vite) empties dist/ at the start of every publish, so each dmg
+      # moves out before the next one; publish keeps dist/publish safe itself.
+      # Apple's timestamp server, which codesign calls, drops the odd request,
+      # hence one retry per publish.
       - name: Build and package
         run: |
           retry() { "$@" || "$@"; }
+          mkdir "$RUNNER_TEMP/dmg"
           for arch in arm64 x86_64; do
-            retry tinyjs build --arch "$arch" --dmg
-            retry tinyjs publish --arch "$arch" --notes-file "$RUNNER_TEMP/notes.md"
+            retry tinyjs publish --arch "$arch" --dmg --notes-file "$RUNNER_TEMP/notes.md"
+            mv dist/*.dmg "$RUNNER_TEMP/dmg/"
           done
+          # Installed apps only update from the manifest: both CPUs must be in it
+          jq -e '.mac.arm64 and .mac.x86_64' dist/publish/manifest.json > /dev/null
           # tinyjs points the zips at update.url's folder (releases/latest);
           # pin them to this release's tag instead
           sed -i '' "s#/releases/latest/download/#/releases/download/v$VERSION/#" dist/publish/manifest.json
@@ -125,7 +131,7 @@ jobs:
             --target "$MERGE_COMMIT" \
             --title "Teneo $VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            dist/*.dmg dist/publish/*.zip dist/publish/manifest.json
+            "$RUNNER_TEMP"/dmg/*.dmg dist/publish/*.zip dist/publish/manifest.json
 
       # A dead link here is an updater failing silently on users' Macs
       - name: Verify update links
