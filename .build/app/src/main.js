@@ -1071,6 +1071,7 @@ var showPanelEvent = "show-panel";
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/windows.ts
 var settingsWindowId = "settings";
 var setupWindowId = "setup";
+var updateWindowId = "update";
 var dockWindowIds = [settingsWindowId, setupWindowId];
 var windowChrome = {
   frame: false,
@@ -1146,6 +1147,31 @@ async function openSetupWindow(app) {
   }
   app.window(setupWindowId).show();
 }
+var availableUpdate = null;
+function getAvailableUpdate() {
+  return availableUpdate;
+}
+async function openUpdateWindow(update, app) {
+  availableUpdate = update;
+  if (!await isWindowOpen(app, updateWindowId)) {
+    app.openWindow(updateWindowId, {
+      page: "update.html",
+      title: `Teneo ${update.latest} is available`,
+      size: "480x460",
+      chrome: { ...windowChrome, windowControls: false }
+    });
+    app.window(updateWindowId).setLevel("floating");
+    app.window(updateWindowId).setAllSpaces(true);
+  }
+  app.window(updateWindowId).show();
+}
+async function closeUpdateWindow(app) {
+  app.window(updateWindowId).close();
+  const isOnScreen = await Promise.all(
+    dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId))
+  );
+  if (!isOnScreen.includes(true)) app.window("main").hide();
+}
 async function closeSetupWindow(app) {
   const teneoProcessId = (await app.frontmostApp())?.pid;
   app.window(setupWindowId).close();
@@ -1212,6 +1238,9 @@ var api = {
   openSettings: (_parameters, app) => openSettingsWindow(app),
   finishSetup: (_parameters, app) => finishSetup(app),
   openSetup: (_parameters, app) => openSetupWindow(app),
+  openUpdate: (update, app) => openUpdateWindow(update, app),
+  availableUpdate: () => getAvailableUpdate(),
+  closeUpdate: (_parameters, app) => closeUpdateWindow(app),
   pauseOpenPanelShortcut: ({ paused }, app) => pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
@@ -1243,6 +1272,16 @@ async function init(app) {
   app.setHideOnClose(true);
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  await previewUpdateWindow(app);
+}
+async function previewUpdateWindow(app) {
+  const notesPath = tjs.env.TENEO_PREVIEW_UPDATE;
+  if (!notesPath) return;
+  const notes = new TextDecoder().decode(await tjs.readFile(notesPath));
+  await openUpdateWindow(
+    { current: app.info.version, latest: "9.9.9", notes },
+    app
+  );
 }
 export {
   api,

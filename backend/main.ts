@@ -27,10 +27,13 @@ import {
   showMenuBarOrSetup,
 } from "./setup";
 import {
+  closeUpdateWindow,
+  getAvailableUpdate,
   handleWindowClosed,
   hidePanel,
   openSettingsWindow,
   openSetupWindow,
+  openUpdateWindow,
 } from "./windows";
 
 export const api: Record<string, TinyApiHandler> = {
@@ -44,6 +47,9 @@ export const api: Record<string, TinyApiHandler> = {
   openSettings: (_parameters, app) => openSettingsWindow(app),
   finishSetup: (_parameters, app) => finishSetup(app),
   openSetup: (_parameters, app) => openSetupWindow(app),
+  openUpdate: (update, app) => openUpdateWindow(update, app),
+  availableUpdate: () => getAvailableUpdate(),
+  closeUpdate: (_parameters, app) => closeUpdateWindow(app),
   pauseOpenPanelShortcut: ({ paused }, app) =>
     pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
@@ -85,4 +91,17 @@ export async function init(app: TinyApp) {
   // Open the panel on the current Space, over full-screen apps too
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  await previewUpdateWindow(app);
+}
+
+// Dev runs never find updates. `TENEO_PREVIEW_UPDATE=notes.md tinyjs dev`
+// opens the update window with that file as the release notes.
+async function previewUpdateWindow(app: TinyApp): Promise<void> {
+  const notesPath = tjs.env.TENEO_PREVIEW_UPDATE;
+  if (!notesPath) return;
+  const notes = new TextDecoder().decode(await tjs.readFile(notesPath));
+  await openUpdateWindow(
+    { current: app.info.version, latest: "9.9.9", notes },
+    app,
+  );
 }
