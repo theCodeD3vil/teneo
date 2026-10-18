@@ -1067,6 +1067,7 @@ function startTrimmingClipboardHistory(app) {
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/windows.ts
 var showPanelEvent = "show-panel";
+var updateProgressEvent = "update-progress";
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/windows.ts
 var settingsWindowId = "settings";
@@ -1227,6 +1228,49 @@ async function quitIfSetupClosedEarly(windowId, app) {
   if (windowId === setupWindowId && !await isSetupComplete(app)) app.quit();
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/updates.ts
+var progressIntervalMs = 100;
+function sendProgress(progress, app) {
+  app.window(updateWindowId).push(updateProgressEvent, progress);
+}
+function trackDownload(response, app) {
+  const total = Number(response.headers.get("content-length")) || null;
+  let received = 0;
+  let lastSentAt = 0;
+  const countedBody = response.body.pipeThrough(
+    new TransformStream({
+      transform(chunk, controller) {
+        received += chunk.byteLength;
+        if (Date.now() - lastSentAt >= progressIntervalMs) {
+          lastSentAt = Date.now();
+          sendProgress({ received, total }, app);
+        }
+        controller.enqueue(chunk);
+      },
+      // Everything has arrived, so the size is known even without a header
+      flush() {
+        sendProgress({ received, total: received }, app);
+      }
+    })
+  );
+  response.arrayBuffer = () => new Response(countedBody).arrayBuffer();
+}
+async function installUpdate(app) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init2) => {
+    const response = await originalFetch(input, init2);
+    if (String(input).endsWith(".zip") && response.body) {
+      trackDownload(response, app);
+    }
+    return response;
+  };
+  try {
+    await app.update.install();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/main.ts
 var api = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
@@ -1241,6 +1285,7 @@ var api = {
   openUpdate: (update, app) => openUpdateWindow(update, app),
   availableUpdate: () => getAvailableUpdate(),
   closeUpdate: (_parameters, app) => closeUpdateWindow(app),
+  installUpdate: (_parameters, app) => installUpdate(app),
   pauseOpenPanelShortcut: ({ paused }, app) => pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
