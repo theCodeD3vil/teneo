@@ -172,7 +172,7 @@ async function copyToClipboard(
 
   try {
     await tiny.clipboard.write(clipboardData);
-    if (hideWindow) await tiny.win.hide();
+    if (hideWindow) await tiny.api.call("hidePanel");
     // after the hide, focus is back in the app the user was typing in
     if (paste) await pasteIntoFrontmostApp();
   } finally {

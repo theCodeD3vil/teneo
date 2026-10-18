@@ -8,11 +8,18 @@ import {
   saveClipboardItem,
 } from "./database";
 import { getFilePreview } from "./file-previews";
+import {
+  handleSettingsWindowClosed,
+  hidePanel,
+  openSettingsWindow,
+} from "./windows";
 
 export const api: Record<string, TinyApiHandler> = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
+  hidePanel: (_parameters, app) => hidePanel(app),
+  openSettings: (_parameters, app) => openSettingsWindow(app),
 };
 
 // Defining this handler makes tinyjs start watching the clipboard.
@@ -23,6 +30,10 @@ export async function onClipboardChange(
   if (self) return; // our own write, e.g. pasting a history item back
   const item = await readClipboardItem(app);
   if (item) await saveClipboardItem(item, app);
+}
+
+export function onWindowClosed(windowId: string, app: TinyApp) {
+  handleSettingsWindowClosed(windowId, app);
 }
 
 export async function init(app: TinyApp) {

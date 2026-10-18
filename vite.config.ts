@@ -18,4 +18,13 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
+  // each html file is its own window
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(import.meta.dirname, "index.html"),
+        settings: path.resolve(import.meta.dirname, "settings.html"),
+      },
+    },
+  },
 });

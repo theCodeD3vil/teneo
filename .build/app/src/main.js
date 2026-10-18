@@ -767,16 +767,70 @@ async function getFilePreview(path, app) {
   }
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/windows.ts
+var settingsWindowId = "settings";
+async function isSettingsWindowOpen(app) {
+  return (await app.windows()).includes(settingsWindowId);
+}
+async function isSettingsWindowOnScreen(app) {
+  if (!await isSettingsWindowOpen(app)) return false;
+  const state = await app.window(settingsWindowId).getState();
+  return Boolean(state?.visible && !state.minimized);
+}
+async function waitForFocusToLeave(app, teneoProcessId) {
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline && (await app.frontmostApp())?.pid === teneoProcessId) {
+    await new Promise((resolve) => setTimeout(resolve, 16));
+  }
+}
+async function hidePanel(app) {
+  const panel = app.window("main");
+  const keepSettingsOnScreen = await isSettingsWindowOnScreen(app);
+  const teneoProcessId = keepSettingsOnScreen ? (await app.frontmostApp())?.pid : void 0;
+  panel.hide({ app: false });
+  panel.hide();
+  if (!keepSettingsOnScreen) return;
+  await waitForFocusToLeave(app, teneoProcessId);
+  app.window(settingsWindowId).show({ activate: false });
+}
+async function openSettingsWindow(app) {
+  app.window("main").hide({ app: false });
+  app.presence("normal");
+  if (await isSettingsWindowOpen(app)) {
+    app.window(settingsWindowId).show();
+    return;
+  }
+  app.openWindow(settingsWindowId, {
+    page: "settings.html",
+    title: "Settings",
+    size: "820x520",
+    chrome: {
+      frame: false,
+      windowControls: true,
+      transparent: true,
+      vibrancy: "popover"
+    }
+  });
+}
+function handleSettingsWindowClosed(windowId, app) {
+  if (windowId === settingsWindowId) app.presence("menubar");
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/main.ts
 var api = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
-  filePreview: ({ path }, app) => getFilePreview(path, app)
+  filePreview: ({ path }, app) => getFilePreview(path, app),
+  hidePanel: (_parameters, app) => hidePanel(app),
+  openSettings: (_parameters, app) => openSettingsWindow(app)
 };
 async function onClipboardChange({ self }, app) {
   if (self) return;
   const item = await readClipboardItem(app);
   if (item) await saveClipboardItem(item, app);
+}
+function onWindowClosed(windowId, app) {
+  handleSettingsWindowClosed(windowId, app);
 }
 async function init(app) {
   await initializeDatabase(app);
@@ -786,5 +840,6 @@ async function init(app) {
 export {
   api,
   init,
-  onClipboardChange
+  onClipboardChange,
+  onWindowClosed
 };

@@ -14,6 +14,10 @@ defineProps<{
 }>();
 
 const { hotkeyProgress } = useHotkeyPreview();
+
+function openSettings(): void {
+  void tiny.api.call("openSettings");
+}
 </script>
 <template>
   <div class="flex items-center justify-between gap-4 p-1">
@@ -50,7 +54,8 @@ const { hotkeyProgress } = useHotkeyPreview();
     <Button
       variant="ghost"
       size="icon"
-      class="hover:bg-foreground/5! text-foreground/70 hover:text-foreground">
+      class="hover:bg-foreground/5! text-foreground/70 hover:text-foreground"
+      @click="openSettings">
       <Settings />
     </Button>
   </div>

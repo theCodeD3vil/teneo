@@ -16,7 +16,7 @@ async function toggleWindow() {
   const trayPosition = await tiny.tray.position();
 
   if (windowState.visible) {
-    await tiny.win.hide();
+    await tiny.api.call("hidePanel");
     return;
   }
 
@@ -50,8 +50,12 @@ async function isCursorOverTray(): Promise<boolean> {
 
 async function hideWindowOnBlur(): Promise<void> {
   const windowState = await tiny.win.getState();
-  // Clicking the tray icon also blurs the window; the tray click handles closing
-  if (windowState.visible && !(await isCursorOverTray())) await tiny.win.hide();
+  // Clicking the tray icon also blurs the window; the tray click handles closing.
+  // Focus already left, so hide only the panel: a bare hide() hides the whole
+  // app, settings window included.
+  if (windowState.visible && !(await isCursorOverTray())) {
+    await tiny.win.hide({ app: false });
+  }
 }
 
 onMounted(() => {

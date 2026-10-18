@@ -3,8 +3,8 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { getHotkeyProgress, type HotkeyProgress } from "@/constants/hotkeys";
 import { blocksHotkeys } from "@/utils/keyboard";
 
-const partialHotkeyTimeout = 5_000;
-const completedHotkeyTimeout = 1500;
+const PARTIAL_HOTKEY_TIMEOUT = 5_000;
+const COMPLETED_HOTKEY_TIMEOUT = 1500;
 
 export function useHotkeyPreview() {
   const hotkeyProgress = ref<HotkeyProgress | null>(null);
@@ -29,8 +29,8 @@ export function useHotkeyPreview() {
     hotkeyProgress.value = progress;
     scheduleHotkeyPreviewReset(
       progress.state === "complete"
-        ? completedHotkeyTimeout
-        : partialHotkeyTimeout,
+        ? COMPLETED_HOTKEY_TIMEOUT
+        : PARTIAL_HOTKEY_TIMEOUT,
     );
   }
 
