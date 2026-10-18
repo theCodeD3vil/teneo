@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { onKeyStroke } from "@vueuse/core";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Spinner } from "@/components/ui/spinner";
+import { formatFileSize } from "@/utils/file-size";
 
+import {
+  type UpdateProgress,
+  updateProgressEvent,
+} from "../../shared/types/windows";
 import ReleaseNotes from "./ReleaseNotes.vue";
 
 const update = ref<TinyUpdateInfo | null>(null);
@@ -15,6 +19,23 @@ void tiny.api
 
 const isInstalling = ref(false);
 const didInstallFail = ref(false);
+
+const progress = ref<UpdateProgress | null>(null);
+tiny.api.on(updateProgressEvent, (update: UpdateProgress) => {
+  progress.value = update;
+});
+
+// After the download, the new version is checked and moved into place
+const isDownloaded = computed(
+  () =>
+    progress.value?.total != null &&
+    progress.value.received >= progress.value.total,
+);
+// null shows a moving bar: still connecting, size unknown, or installing
+const downloadPercent = computed(() => {
+  if (!progress.value?.total || isDownloaded.value) return null;
+  return (progress.value.received / progress.value.total) * 100;
+});
 
 function remindLater(): void {
   if (isInstalling.value) return;
@@ -27,10 +48,11 @@ async function install(): Promise<void> {
   didInstallFail.value = false;
   try {
     // Downloads and checks the new version, then relaunches into it
-    await tiny.api.call("update.install");
+    await tiny.api.call("installUpdate");
   } catch {
     didInstallFail.value = true;
     isInstalling.value = false;
+    progress.value = null;
   }
 }
 
@@ -67,21 +89,61 @@ onKeyStroke("Escape", (event) => {
       <ReleaseNotes :markdown="update.notes" class="px-5 py-4" />
     </ScrollArea>
 
-    <footer class="mt-auto flex shrink-0 items-center gap-x-2 pt-5">
-      <p v-if="didInstallFail" class="text-destructive text-xs">
-        Couldn't install the update. Try again later.
-      </p>
-      <Button
-        variant="secondary"
-        class="ml-auto"
-        :disabled="isInstalling"
-        @click="remindLater">
-        Later
-      </Button>
-      <Button :disabled="isInstalling" @click="install">
-        <template v-if="isInstalling"><Spinner /> Installing…</template>
-        <template v-else>Install and Relaunch</template>
-      </Button>
+    <!-- same height in both states, so the notes don't jump -->
+    <footer class="mt-auto flex h-14 shrink-0 items-end">
+      <div
+        v-if="isInstalling"
+        class="flex h-9 w-full flex-col justify-center gap-y-2">
+        <div class="text-foreground/60 flex justify-between text-xs">
+          <span>{{ isDownloaded ? "Installing…" : "Downloading…" }}</span>
+          <span v-if="progress && !isDownloaded" class="tabular-nums">
+            {{ formatFileSize(progress.received) }}
+            <template v-if="progress.total">
+              of {{ formatFileSize(progress.total) }}
+            </template>
+          </span>
+        </div>
+        <div
+          role="progressbar"
+          aria-label="Update progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="downloadPercent ?? undefined"
+          class="bg-foreground/10 h-1.5 overflow-hidden rounded-full">
+          <div
+            v-if="downloadPercent !== null"
+            class="bg-primary h-full rounded-full transition-[width] duration-200 ease-out"
+            :style="{ width: `${downloadPercent}%` }" />
+          <div
+            v-else
+            class="indeterminate bg-primary h-full w-2/5 rounded-full" />
+        </div>
+      </div>
+
+      <div v-else class="flex w-full items-center gap-x-2">
+        <p v-if="didInstallFail" class="text-destructive text-xs">
+          Couldn't install the update. Try again later.
+        </p>
+        <Button variant="secondary" class="ml-auto" @click="remindLater">
+          Later
+        </Button>
+        <Button @click="install">Install and Relaunch</Button>
+      </div>
     </footer>
   </div>
 </template>
+
+<style scoped>
+/* A segment sweeping across while there's no percentage to show */
+.indeterminate {
+  animation: sweep 1.4s ease-in-out infinite;
+}
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+</style>

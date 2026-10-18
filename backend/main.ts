@@ -26,6 +26,7 @@ import {
   quitIfSetupClosedEarly,
   showMenuBarOrSetup,
 } from "./setup";
+import { installUpdate } from "./updates";
 import {
   closeUpdateWindow,
   getAvailableUpdate,
@@ -50,6 +51,7 @@ export const api: Record<string, TinyApiHandler> = {
   openUpdate: (update, app) => openUpdateWindow(update, app),
   availableUpdate: () => getAvailableUpdate(),
   closeUpdate: (_parameters, app) => closeUpdateWindow(app),
+  installUpdate: (_parameters, app) => installUpdate(app),
   pauseOpenPanelShortcut: ({ paused }, app) =>
     pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),

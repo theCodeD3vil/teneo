@@ -2,7 +2,7 @@ import { showPanelEvent } from "../shared/types/windows";
 
 const settingsWindowId = "settings";
 export const setupWindowId = "setup";
-const updateWindowId = "update";
+export const updateWindowId = "update";
 // Teneo shows a Dock icon while either of these is open
 const dockWindowIds = [settingsWindowId, setupWindowId];
 
