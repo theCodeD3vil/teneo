@@ -1,7 +1,7 @@
 import { showPanelEvent } from "../shared/types/windows";
 
 const settingsWindowId = "settings";
-const setupWindowId = "setup";
+export const setupWindowId = "setup";
 // Teneo shows a Dock icon while either of these is open
 const dockWindowIds = [settingsWindowId, setupWindowId];
 
@@ -13,13 +13,16 @@ const windowChrome: TinyChromeOptions = {
   vibrancy: "popover",
 };
 
-async function isSettingsWindowOpen(app: TinyApp): Promise<boolean> {
-  return (await app.windows()).includes(settingsWindowId);
+async function isWindowOpen(app: TinyApp, windowId: string): Promise<boolean> {
+  return (await app.windows()).includes(windowId);
 }
 
-async function isSettingsWindowOnScreen(app: TinyApp): Promise<boolean> {
-  if (!(await isSettingsWindowOpen(app))) return false;
-  const state = await app.window(settingsWindowId).getState();
+async function isWindowOnScreen(
+  app: TinyApp,
+  windowId: string,
+): Promise<boolean> {
+  if (!(await isWindowOpen(app, windowId))) return false;
+  const state = await app.window(windowId).getState();
   return Boolean(state?.visible && !state.minimized);
 }
 
@@ -39,13 +42,16 @@ async function waitForFocusToLeave(
 
 /**
  * Put the panel away and hand focus back to the app the user came from,
- * leaving the settings window on screen.
+ * leaving the settings and setup windows on screen.
  */
 export async function hidePanel(app: TinyApp): Promise<void> {
   const panel = app.window("main");
-  const keepSettingsOnScreen = await isSettingsWindowOnScreen(app);
+  const isOnScreen = await Promise.all(
+    dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId)),
+  );
+  const windowIdsToKeep = dockWindowIds.filter((_, index) => isOnScreen[index]);
   // The panel has focus, so the frontmost app is Teneo
-  const teneoProcessId = keepSettingsOnScreen
+  const teneoProcessId = windowIdsToKeep.length
     ? (await app.frontmostApp())?.pid
     : undefined;
 
@@ -53,11 +59,13 @@ export async function hidePanel(app: TinyApp): Promise<void> {
   panel.hide({ app: false });
   // A bare hide() on main hides the whole app: macOS refocuses the previous app
   panel.hide();
-  if (!keepSettingsOnScreen) return;
+  if (!windowIdsToKeep.length) return;
 
-  // Showing settings before that hand-off finishes keeps focus in Teneo
+  // Showing them before that hand-off finishes keeps focus in Teneo
   await waitForFocusToLeave(app, teneoProcessId);
-  app.window(settingsWindowId).show({ activate: false });
+  for (const windowId of windowIdsToKeep) {
+    app.window(windowId).show({ activate: false });
+  }
 }
 
 // Show the Dock icon (the app icon, icon.png)
@@ -68,23 +76,26 @@ function showInDock(app: TinyApp): void {
   if (tjs.env.TINYJS_ICON) app.icon(tjs.env.TINYJS_ICON);
 }
 
+/** Returns whether Teneo left the Dock. */
 async function leaveDockUnlessWindowOpen(
   app: TinyApp,
   closedWindowId: string,
-): Promise<void> {
+): Promise<boolean> {
   const openWindowIds = await app.windows();
   const isOtherWindowOpen = dockWindowIds.some(
     (windowId) =>
       windowId !== closedWindowId && openWindowIds.includes(windowId),
   );
-  if (!isOtherWindowOpen) app.presence("menubar");
+  if (isOtherWindowOpen) return false;
+  app.presence("menubar");
+  return true;
 }
 
 export async function openSettingsWindow(app: TinyApp): Promise<void> {
   app.window("main").hide({ app: false });
   showInDock(app);
 
-  if (await isSettingsWindowOpen(app)) {
+  if (await isWindowOpen(app, settingsWindowId)) {
     app.window(settingsWindowId).show();
     return;
   }
@@ -97,24 +108,64 @@ export async function openSettingsWindow(app: TinyApp): Promise<void> {
   });
 }
 
-export function openSetupWindow(app: TinyApp): void {
+// Opens at first launch, and again from the banner in Settings
+export async function openSetupWindow(app: TinyApp): Promise<void> {
   showInDock(app);
-  app.openWindow(setupWindowId, {
-    page: "setup.html",
-    title: "Welcome to Teneo",
-    size: "560x560",
-    chrome: windowChrome,
-  });
+  if (!(await isWindowOpen(app, setupWindowId))) {
+    app.openWindow(setupWindowId, {
+      page: "setup.html",
+      title: "Welcome to Teneo",
+      size: "560x560",
+      chrome: windowChrome,
+    });
+  }
   // An app launched without a Dock icon doesn't come to the front by itself
   app.window(setupWindowId).show();
 }
 
-/** Close the setup window, then open the panel under the menu bar icon. */
 export async function closeSetupWindow(app: TinyApp): Promise<void> {
+  // The setup window has focus, so the frontmost app is Teneo
+  const teneoProcessId = (await app.frontmostApp())?.pid;
   app.window(setupWindowId).close();
-  // Leave the Dock before the panel shows, so the switch can't take its focus
-  await leaveDockUnlessWindowOpen(app, setupWindowId);
-  // The panel positions itself under the tray icon, so it opens itself
+  // Leaving the Dock makes macOS hand focus to another app a moment later. A
+  // panel shown before that loses focus and hides itself, so wait it out.
+  if (await leaveDockUnlessWindowOpen(app, setupWindowId)) {
+    await waitForFocusToLeave(app, teneoProcessId);
+  }
+}
+
+type TrayRect = Awaited<ReturnType<TinyApp["tray"]["position"]>>;
+
+function isSameRect(rect: TrayRect, other: TrayRect): boolean {
+  return (
+    rect?.x === other?.x &&
+    rect?.y === other?.y &&
+    rect?.width === other?.width &&
+    rect?.height === other?.height
+  );
+}
+
+/** Wait for a menu bar icon added a moment ago to take its place. */
+async function waitForTrayToSettle(app: TinyApp): Promise<boolean> {
+  // A new icon first reports a zero-height placeholder at the bottom of the
+  // screen, then slides up into the menu bar (~350ms)
+  const deadline = Date.now() + 2000;
+  let previousRect: TrayRect = null;
+  while (Date.now() < deadline) {
+    const rect = await app.tray.position();
+    if (rect && rect.height > 0 && isSameRect(rect, previousRect)) return true;
+    previousRect = rect;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+/** Open the panel under the menu bar icon. */
+export async function showPanel(app: TinyApp): Promise<void> {
+  // Without the icon's real position the panel would open in a screen
+  // corner; the user can still click the icon
+  if (!(await waitForTrayToSettle(app))) return;
+  // The panel positions itself under the icon, so it opens itself
   app.window("main").push(showPanelEvent);
 }
 

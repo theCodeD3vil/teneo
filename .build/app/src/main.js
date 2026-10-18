@@ -1078,12 +1078,12 @@ var windowChrome = {
   transparent: true,
   vibrancy: "popover"
 };
-async function isSettingsWindowOpen(app) {
-  return (await app.windows()).includes(settingsWindowId);
+async function isWindowOpen(app, windowId) {
+  return (await app.windows()).includes(windowId);
 }
-async function isSettingsWindowOnScreen(app) {
-  if (!await isSettingsWindowOpen(app)) return false;
-  const state = await app.window(settingsWindowId).getState();
+async function isWindowOnScreen(app, windowId) {
+  if (!await isWindowOpen(app, windowId)) return false;
+  const state = await app.window(windowId).getState();
   return Boolean(state?.visible && !state.minimized);
 }
 async function waitForFocusToLeave(app, teneoProcessId) {
@@ -1094,13 +1094,18 @@ async function waitForFocusToLeave(app, teneoProcessId) {
 }
 async function hidePanel(app) {
   const panel = app.window("main");
-  const keepSettingsOnScreen = await isSettingsWindowOnScreen(app);
-  const teneoProcessId = keepSettingsOnScreen ? (await app.frontmostApp())?.pid : void 0;
+  const isOnScreen = await Promise.all(
+    dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId))
+  );
+  const windowIdsToKeep = dockWindowIds.filter((_, index) => isOnScreen[index]);
+  const teneoProcessId = windowIdsToKeep.length ? (await app.frontmostApp())?.pid : void 0;
   panel.hide({ app: false });
   panel.hide();
-  if (!keepSettingsOnScreen) return;
+  if (!windowIdsToKeep.length) return;
   await waitForFocusToLeave(app, teneoProcessId);
-  app.window(settingsWindowId).show({ activate: false });
+  for (const windowId of windowIdsToKeep) {
+    app.window(windowId).show({ activate: false });
+  }
 }
 function showInDock(app) {
   app.presence("normal");
@@ -1111,12 +1116,14 @@ async function leaveDockUnlessWindowOpen(app, closedWindowId) {
   const isOtherWindowOpen = dockWindowIds.some(
     (windowId) => windowId !== closedWindowId && openWindowIds.includes(windowId)
   );
-  if (!isOtherWindowOpen) app.presence("menubar");
+  if (isOtherWindowOpen) return false;
+  app.presence("menubar");
+  return true;
 }
 async function openSettingsWindow(app) {
   app.window("main").hide({ app: false });
   showInDock(app);
-  if (await isSettingsWindowOpen(app)) {
+  if (await isWindowOpen(app, settingsWindowId)) {
     app.window(settingsWindowId).show();
     return;
   }
@@ -1127,19 +1134,41 @@ async function openSettingsWindow(app) {
     chrome: windowChrome
   });
 }
-function openSetupWindow(app) {
+async function openSetupWindow(app) {
   showInDock(app);
-  app.openWindow(setupWindowId, {
-    page: "setup.html",
-    title: "Welcome to Teneo",
-    size: "560x560",
-    chrome: windowChrome
-  });
+  if (!await isWindowOpen(app, setupWindowId)) {
+    app.openWindow(setupWindowId, {
+      page: "setup.html",
+      title: "Welcome to Teneo",
+      size: "560x560",
+      chrome: windowChrome
+    });
+  }
   app.window(setupWindowId).show();
 }
 async function closeSetupWindow(app) {
+  const teneoProcessId = (await app.frontmostApp())?.pid;
   app.window(setupWindowId).close();
-  await leaveDockUnlessWindowOpen(app, setupWindowId);
+  if (await leaveDockUnlessWindowOpen(app, setupWindowId)) {
+    await waitForFocusToLeave(app, teneoProcessId);
+  }
+}
+function isSameRect(rect, other) {
+  return rect?.x === other?.x && rect?.y === other?.y && rect?.width === other?.width && rect?.height === other?.height;
+}
+async function waitForTrayToSettle(app) {
+  const deadline = Date.now() + 2e3;
+  let previousRect = null;
+  while (Date.now() < deadline) {
+    const rect = await app.tray.position();
+    if (rect && rect.height > 0 && isSameRect(rect, previousRect)) return true;
+    previousRect = rect;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+async function showPanel(app) {
+  if (!await waitForTrayToSettle(app)) return;
   app.window("main").push(showPanelEvent);
 }
 async function handleWindowClosed(windowId, app) {
@@ -1150,13 +1179,26 @@ async function handleWindowClosed(windowId, app) {
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/setup.ts
 var setupCompleteStoreKey = "setupComplete";
-async function openSetupOnFirstLaunch(app) {
-  if (await app.store.get(setupCompleteStoreKey)) return;
-  openSetupWindow(app);
+async function isSetupComplete(app) {
+  return Boolean(await app.store.get(setupCompleteStoreKey));
+}
+function showInMenuBar(app) {
+  app.tray.set({ icon: `${app.paths.resources}/tray.png` });
+  syncOpenPanelShortcut(app);
+}
+async function showMenuBarOrSetup(app) {
+  if (await isSetupComplete(app)) showInMenuBar(app);
+  else await openSetupWindow(app);
 }
 async function finishSetup(app) {
+  const isInMenuBar = await isSetupComplete(app);
   await app.store.set(setupCompleteStoreKey, true);
   await closeSetupWindow(app);
+  if (!isInMenuBar) showInMenuBar(app);
+  await showPanel(app);
+}
+async function quitIfSetupClosedEarly(windowId, app) {
+  if (windowId === setupWindowId && !await isSetupComplete(app)) app.quit();
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/main.ts
@@ -1169,6 +1211,7 @@ var api = {
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
   finishSetup: (_parameters, app) => finishSetup(app),
+  openSetup: (_parameters, app) => openSetupWindow(app),
   pauseOpenPanelShortcut: ({ paused }, app) => pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
@@ -1190,16 +1233,15 @@ async function onClipboardChange({ self }, app) {
 }
 function onWindowClosed(windowId, app) {
   void handleWindowClosed(windowId, app);
+  void quitIfSetupClosedEarly(windowId, app);
   pauseOpenPanelShortcut(false, app);
 }
 async function init(app) {
   await loadSettings(app);
-  syncOpenPanelShortcut(app);
   await initializeDatabase(app);
   startTrimmingClipboardHistory(app);
-  app.tray.set({ icon: `${app.paths.resources}/tray.png` });
   app.setHideOnClose(true);
-  await openSetupOnFirstLaunch(app);
+  await showMenuBarOrSetup(app);
 }
 export {
   api,
