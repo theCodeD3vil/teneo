@@ -24,8 +24,19 @@ Teneo runs on macOS, on both Apple Silicon and Intel Macs.
 
 2. Open the disk image and drag **Teneo** into **Applications**.
 3. Open Teneo from Applications. macOS blocks it the first time, because Teneo isn't notarized by Apple yet. Click **Done**, then go to **System Settings › Privacy & Security**, scroll down, and click **Open Anyway** next to the message about Teneo. You only need to do this once.
-4. Teneo's icon appears in the menu bar. Click it to see your clipboard history.
-5. To let Teneo paste into other apps, allow it in **System Settings › Privacy & Security › Accessibility**. Teneo's **Settings › Security** tab shows whether it's allowed.
+4. A welcome window walks you through setup. Click **Continue**, then allow Accessibility (see [below](#accessibility-permission)), or click **Set up later** to skip it for now.
+5. Click **Done**. Teneo's icon appears in the menu bar and your clipboard history opens. Click the icon whenever you need it.
+
+### Accessibility permission
+
+Teneo needs Accessibility permission to paste into the app you're using. Without it, Teneo still saves your history and copies items; you just paste them yourself with ⌘V.
+
+You can allow it in either of two ways:
+
+- **In Teneo's setup window.** Click **Grant access**: System Settings opens on the right page. Turn on **Teneo**, then come back, and the setup window moves on by itself. If you chose **Set up later**, open Teneo's Settings (the gear in Teneo's panel) and click **Finish setup** in the banner at the top to bring the setup window back.
+- **Manually in System Settings.** Open **System Settings › Privacy & Security › Accessibility** and turn on **Teneo**. If Teneo isn't in the list, click **+** below it and choose Teneo from Applications.
+
+Teneo's **Settings › Security** tab shows whether access is allowed.
 
 Teneo keeps itself up to date: when a new version is out, it asks before installing it. You can also check any time from **Settings › About › Check now**.
 
@@ -56,6 +67,12 @@ Teneo keeps itself up to date: when a new version is out, it asks before install
   <img src="screenshots/clipboard-panel.png" alt="The Teneo panel: a search field, filter tabs and a list of recently copied text, each showing its source app and when it was copied" width="600">
   <br>
   <em>Your clipboard history, searchable and sorted by type</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/setup-welcome.png" alt="Teneo's welcome window, with the Teneo logo, the title 'Everything you copy, always within reach' and a Continue button" width="480">
+  <br>
+  <em>A short setup the first time you open Teneo</em>
 </p>
 
 <p align="center">
