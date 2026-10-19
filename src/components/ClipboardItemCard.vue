@@ -13,13 +13,16 @@ import PinOffIcon from "~icons/hugeicons/pin-off";
 import TextAlignLeftIcon from "~icons/hugeicons/text-align-left";
 import TickIcon from "~icons/hugeicons/tick-02";
 
+import BetaBadge from "@/components/BetaBadge.vue";
 import Button from "@/components/ui/button/Button.vue";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
+import { useSettings } from "@/composables/useSettings";
 import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import { cn } from "@/lib/utils";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
 import { formatFileSize } from "@/utils/file-size";
+import { maskSecrets } from "@/utils/secrets";
 
 const props = defineProps<{
   itemDetails: ClipboardHistoryItem;
@@ -109,6 +112,21 @@ const fileSize = computed(() =>
 );
 
 const dateCopied = useRelativeTimeAgo(props.itemDetails.dateCopied);
+
+// Secrets in the text show as asterisks unless masking is off in Settings; copying
+// and pasting always give the real text
+const { settings } = useSettings();
+const textParts = computed(() => {
+  const text = props.itemDetails.text ?? "";
+  return settings.value.maskSecrets
+    ? maskSecrets(text, props.itemDetails.secrets)
+    : [{ text }];
+});
+const secretLabels = computed(() =>
+  [
+    ...new Set(textParts.value.map((part) => part.secretLabel).filter(Boolean)),
+  ].join(", "),
+);
 
 /** Original filename from a browser copy's `<img src>` html, or null. */
 function imageNameFromHtml(html: string | null): string | null {
@@ -296,7 +314,14 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
         <p
           class="font-foreground line-clamp-2 text-sm wrap-break-word"
           v-if="itemDetails.kind === 'text' && itemDetails.text">
-          {{ itemDetails.text }}
+          <template v-for="(part, index) in textParts" :key="index">
+            <!-- a masked key and its badge wrap as one -->
+            <span v-if="part.secretLabel" class="whitespace-nowrap">
+              <span class="font-mono">{{ part.text }}</span>
+              <BetaBadge class="ml-1" />
+            </span>
+            <template v-else>{{ part.text }}</template>
+          </template>
         </p>
         <!-- color (value + small preview) -->
         <p
@@ -373,6 +398,12 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
           <template v-if="itemDetails.dateCopied">
             <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 text-xs">{{ dateCopied }}</span>
+          </template>
+          <template v-if="secretLabels">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 min-w-0 flex-1 truncate text-xs">
+              {{ secretLabels }}</span
+            >
           </template>
           <template v-if="isFiles && firstPath">
             <span class="text-foreground/50">·</span>

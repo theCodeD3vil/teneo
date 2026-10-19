@@ -13,6 +13,14 @@ export interface ClipboardSourceApp {
   bundleId: string | null;
 }
 
+/** Where a secret, such as an API key, sits in an item's text: text.slice(start, end) */
+export interface SecretSpan {
+  start: number;
+  end: number;
+  /** what kind of secret it is, such as "GitHub token" */
+  label: string;
+}
+
 /** Data returned from the backend to every frontend window through tiny.api. */
 export interface ClipboardHistoryItem {
   id: string;
@@ -35,4 +43,7 @@ export interface ClipboardHistoryItem {
   /** bytes of a single copied file, read each time history is listed; null
    *  for a folder, a missing file, several files and other kinds */
   fileSize: number | null;
+  /** secrets in the text, found each time history is listed, so a rule
+   *  added later covers older copies too */
+  secrets: SecretSpan[];
 }

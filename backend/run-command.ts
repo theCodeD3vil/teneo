@@ -5,7 +5,8 @@ export async function runCommand(command: string[]): Promise<string> {
   try {
     const child = tjs.spawn(command, { stdout: "pipe", stderr: "ignore" });
     // read until the stream ends: a full, unread pipe would block the command forever
-    const reader = child.stdout.getReader();
+    // stdout is only null when it isn't piped, and it is here
+    const reader = child.stdout!.getReader();
     // one decoder per call: in stream mode it holds a split UTF-8 character
     // between chunks, which concurrent calls must not share
     const textDecoder = new TextDecoder();

@@ -2,6 +2,8 @@ import { Database } from "tjs:sqlite";
 
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";
+import { findSecrets } from "./secret-detection";
+import { decryptText, encryptText } from "./secret-encryption";
 import type {
   ClipboardHistoryItem,
   ClipboardItemColumn,
@@ -39,7 +41,8 @@ async function openDatabase(app: TinyApp): Promise<Database> {
         sourceAppBundleId TEXT,
         deletedAt INTEGER,
         pinnedAt INTEGER,
-        pasteAsFile INTEGER
+        pasteAsFile INTEGER,
+        encrypted INTEGER
       )
     `,
   );
@@ -67,30 +70,38 @@ export async function saveClipboardItem(
   const dateCopied = Date.now();
   const savedItem: ClipboardHistoryItem = {
     ...item,
+    kind: item.kind, // "empty" was ruled out above
     id: generateUUID(),
     dateCopied,
     pinned: false,
     pasteAsFile: item.pasteAsFile === true,
     fileSize: null, // read when history is listed
+    secrets: item.kind === "text" && item.text ? findSecrets(item.text) : [],
   };
+  // Text holding a secret is only ever saved encrypted: when the key can't be
+  // read, encryptText throws and the item isn't saved at all
+  const value = serializeValue(savedItem);
+  const isEncrypted = value !== null && savedItem.secrets.length > 0;
+  const storedValue = isEncrypted ? await encryptText(value, app) : value;
 
   run(
     await initializeDatabase(app),
     `
       INSERT INTO "CLIPBOARD_ITEMS" (
-        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
     serializeImageSize(savedItem),
     serializePath(savedItem, app),
-    serializeValue(savedItem),
+    storedValue,
     savedItem.dateCopied,
     savedItem.sourceApp?.name ?? null,
     savedItem.sourceApp?.bundleId ?? null,
     savedItem.pasteAsFile ? 1 : null,
+    isEncrypted ? 1 : null,
   );
   notifyClipboardHistoryChanged(app);
 
@@ -265,15 +276,18 @@ export async function listClipboardItems(
   const rows = all<ClipboardItemRow>(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile, encrypted
       FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL
       ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
     `,
   );
 
-  const items = rows.flatMap((row) => {
-    const item = rowToClipboardItem(row, app);
+  const decryptedRows = await Promise.all(
+    rows.map((row) => decryptRow(row, app)),
+  );
+  const items = decryptedRows.flatMap((row) => {
+    const item = row && rowToClipboardItem(row, app);
     return item ? [item] : [];
   });
   // Only for a single copied file: next to "+N" the first file's size would
@@ -285,6 +299,45 @@ export async function listClipboardItems(
     }),
   );
   return items;
+}
+
+/** The row with its text decrypted, or null while it can't be: the Keychain
+ *  can't be read, or the key there isn't the one it was encrypted with. The
+ *  row stays saved, in case the key comes back. */
+async function decryptRow(
+  row: ClipboardItemRow,
+  app: TinyApp,
+): Promise<ClipboardItemRow | null> {
+  if (row.encrypted !== 1 || row.value === null) return row;
+  try {
+    return { ...row, value: await decryptText(row.value, app) };
+  } catch (error) {
+    logError(`decrypting history item ${row.id} failed:`, error);
+    return null;
+  }
+}
+
+/** Encrypt saved text that holds a secret but was saved before it could be
+ *  found: copied before Teneo looked for secrets, or caught by a rule added
+ *  since. Run at startup; text is never changed once saved. */
+export async function encryptSecretsInHistory(app: TinyApp): Promise<void> {
+  const database = await initializeDatabase(app);
+  const rows = all<Pick<ClipboardItemRow, "id" | "value">>(
+    database,
+    `
+      SELECT id, value FROM "CLIPBOARD_ITEMS"
+      WHERE kind = 'text' AND encrypted IS NULL AND value IS NOT NULL
+    `,
+  );
+  for (const { id, value } of rows) {
+    if (!value || findSecrets(value).length === 0) continue;
+    run(
+      database,
+      `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = 1 WHERE id = ? AND encrypted IS NULL`,
+      await encryptText(value, app),
+      id,
+    );
+  }
 }
 
 function serializeImageSize(item: TinyClipboardData): string | null {
@@ -321,6 +374,7 @@ const addedColumns = {
   deletedAt: "INTEGER",
   pinnedAt: "INTEGER",
   pasteAsFile: "INTEGER",
+  encrypted: "INTEGER",
 };
 
 function addMissingColumns(database: Database): void {
@@ -362,6 +416,7 @@ function rowToClipboardItem(
     pinned: row.pinnedAt != null,
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
     fileSize: null, // filled in by listClipboardItems
+    secrets: row.kind === "text" && row.value ? findSecrets(row.value) : [],
   };
 }
 

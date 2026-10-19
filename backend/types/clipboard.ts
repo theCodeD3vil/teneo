@@ -21,6 +21,8 @@ export interface ClipboardItemRow {
   sourceAppBundleId: string | null;
   pinnedAt: number | null;
   pasteAsFile: number | null;
+  /** 1 when value is encrypted, because the text holds a secret */
+  encrypted: number | null;
 }
 
 export interface ClipboardItemColumn {

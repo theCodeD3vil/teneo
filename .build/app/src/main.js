@@ -530,6 +530,7 @@ function splitWhitespace(value) {
 var defaultSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
+  maskSecrets: true,
   excludedApps: [],
   openPanelShortcut: "",
   historyDuration: "forever",
@@ -702,6 +703,165 @@ async function getFileSize(path) {
   return stats && !stats.isDirectory ? stats.size : null;
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/secret-detection.ts
+var secretRules = [
+  {
+    label: "Private key",
+    keywords: ["PRIVATE KEY-----"],
+    pattern: /-----BEGIN[A-Z ]*PRIVATE KEY-----\s*(?<secret>[\s\S]+?)\s*-----END[A-Z ]*PRIVATE KEY-----/dg
+  },
+  {
+    label: "GitHub token",
+    keywords: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"],
+    pattern: /\bgh[pousr]_(?<secret>[A-Za-z0-9]{36})\b/dg
+  },
+  {
+    label: "GitHub token",
+    keywords: ["github_pat_"],
+    pattern: /\bgithub_pat_(?<secret>\w{82})\b/dg
+  },
+  {
+    label: "GitLab token",
+    keywords: ["glpat-"],
+    pattern: /\bglpat-(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "AWS access key",
+    keywords: ["AKIA", "ASIA"],
+    pattern: /\b(?:AKIA|ASIA)(?<secret>[A-Z2-7]{16})\b/dg
+  },
+  {
+    label: "AWS secret key",
+    // ~/.aws/credentials, env vars and `aws iam create-access-key` output
+    keywords: [
+      "aws_secret_access_key",
+      "AWS_SECRET_ACCESS_KEY",
+      "SecretAccessKey"
+    ],
+    pattern: /(?:aws_secret_access_key|SecretAccessKey)["']?\s*[:=]\s*["']?(?<secret>[A-Za-z0-9/+]{40})(?![A-Za-z0-9/+])/dgi
+  },
+  {
+    label: "Google API key",
+    keywords: ["AIza"],
+    pattern: /\bAIza(?<secret>[\w-]{35})(?![\w-])/dg
+  },
+  {
+    label: "Slack token",
+    keywords: ["xox"],
+    pattern: /\bxox[abposr]-(?<secret>[A-Za-z0-9-]{10,})/dg
+  },
+  {
+    label: "Slack webhook",
+    keywords: ["hooks.slack.com/"],
+    pattern: /hooks\.slack\.com\/(?:services|workflows|triggers)\/(?<secret>[\w+/-]{20,})/dg
+  },
+  {
+    label: "Stripe key",
+    keywords: ["sk_live_", "sk_test_", "rk_live_", "rk_test_"],
+    pattern: /\b[rs]k_(?:live|test)_(?<secret>[A-Za-z0-9]{20,})/dg
+  },
+  {
+    label: "Anthropic API key",
+    keywords: ["sk-ant-"],
+    pattern: /\bsk-ant-(?:[a-z]+\d+-)?(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "OpenAI API key",
+    keywords: ["sk-proj-", "sk-svcacct-", "sk-admin-"],
+    pattern: /\bsk-(?:proj|svcacct|admin)-(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "OpenAI API key",
+    // older keys carry "OpenAI" in base64 in the middle
+    keywords: ["T3BlbkFJ"],
+    pattern: /\bsk-(?<secret>[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/dg
+  },
+  {
+    label: "Hyper API key",
+    keywords: ["sk-hyper-"],
+    pattern: /\bsk-hyper-(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "npm token",
+    keywords: ["npm_"],
+    pattern: /\bnpm_(?<secret>[A-Za-z0-9]{36})\b/dg
+  },
+  {
+    label: "JWT",
+    keywords: ["eyJ"],
+    pattern: /\beyJ(?<secret>[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{10,})/dg
+  },
+  {
+    label: "Password in URL",
+    // user:password@ in a URL, such as a database connection string
+    keywords: ["://"],
+    pattern: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:(?<secret>[^\s/@]+)@/dg
+  }
+];
+var maximumScannedLength = 1e5;
+function findSecrets(text) {
+  const scannedText = text.slice(0, maximumScannedLength);
+  const secrets = [];
+  for (const { label, keywords, pattern } of secretRules) {
+    if (!keywords.some((keyword) => scannedText.includes(keyword))) continue;
+    for (const match of scannedText.matchAll(pattern)) {
+      const [start, end] = match.indices.groups.secret;
+      secrets.push({ start, end, label });
+    }
+  }
+  secrets.sort((first, second) => first.start - second.start);
+  const separateSecrets = [];
+  for (const secret of secrets) {
+    if (secret.start >= (separateSecrets.at(-1)?.end ?? 0)) {
+      separateSecrets.push(secret);
+    }
+  }
+  return separateSecrets;
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/secret-encryption.ts
+var keychainKeyName = "history-encryption-key";
+var ivLength = 12;
+var encryptionKeyPromise = null;
+function getEncryptionKey(app) {
+  encryptionKeyPromise ??= loadOrCreateEncryptionKey(app);
+  return encryptionKeyPromise;
+}
+async function loadOrCreateEncryptionKey(app) {
+  const savedKey = await app.secrets.get(keychainKeyName);
+  if (savedKey) return importEncryptionKey(Uint8Array.fromBase64(savedKey));
+  const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+  await app.secrets.set(keychainKeyName, keyBytes.toBase64());
+  return importEncryptionKey(keyBytes);
+}
+function importEncryptionKey(keyBytes) {
+  return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, [
+    "encrypt",
+    "decrypt"
+  ]);
+}
+async function encryptText(text, app) {
+  const iv = crypto.getRandomValues(new Uint8Array(ivLength));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await getEncryptionKey(app),
+    new TextEncoder().encode(text)
+  );
+  const encrypted = new Uint8Array(ivLength + ciphertext.byteLength);
+  encrypted.set(iv);
+  encrypted.set(new Uint8Array(ciphertext), ivLength);
+  return encrypted.toBase64();
+}
+async function decryptText(encryptedText, app) {
+  const encrypted = Uint8Array.fromBase64(encryptedText);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: encrypted.subarray(0, ivLength) },
+    await getEncryptionKey(app),
+    encrypted.subarray(ivLength)
+  );
+  return new TextDecoder().decode(plaintext);
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/clipboard.ts
 var clipboardHistoryChangedEvent = "clipboard-history-changed";
 
@@ -728,7 +888,8 @@ async function openDatabase(app) {
         sourceAppBundleId TEXT,
         deletedAt INTEGER,
         pinnedAt INTEGER,
-        pasteAsFile INTEGER
+        pasteAsFile INTEGER,
+        encrypted INTEGER
       )
     `
   );
@@ -749,30 +910,37 @@ async function saveClipboardItem(item, app) {
   const dateCopied = Date.now();
   const savedItem = {
     ...item,
+    kind: item.kind,
+    // "empty" was ruled out above
     id: generateUUID(),
     dateCopied,
     pinned: false,
     pasteAsFile: item.pasteAsFile === true,
-    fileSize: null
+    fileSize: null,
     // read when history is listed
+    secrets: item.kind === "text" && item.text ? findSecrets(item.text) : []
   };
+  const value = serializeValue(savedItem);
+  const isEncrypted = value !== null && savedItem.secrets.length > 0;
+  const storedValue = isEncrypted ? await encryptText(value, app) : value;
   run(
     await initializeDatabase(app),
     `
       INSERT INTO "CLIPBOARD_ITEMS" (
-        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
     serializeImageSize(savedItem),
     serializePath(savedItem, app),
-    serializeValue(savedItem),
+    storedValue,
     savedItem.dateCopied,
     savedItem.sourceApp?.name ?? null,
     savedItem.sourceApp?.bundleId ?? null,
-    savedItem.pasteAsFile ? 1 : null
+    savedItem.pasteAsFile ? 1 : null,
+    isEncrypted ? 1 : null
   );
   notifyClipboardHistoryChanged(app);
   return savedItem;
@@ -889,14 +1057,17 @@ async function listClipboardItems(app) {
   const rows = all(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile, encrypted
       FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL
       ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
     `
   );
-  const items = rows.flatMap((row) => {
-    const item = rowToClipboardItem(row, app);
+  const decryptedRows = await Promise.all(
+    rows.map((row) => decryptRow(row, app))
+  );
+  const items = decryptedRows.flatMap((row) => {
+    const item = row && rowToClipboardItem(row, app);
     return item ? [item] : [];
   });
   await Promise.all(
@@ -906,6 +1077,34 @@ async function listClipboardItems(app) {
     })
   );
   return items;
+}
+async function decryptRow(row, app) {
+  if (row.encrypted !== 1 || row.value === null) return row;
+  try {
+    return { ...row, value: await decryptText(row.value, app) };
+  } catch (error) {
+    logError(`decrypting history item ${row.id} failed:`, error);
+    return null;
+  }
+}
+async function encryptSecretsInHistory(app) {
+  const database = await initializeDatabase(app);
+  const rows = all(
+    database,
+    `
+      SELECT id, value FROM "CLIPBOARD_ITEMS"
+      WHERE kind = 'text' AND encrypted IS NULL AND value IS NOT NULL
+    `
+  );
+  for (const { id, value } of rows) {
+    if (!value || findSecrets(value).length === 0) continue;
+    run(
+      database,
+      `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = 1 WHERE id = ? AND encrypted IS NULL`,
+      await encryptText(value, app),
+      id
+    );
+  }
 }
 function serializeImageSize(item) {
   return item.kind === "image" && item.imageSize ? JSON.stringify(item.imageSize) : null;
@@ -933,7 +1132,8 @@ var addedColumns = {
   sourceAppBundleId: "TEXT",
   deletedAt: "INTEGER",
   pinnedAt: "INTEGER",
-  pasteAsFile: "INTEGER"
+  pasteAsFile: "INTEGER",
+  encrypted: "INTEGER"
 };
 function addMissingColumns(database) {
   const columnNames = new Set(
@@ -968,8 +1168,9 @@ function rowToClipboardItem(row, app) {
     sourceURL: null,
     pinned: row.pinnedAt != null,
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
-    fileSize: null
+    fileSize: null,
     // filled in by listClipboardItems
+    secrets: row.kind === "text" && row.value ? findSecrets(row.value) : []
   };
 }
 function sourceAppFromRow(row) {
@@ -1384,6 +1585,9 @@ function onWindowClosed(windowId, app) {
 async function init(app) {
   await loadSettings(app);
   await initializeDatabase(app);
+  void encryptSecretsInHistory(app).catch(
+    (error) => logError("encrypting secrets in history failed:", error)
+  );
   startTrimmingClipboardHistory(app);
   app.setHideOnClose(true);
   app.setAllSpaces(true);

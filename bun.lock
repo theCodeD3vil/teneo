@@ -24,6 +24,7 @@
       "devDependencies": {
         "@iconify-json/hugeicons": "^1.2.35",
         "@iconify/vue": "^5.0.3",
+        "@txikijs/types": "26.6.0",
         "@types/node": "^24.13.3",
         "@vitejs/plugin-vue": "^6.0.8",
         "@vue/tsconfig": "^0.9.1",
@@ -350,6 +351,8 @@
     "@tanstack/vue-virtual": ["@tanstack/vue-virtual@3.13.45", "", { "dependencies": { "@tanstack/virtual-core": "3.19.4" }, "peerDependencies": { "vue": "^2.7.0 || ^3.0.0" } }, "sha512-AnYTTgpps/HyHJ9jgBW6dAPVTOY9UVb1AY8Gi2Th1dTDDUiUqalbq5W2hBrW0q8/DI8V5bt9HUgTvatbvZIukQ=="],
 
     "@ts-morph/common": ["@ts-morph/common@0.29.0", "", { "dependencies": { "minimatch": "^10.0.1", "path-browserify": "^1.0.1", "tinyglobby": "^0.2.14" } }, "sha512-35oUmphHbJvQ/+UTwFNme/t2p3FoKiGJ5auTjjpNTop2dyREspirjMy82PLSC1pnDJ8ah1GU98hwpVt64YXQsg=="],
+
+    "@txikijs/types": ["@txikijs/types@26.6.0", "", {}, "sha512-Qcq5j7zBZH76XIaxJGye8FiU30MIynPwmW0V0Eyp747XE2LugzRXKkCQHs6T6plhE9t8mlTPukrOLZQkzgx9vA=="],
 
     "@types/esrecurse": ["@types/esrecurse@4.3.1", "", {}, "sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw=="],
 
