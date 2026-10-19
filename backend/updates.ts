@@ -20,8 +20,10 @@ function trackDownload(response: Response, app: TinyApp): void {
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
         received += chunk.byteLength;
-        if (Date.now() - lastSentAt >= progressIntervalMs) {
-          lastSentAt = Date.now();
+        // performance.now() only moves forward; with Date.now(), setting the
+        // Mac's clock back would stop progress until it caught up again
+        if (performance.now() - lastSentAt >= progressIntervalMs) {
+          lastSentAt = performance.now();
           sendProgress({ received, total }, app);
         }
         controller.enqueue(chunk);

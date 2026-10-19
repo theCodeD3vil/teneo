@@ -21,6 +21,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { currentTime } from "@/composables/useRelativeTimeAgo";
 import type { ClipboardHistoryItem, TabVariant } from "@/types/clipboard";
 
 import ClipboardItemCard from "./ClipboardItemCard.vue";
@@ -55,6 +56,8 @@ interface ClipboardItemGroup {
 
 const cardReferences = new Map<string, ClipboardItemCardReference>();
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
+// Changes once a day, so the groups below regroup at midnight, not on every tick
+const todayStart = computed(() => getDayStart(currentTime.value.getTime()));
 
 // Pinned items come first from the backend, so they also get the first ⌘ numbers
 const groupedItems = computed<ClipboardItemGroup[]>(() => {
@@ -150,8 +153,7 @@ function getDayStart(timestamp: number): number {
 }
 
 function getDayLabel(dayStart: number): string {
-  const todayStart = getDayStart(Date.now());
-  const daysAgo = Math.round((todayStart - dayStart) / dayInMilliseconds);
+  const daysAgo = Math.round((todayStart.value - dayStart) / dayInMilliseconds);
 
   if (daysAgo === 0) return "Today";
   if (daysAgo === 1) return "Yesterday";

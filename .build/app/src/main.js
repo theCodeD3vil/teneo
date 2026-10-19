@@ -1105,6 +1105,8 @@ async function getTrimLimits(app, { historyDuration, maximumItems, maximumStorag
     maximumStorage > 0 ? await countItemsWithinStorage(app, maximumStorage) : Infinity
   );
   return {
+    // Date.now(), not performance.now(): it's compared with the saved copy
+    // times, which are Mac clock times too
     copiedBefore: keepFor === null ? 0 : Date.now() - keepFor,
     keepNewest: Number.isFinite(keepNewest) ? keepNewest : -1
   };
@@ -1156,8 +1158,8 @@ async function isWindowOnScreen(app, windowId) {
   return Boolean(state?.visible && !state.minimized);
 }
 async function waitForFocusToLeave(app, teneoProcessId) {
-  const deadline = Date.now() + 500;
-  while (Date.now() < deadline && (await app.frontmostApp())?.pid === teneoProcessId) {
+  const deadline = performance.now() + 500;
+  while (performance.now() < deadline && (await app.frontmostApp())?.pid === teneoProcessId) {
     await new Promise((resolve) => setTimeout(resolve, 16));
   }
 }
@@ -1225,7 +1227,7 @@ async function openUpdateWindow(update, app) {
     app.openWindow(updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
-      size: "480x460",
+      size: "480x640",
       chrome: { ...windowChrome, windowControls: false }
     });
     app.window(updateWindowId).setLevel("floating");
@@ -1251,9 +1253,9 @@ function isSameRect(rect, other) {
   return rect?.x === other?.x && rect?.y === other?.y && rect?.width === other?.width && rect?.height === other?.height;
 }
 async function waitForTrayToSettle(app) {
-  const deadline = Date.now() + 2e3;
+  const deadline = performance.now() + 2e3;
   let previousRect = null;
-  while (Date.now() < deadline) {
+  while (performance.now() < deadline) {
     const rect = await app.tray.position();
     if (rect && rect.height > 0 && isSameRect(rect, previousRect)) return true;
     previousRect = rect;
@@ -1308,8 +1310,8 @@ function trackDownload(response, app) {
     new TransformStream({
       transform(chunk, controller) {
         received += chunk.byteLength;
-        if (Date.now() - lastSentAt >= progressIntervalMs) {
-          lastSentAt = Date.now();
+        if (performance.now() - lastSentAt >= progressIntervalMs) {
+          lastSentAt = performance.now();
           sendProgress({ received, total }, app);
         }
         controller.enqueue(chunk);
