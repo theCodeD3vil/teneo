@@ -8,6 +8,7 @@ import { useClipboard } from "@/composables/useClipboard";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useSettings } from "@/composables/useSettings";
 import { omit } from "@/utils/helpers";
+import { maskSecrets } from "@/utils/secrets";
 
 import {
   clipboardItemVariants,
@@ -67,13 +68,26 @@ function matchesSearchQuery(
   searchQuery: string,
 ): boolean {
   return [
-    item.text,
+    searchableText(item),
     item.html,
     item.color,
     item.paths.join(" "),
     item.sourceApp?.name,
     item.sourceURL,
   ].some((value) => value?.toLowerCase().includes(searchQuery));
+}
+
+// A masked key is found by what the card shows and by its kind ("GitHub
+// token"), so searching for part of it can't reveal which item holds it
+function searchableText(item: ClipboardHistoryItem): string | null {
+  if (!item.text || !settings.value.maskSecrets || !item.secrets.length) {
+    return item.text;
+  }
+  return maskSecrets(item.text, item.secrets)
+    .map((part) =>
+      part.secretLabel ? `${part.text} ${part.secretLabel} ` : part.text,
+    )
+    .join("");
 }
 
 function activateFirstItem(): void {

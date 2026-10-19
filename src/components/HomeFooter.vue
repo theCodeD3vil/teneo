@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import CommandIcon from "~icons/hugeicons/command";
 import Settings from "~icons/hugeicons/settings-01";
+import ShutDownIcon from "~icons/hugeicons/shut-down";
 
 import { useHotkeyPreview } from "@/composables/useHotkeyPreview";
 
@@ -16,6 +17,11 @@ const { hotkeyProgress } = useHotkeyPreview();
 
 function openSettings(): void {
   void tiny.api.call("openSettings");
+}
+
+// Ends Teneo's process, which closes every window and stops recording copies
+function quitApp(): void {
+  void tiny.quit();
 }
 </script>
 <template>
@@ -49,13 +55,24 @@ function openSettings(): void {
       </div>
     </Transition>
 
-    <!-- settings button -->
-    <Button
-      variant="ghost"
-      size="icon"
-      class="hover:bg-foreground/5! text-foreground/70 hover:text-foreground"
-      @click="openSettings">
-      <Settings />
-    </Button>
+    <!-- one group, so justify-between keeps the buttons side by side -->
+    <div class="flex items-center">
+      <Button
+        variant="ghost"
+        size="icon"
+        title="Settings"
+        class="hover:bg-foreground/5! text-foreground/70 hover:text-foreground"
+        @click="openSettings">
+        <Settings />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        title="Quit Teneo"
+        class="hover:bg-foreground/5! text-foreground/70 hover:text-foreground"
+        @click="quitApp">
+        <ShutDownIcon />
+      </Button>
+    </div>
   </div>
 </template>

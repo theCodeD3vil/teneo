@@ -4,6 +4,7 @@ import { getAppIconUrl } from "./app-icons";
 import { readClipboardItem } from "./clipboard-history";
 import { getDataFolderUsage } from "./data-usage";
 import {
+  encryptSecretsInHistory,
   initializeDatabase,
   listClipboardItems,
   saveClipboardItem,
@@ -12,6 +13,7 @@ import {
 } from "./database";
 import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
 import { getFilePreview } from "./file-previews";
+import { logError } from "./files";
 import {
   pauseOpenPanelShortcut,
   syncOpenPanelShortcut,
@@ -28,7 +30,11 @@ import {
   quitIfSetupClosedEarly,
   showMenuBarOrSetup,
 } from "./setup";
-import { installUpdate } from "./updates";
+import {
+  checkForUpdatesInBackground,
+  installUpdate,
+  startCheckingForUpdates,
+} from "./updates";
 import {
   closeUpdateWindow,
   getAvailableUpdate,
@@ -61,9 +67,14 @@ export const api: Record<string, TinyApiHandler> = {
     pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
+    const wasCheckingForUpdates = getSettings().checkForUpdates;
     const settings = await updateSettings(changes, app);
     syncOpenPanelShortcut(app);
     await trimClipboardHistory(app); // a tighter history limit applies now
+    // turning update checks on looks now, not only at the next launch
+    if (settings.checkForUpdates && !wasCheckingForUpdates) {
+      void checkForUpdatesInBackground(app);
+    }
     return settings;
   },
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
@@ -93,11 +104,16 @@ export function onWindowClosed(windowId: string, app: TinyApp) {
 export async function init(app: TinyApp) {
   await loadSettings(app);
   await initializeDatabase(app);
+  // not awaited: the menu bar icon shouldn't wait on a Keychain prompt
+  void encryptSecretsInHistory(app).catch((error) =>
+    logError("encrypting secrets in history failed:", error),
+  );
   startTrimmingClipboardHistory(app);
   app.setHideOnClose(true);
   // Open the panel on the current Space, over full-screen apps too
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  startCheckingForUpdates(app);
   await previewUpdateWindow(app);
 }
 

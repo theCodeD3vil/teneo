@@ -6,7 +6,13 @@
     "strict": true,
     "checkJs": false,
     "noEmit": true,
-    "types": []
+    // txiki's tjs global and tjs:* modules; keep the version in step with the
+    // txiki that tinyjs ships (tjs --version)
+    "types": ["@txikijs/types"],
+    // esnext.disposable: txiki's types use Disposable; dom: fetch, WebCrypto…
+    "lib": ["es2022", "esnext.disposable", "dom"],
+    // a few of txiki's own .d.ts files don't type-check; our code still does
+    "skipLibCheck": true
   },
   "include": ["./**/*"]
 }

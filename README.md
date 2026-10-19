@@ -37,7 +37,7 @@ You can allow it in either of two ways:
 
 Teneo's **Settings › Security** tab shows whether access is allowed.
 
-Teneo keeps itself up to date: when a new version is out, it asks before installing it. You can also check any time from **Settings › About › Check now**.
+Teneo keeps itself up to date: when it starts and once a day after that, it looks for a new version and asks before installing it. You can turn this off with **Settings › General › Check for updates**, and check any time from **Settings › About › Check now**.
 
 ## Features
 
@@ -59,6 +59,7 @@ Teneo keeps itself up to date: when a new version is out, it asks before install
 
 - **Pastes for you.** Paste straight into the app you were using, or turn on **Paste on Enter** to paste every time you pick an item. This also happens automatically with the `⌘ + 1-9` hotkeys and `⌘ + V` keys
 - **Leaves passwords alone.** Anything copied from a password manager is skipped, and you can add any other app you want Teneo to ignore.
+- **Hides API keys (beta).** Keys from GitHub, OpenAI, Anthropic, Stripe, AWS and other services, private keys, and passwords in URLs show as asterisks (`***`) in history, but paste in full. Text holding a key is saved encrypted, with the key to it in your Keychain. Teneo finds them on your Mac and never sends them anywhere. Turn it off in **Settings › Security**.
 - **Keeps only what you want.** Choose how long to keep history (1 day to forever), how many items to keep, and how much space it may use. Pinned items always stay, and don't count toward these limits.
 
 ## Screenshots

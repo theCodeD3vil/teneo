@@ -1,1 +1,3 @@
 bun run lint-staged
+# type-check the whole frontend: a change in one file can break another
+bunx vue-tsc -b

@@ -9,10 +9,14 @@ import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
 // UI only for now: not persisted or wired to the backend yet
-const checkForUpdates = ref(false);
 const playCopySound = ref(false);
 
 const { settings, updateSettings } = useSettings();
+
+const checkForUpdates = computed({
+  get: () => settings.value.checkForUpdates,
+  set: (enabled) => updateSettings({ checkForUpdates: enabled }),
+});
 
 const pasteOnEnter = computed({
   get: () => settings.value.pasteOnEnter,
@@ -59,9 +63,11 @@ useEventListener(window, "focus", refreshLaunchAtLoginStatus);
         <Switch v-model="launchAtLogin" />
       </SettingsField>
 
-      <SettingsField disabled>
+      <SettingsField>
         <template #label>Check for updates</template>
-        <template #description>Look for new versions automatically</template>
+        <template #description>
+          Look for a new version at launch and once a day
+        </template>
         <Switch v-model="checkForUpdates" />
       </SettingsField>
     </SettingsSection>

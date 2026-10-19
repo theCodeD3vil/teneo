@@ -2,6 +2,7 @@ export { clipboardHistoryChangedEvent } from "../../shared/types/clipboard";
 export type {
   ClipboardHistoryItem,
   ClipboardItemKind,
+  SecretSpan,
 } from "../../shared/types/clipboard";
 
 export const clipboardItemVariants = [

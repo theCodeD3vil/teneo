@@ -14,5 +14,9 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
-  "exclude": ["dist", "build", "coverage"]
+  "exclude": ["dist", "build", "coverage"],
+  "vueCompilerOptions": {
+    /* A template tag that isn't imported is an error, not an unknown element */
+    "checkUnknownComponents": true
+  }
 }

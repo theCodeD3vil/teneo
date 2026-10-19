@@ -528,8 +528,10 @@ function splitWhitespace(value) {
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/settings.ts
 var defaultSettings = {
+  checkForUpdates: true,
   pasteOnEnter: false,
   ignorePasswords: true,
+  maskSecrets: true,
   excludedApps: [],
   openPanelShortcut: "",
   historyDuration: "forever",
@@ -683,6 +685,184 @@ async function saveClipboardImage(item, app) {
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/database.ts
 import { Database } from "tjs:sqlite";
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
+var PREVIEW_SIZE = 64;
+async function getFilePreview(path, app) {
+  if (typeof path !== "string" || !path.startsWith("/")) return null;
+  const stats = await tjs.stat(path).catch(() => null);
+  if (!stats) return null;
+  try {
+    const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
+    return await pngDataUrl(thumbnail.path);
+  } catch (error) {
+    logError(`filePreview failed for ${path}:`, error);
+    return null;
+  }
+}
+async function getFileSize(path) {
+  const stats = await tjs.stat(path).catch(() => null);
+  return stats && !stats.isDirectory ? stats.size : null;
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/secret-detection.ts
+var secretRules = [
+  {
+    label: "Private key",
+    keywords: ["PRIVATE KEY-----"],
+    pattern: /-----BEGIN[A-Z ]*PRIVATE KEY-----\s*(?<secret>[\s\S]+?)\s*-----END[A-Z ]*PRIVATE KEY-----/dg
+  },
+  {
+    label: "GitHub token",
+    keywords: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"],
+    pattern: /\bgh[pousr]_(?<secret>[A-Za-z0-9]{36})\b/dg
+  },
+  {
+    label: "GitHub token",
+    keywords: ["github_pat_"],
+    pattern: /\bgithub_pat_(?<secret>\w{82})\b/dg
+  },
+  {
+    label: "GitLab token",
+    keywords: ["glpat-"],
+    pattern: /\bglpat-(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "AWS access key",
+    keywords: ["AKIA", "ASIA"],
+    pattern: /\b(?:AKIA|ASIA)(?<secret>[A-Z2-7]{16})\b/dg
+  },
+  {
+    label: "AWS secret key",
+    // ~/.aws/credentials, env vars and `aws iam create-access-key` output
+    keywords: [
+      "aws_secret_access_key",
+      "AWS_SECRET_ACCESS_KEY",
+      "SecretAccessKey"
+    ],
+    pattern: /(?:aws_secret_access_key|SecretAccessKey)["']?\s*[:=]\s*["']?(?<secret>[A-Za-z0-9/+]{40})(?![A-Za-z0-9/+])/dgi
+  },
+  {
+    label: "Google API key",
+    keywords: ["AIza"],
+    pattern: /\bAIza(?<secret>[\w-]{35})(?![\w-])/dg
+  },
+  {
+    label: "Slack token",
+    keywords: ["xox"],
+    pattern: /\bxox[abposr]-(?<secret>[A-Za-z0-9-]{10,})/dg
+  },
+  {
+    label: "Slack webhook",
+    keywords: ["hooks.slack.com/"],
+    pattern: /hooks\.slack\.com\/(?:services|workflows|triggers)\/(?<secret>[\w+/-]{20,})/dg
+  },
+  {
+    label: "Stripe key",
+    keywords: ["sk_live_", "sk_test_", "rk_live_", "rk_test_"],
+    pattern: /\b[rs]k_(?:live|test)_(?<secret>[A-Za-z0-9]{20,})/dg
+  },
+  {
+    label: "Anthropic API key",
+    keywords: ["sk-ant-"],
+    pattern: /\bsk-ant-(?:[a-z]+\d+-)?(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "OpenAI API key",
+    keywords: ["sk-proj-", "sk-svcacct-", "sk-admin-"],
+    pattern: /\bsk-(?:proj|svcacct|admin)-(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "OpenAI API key",
+    // older keys carry "OpenAI" in base64 in the middle
+    keywords: ["T3BlbkFJ"],
+    pattern: /\bsk-(?<secret>[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})\b/dg
+  },
+  {
+    label: "Hyper API key",
+    keywords: ["sk-hyper-"],
+    pattern: /\bsk-hyper-(?<secret>[\w-]{20,})/dg
+  },
+  {
+    label: "npm token",
+    keywords: ["npm_"],
+    pattern: /\bnpm_(?<secret>[A-Za-z0-9]{36})\b/dg
+  },
+  {
+    label: "JWT",
+    keywords: ["eyJ"],
+    pattern: /\beyJ(?<secret>[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{10,})/dg
+  },
+  {
+    label: "Password in URL",
+    // user:password@ in a URL, such as a database connection string
+    keywords: ["://"],
+    pattern: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:(?<secret>[^\s/@]+)@/dg
+  }
+];
+var maximumScannedLength = 1e5;
+function findSecrets(text) {
+  const scannedText = text.slice(0, maximumScannedLength);
+  const secrets = [];
+  for (const { label, keywords, pattern } of secretRules) {
+    if (!keywords.some((keyword) => scannedText.includes(keyword))) continue;
+    for (const match of scannedText.matchAll(pattern)) {
+      const [start, end] = match.indices.groups.secret;
+      secrets.push({ start, end, label });
+    }
+  }
+  secrets.sort((first, second) => first.start - second.start);
+  const separateSecrets = [];
+  for (const secret of secrets) {
+    if (secret.start >= (separateSecrets.at(-1)?.end ?? 0)) {
+      separateSecrets.push(secret);
+    }
+  }
+  return separateSecrets;
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/secret-encryption.ts
+var keychainKeyName = "history-encryption-key";
+var ivLength = 12;
+var encryptionKeyPromise = null;
+function getEncryptionKey(app) {
+  encryptionKeyPromise ??= loadOrCreateEncryptionKey(app);
+  return encryptionKeyPromise;
+}
+async function loadOrCreateEncryptionKey(app) {
+  const savedKey = await app.secrets.get(keychainKeyName);
+  if (savedKey) return importEncryptionKey(Uint8Array.fromBase64(savedKey));
+  const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+  await app.secrets.set(keychainKeyName, keyBytes.toBase64());
+  return importEncryptionKey(keyBytes);
+}
+function importEncryptionKey(keyBytes) {
+  return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, [
+    "encrypt",
+    "decrypt"
+  ]);
+}
+async function encryptText(text, app) {
+  const iv = crypto.getRandomValues(new Uint8Array(ivLength));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await getEncryptionKey(app),
+    new TextEncoder().encode(text)
+  );
+  const encrypted = new Uint8Array(ivLength + ciphertext.byteLength);
+  encrypted.set(iv);
+  encrypted.set(new Uint8Array(ciphertext), ivLength);
+  return encrypted.toBase64();
+}
+async function decryptText(encryptedText, app) {
+  const encrypted = Uint8Array.fromBase64(encryptedText);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: encrypted.subarray(0, ivLength) },
+    await getEncryptionKey(app),
+    encrypted.subarray(ivLength)
+  );
+  return new TextDecoder().decode(plaintext);
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/clipboard.ts
 var clipboardHistoryChangedEvent = "clipboard-history-changed";
 
@@ -709,7 +889,8 @@ async function openDatabase(app) {
         sourceAppBundleId TEXT,
         deletedAt INTEGER,
         pinnedAt INTEGER,
-        pasteAsFile INTEGER
+        pasteAsFile INTEGER,
+        encrypted INTEGER
       )
     `
   );
@@ -730,28 +911,37 @@ async function saveClipboardItem(item, app) {
   const dateCopied = Date.now();
   const savedItem = {
     ...item,
+    kind: item.kind,
+    // "empty" was ruled out above
     id: generateUUID(),
     dateCopied,
     pinned: false,
-    pasteAsFile: item.pasteAsFile === true
+    pasteAsFile: item.pasteAsFile === true,
+    fileSize: null,
+    // read when history is listed
+    secrets: item.kind === "text" && item.text ? findSecrets(item.text) : []
   };
+  const value = serializeValue(savedItem);
+  const isEncrypted = value !== null && savedItem.secrets.length > 0;
+  const storedValue = isEncrypted ? await encryptText(value, app) : value;
   run(
     await initializeDatabase(app),
     `
       INSERT INTO "CLIPBOARD_ITEMS" (
-        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
     serializeImageSize(savedItem),
     serializePath(savedItem, app),
-    serializeValue(savedItem),
+    storedValue,
     savedItem.dateCopied,
     savedItem.sourceApp?.name ?? null,
     savedItem.sourceApp?.bundleId ?? null,
-    savedItem.pasteAsFile ? 1 : null
+    savedItem.pasteAsFile ? 1 : null,
+    isEncrypted ? 1 : null
   );
   notifyClipboardHistoryChanged(app);
   return savedItem;
@@ -868,16 +1058,54 @@ async function listClipboardItems(app) {
   const rows = all(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile, encrypted
       FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL
       ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
     `
   );
-  return rows.flatMap((row) => {
-    const item = rowToClipboardItem(row, app);
+  const decryptedRows = await Promise.all(
+    rows.map((row) => decryptRow(row, app))
+  );
+  const items = decryptedRows.flatMap((row) => {
+    const item = row && rowToClipboardItem(row, app);
     return item ? [item] : [];
   });
+  await Promise.all(
+    items.map(async (item) => {
+      if (item.paths.length === 1)
+        item.fileSize = await getFileSize(item.paths[0]);
+    })
+  );
+  return items;
+}
+async function decryptRow(row, app) {
+  if (row.encrypted !== 1 || row.value === null) return row;
+  try {
+    return { ...row, value: await decryptText(row.value, app) };
+  } catch (error) {
+    logError(`decrypting history item ${row.id} failed:`, error);
+    return null;
+  }
+}
+async function encryptSecretsInHistory(app) {
+  const database = await initializeDatabase(app);
+  const rows = all(
+    database,
+    `
+      SELECT id, value FROM "CLIPBOARD_ITEMS"
+      WHERE kind = 'text' AND encrypted IS NULL AND value IS NOT NULL
+    `
+  );
+  for (const { id, value } of rows) {
+    if (!value || findSecrets(value).length === 0) continue;
+    run(
+      database,
+      `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = 1 WHERE id = ? AND encrypted IS NULL`,
+      await encryptText(value, app),
+      id
+    );
+  }
 }
 function serializeImageSize(item) {
   return item.kind === "image" && item.imageSize ? JSON.stringify(item.imageSize) : null;
@@ -905,7 +1133,8 @@ var addedColumns = {
   sourceAppBundleId: "TEXT",
   deletedAt: "INTEGER",
   pinnedAt: "INTEGER",
-  pasteAsFile: "INTEGER"
+  pasteAsFile: "INTEGER",
+  encrypted: "INTEGER"
 };
 function addMissingColumns(database) {
   const columnNames = new Set(
@@ -939,7 +1168,10 @@ function rowToClipboardItem(row, app) {
     sourceApp: sourceAppFromRow(row),
     sourceURL: null,
     pinned: row.pinnedAt != null,
-    pasteAsFile: row.kind === "image" && row.pasteAsFile === 1
+    pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
+    fileSize: null,
+    // filled in by listClipboardItems
+    secrets: row.kind === "text" && row.value ? findSecrets(row.value) : []
   };
 }
 function sourceAppFromRow(row) {
@@ -1032,24 +1264,6 @@ async function getFolderSize(folder) {
   return size;
 }
 
-// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
-var PREVIEW_SIZE = 64;
-async function getFilePreview(path, app) {
-  if (typeof path !== "string" || !path.startsWith("/")) return null;
-  const stats = await tjs.stat(path).catch(() => null);
-  if (!stats) return null;
-  try {
-    const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
-    return {
-      url: await pngDataUrl(thumbnail.path),
-      size: stats.isDirectory ? null : stats.size
-    };
-  } catch (error) {
-    logError(`filePreview failed for ${path}:`, error);
-    return null;
-  }
-}
-
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/global-shortcut.ts
 var SHORTCUT_PATTERN = /^[a-z0-9+]+$/;
 var registeredShortcut = "";
@@ -1093,6 +1307,8 @@ async function getTrimLimits(app, { historyDuration, maximumItems, maximumStorag
     maximumStorage > 0 ? await countItemsWithinStorage(app, maximumStorage) : Infinity
   );
   return {
+    // Date.now(), not performance.now(): it's compared with the saved copy
+    // times, which are Mac clock times too
     copiedBefore: keepFor === null ? 0 : Date.now() - keepFor,
     keepNewest: Number.isFinite(keepNewest) ? keepNewest : -1
   };
@@ -1144,8 +1360,8 @@ async function isWindowOnScreen(app, windowId) {
   return Boolean(state?.visible && !state.minimized);
 }
 async function waitForFocusToLeave(app, teneoProcessId) {
-  const deadline = Date.now() + 500;
-  while (Date.now() < deadline && (await app.frontmostApp())?.pid === teneoProcessId) {
+  const deadline = performance.now() + 500;
+  while (performance.now() < deadline && (await app.frontmostApp())?.pid === teneoProcessId) {
     await new Promise((resolve) => setTimeout(resolve, 16));
   }
 }
@@ -1213,7 +1429,7 @@ async function openUpdateWindow(update, app) {
     app.openWindow(updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
-      size: "480x460",
+      size: "480x640",
       chrome: { ...windowChrome, windowControls: false }
     });
     app.window(updateWindowId).setLevel("floating");
@@ -1239,9 +1455,9 @@ function isSameRect(rect, other) {
   return rect?.x === other?.x && rect?.y === other?.y && rect?.width === other?.width && rect?.height === other?.height;
 }
 async function waitForTrayToSettle(app) {
-  const deadline = Date.now() + 2e3;
+  const deadline = performance.now() + 2e3;
   let previousRect = null;
-  while (Date.now() < deadline) {
+  while (performance.now() < deadline) {
     const rect = await app.tray.position();
     if (rect && rect.height > 0 && isSameRect(rect, previousRect)) return true;
     previousRect = rect;
@@ -1296,8 +1512,8 @@ function trackDownload(response, app) {
     new TransformStream({
       transform(chunk, controller) {
         received += chunk.byteLength;
-        if (Date.now() - lastSentAt >= progressIntervalMs) {
-          lastSentAt = Date.now();
+        if (performance.now() - lastSentAt >= progressIntervalMs) {
+          lastSentAt = performance.now();
           sendProgress({ received, total }, app);
         }
         controller.enqueue(chunk);
@@ -1309,6 +1525,24 @@ function trackDownload(response, app) {
     })
   );
   response.arrayBuffer = () => new Response(countedBody).arrayBuffer();
+}
+async function checkForUpdatesInBackground(app) {
+  if (!tjs.exePath.includes(".app/Contents/MacOS/")) return;
+  try {
+    const { available, current, latest, notes } = await app.update.check();
+    if (available && latest) {
+      await openUpdateWindow({ current, latest, notes }, app);
+    }
+  } catch {
+  }
+}
+var oneDayMs = 24 * 60 * 60 * 1e3;
+function startCheckingForUpdates(app) {
+  const checkIfEnabled = () => {
+    if (getSettings().checkForUpdates) void checkForUpdatesInBackground(app);
+  };
+  checkIfEnabled();
+  setInterval(checkIfEnabled, oneDayMs);
 }
 async function installUpdate(app) {
   const originalFetch = globalThis.fetch;
@@ -1346,9 +1580,13 @@ var api = {
   pauseOpenPanelShortcut: ({ paused }, app) => pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
+    const wasCheckingForUpdates = getSettings().checkForUpdates;
     const settings = await updateSettings(changes, app);
     syncOpenPanelShortcut(app);
     await trimClipboardHistory(app);
+    if (settings.checkForUpdates && !wasCheckingForUpdates) {
+      void checkForUpdatesInBackground(app);
+    }
     return settings;
   },
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
@@ -1370,10 +1608,14 @@ function onWindowClosed(windowId, app) {
 async function init(app) {
   await loadSettings(app);
   await initializeDatabase(app);
+  void encryptSecretsInHistory(app).catch(
+    (error) => logError("encrypting secrets in history failed:", error)
+  );
   startTrimmingClipboardHistory(app);
   app.setHideOnClose(true);
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  startCheckingForUpdates(app);
   await previewUpdateWindow(app);
 }
 async function previewUpdateWindow(app) {

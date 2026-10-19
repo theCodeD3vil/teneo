@@ -4,6 +4,7 @@ import AddIcon from "~icons/hugeicons/add-01";
 import CancelIcon from "~icons/hugeicons/cancel-01";
 import TickIcon from "~icons/hugeicons/tick-02";
 
+import BetaBadge from "@/components/BetaBadge.vue";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +39,20 @@ const ignorePasswords = computed({
     else isPasswordWarningOpen.value = true;
   },
 });
+
+// Turning this off shows keys in full in history, so it asks first
+const isMaskSecretsWarningOpen = ref(false);
+const maskSecrets = computed({
+  get: () => settings.value.maskSecrets,
+  set: (enabled) => {
+    if (enabled) void updateSettings({ maskSecrets: true });
+    else isMaskSecretsWarningOpen.value = true;
+  },
+});
+
+function showSecretsInHistory(): void {
+  void updateSettings({ maskSecrets: false });
+}
 
 function keepPasswordsInHistory(): void {
   void updateSettings({ ignorePasswords: false });
@@ -141,6 +156,45 @@ const {
         </Button>
       </div>
     </SettingsSection>
+
+    <SettingsSection>
+      <template #section-title>API Keys</template>
+
+      <SettingsField>
+        <template #label>
+          <span class="flex items-center gap-2">
+            Hide API keys
+            <BetaBadge />
+          </span>
+        </template>
+        <template #description>
+          Show keys and other secrets as asterisks in history. Pasting still
+          gives the full key, and they're always saved encrypted.
+        </template>
+        <Switch v-model="maskSecrets" />
+      </SettingsField>
+    </SettingsSection>
+
+    <AlertDialog v-model:open="isMaskSecretsWarningOpen">
+      <AlertDialogContent class="bg-card/35 border-card/45">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Show API keys in history?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Keys and other secrets will show in full in Teneo's history, where
+            anyone who sees your screen can read them. They stay saved encrypted
+            on this Mac.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            @click="showSecretsInHistory">
+            Show keys
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
     <AlertDialog v-model:open="isPasswordWarningOpen">
       <AlertDialogContent class="bg-card/35 border-card/45">

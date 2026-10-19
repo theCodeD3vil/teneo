@@ -54,6 +54,8 @@ async function getTrimLimits(
       : Infinity,
   );
   return {
+    // Date.now(), not performance.now(): it's compared with the saved copy
+    // times, which are Mac clock times too
     copiedBefore: keepFor === null ? 0 : Date.now() - keepFor,
     keepNewest: Number.isFinite(keepNewest) ? keepNewest : -1,
   };

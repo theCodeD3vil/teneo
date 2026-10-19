@@ -32,9 +32,11 @@ async function waitForFocusToLeave(
   teneoProcessId: number | undefined,
 ): Promise<void> {
   // The hand-off usually takes under 60ms; don't hold up a paste if it never comes
-  const deadline = Date.now() + 500;
+  // performance.now() only moves forward, unlike Date.now(), which follows the
+  // Mac's clock: a clock set back mid-wait would stretch 500ms into hours
+  const deadline = performance.now() + 500;
   while (
-    Date.now() < deadline &&
+    performance.now() < deadline &&
     (await app.frontmostApp())?.pid === teneoProcessId
   ) {
     await new Promise((resolve) => setTimeout(resolve, 16));
@@ -141,7 +143,7 @@ export async function openUpdateWindow(
     app.openWindow(updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
-      size: "480x460",
+      size: "480x640",
       chrome: { ...windowChrome, windowControls: false },
     });
     // Like an alert: above other apps, and on any Space or full-screen app
@@ -187,9 +189,11 @@ function isSameRect(rect: TrayRect, other: TrayRect): boolean {
 async function waitForTrayToSettle(app: TinyApp): Promise<boolean> {
   // A new icon first reports a zero-height placeholder at the bottom of the
   // screen, then slides up into the menu bar (~350ms)
-  const deadline = Date.now() + 2000;
+  // performance.now(), not Date.now(): a change to the Mac's clock mustn't
+  // shorten or stretch the wait (see waitForFocusToLeave)
+  const deadline = performance.now() + 2000;
   let previousRect: TrayRect = null;
-  while (Date.now() < deadline) {
+  while (performance.now() < deadline) {
     const rect = await app.tray.position();
     if (rect && rect.height > 0 && isSameRect(rect, previousRect)) return true;
     previousRect = rect;

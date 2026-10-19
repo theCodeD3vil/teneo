@@ -2,7 +2,8 @@ import {
   type UpdateProgress,
   updateProgressEvent,
 } from "../shared/types/windows";
-import { updateWindowId } from "./windows";
+import { getSettings } from "./settings";
+import { openUpdateWindow, updateWindowId } from "./windows";
 
 // A push per chunk would flood the page on a fast connection
 const progressIntervalMs = 100;
@@ -20,8 +21,10 @@ function trackDownload(response: Response, app: TinyApp): void {
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
         received += chunk.byteLength;
-        if (Date.now() - lastSentAt >= progressIntervalMs) {
-          lastSentAt = Date.now();
+        // performance.now() only moves forward; with Date.now(), setting the
+        // Mac's clock back would stop progress until it caught up again
+        if (performance.now() - lastSentAt >= progressIntervalMs) {
+          lastSentAt = performance.now();
           sendProgress({ received, total }, app);
         }
         controller.enqueue(chunk);
@@ -34,6 +37,34 @@ function trackDownload(response: Response, app: TinyApp): void {
   );
   // update.install() reads the whole download with arrayBuffer()
   response.arrayBuffer = () => new Response(countedBody).arrayBuffer();
+}
+
+/** Look for a newer version and ask to install it, for "Check for updates" in
+ *  Settings. Only the installed app looks: a dev run has no .app to replace
+ *  (tinyjs's own updater makes the same check). */
+export async function checkForUpdatesInBackground(app: TinyApp): Promise<void> {
+  if (!tjs.exePath.includes(".app/Contents/MacOS/")) return;
+  try {
+    const { available, current, latest, notes } = await app.update.check();
+    if (available && latest) {
+      await openUpdateWindow({ current, latest, notes }, app);
+    }
+  } catch {
+    // offline or the release server is down; it looks again next launch
+  }
+}
+
+const oneDayMs = 24 * 60 * 60 * 1000;
+
+/** Check at launch, then once a day while Teneo runs: a menu bar app can stay
+ *  open for weeks. txiki's timers count time the Mac spends asleep, so
+ *  overnight sleep doesn't put the check off. */
+export function startCheckingForUpdates(app: TinyApp): void {
+  const checkIfEnabled = () => {
+    if (getSettings().checkForUpdates) void checkForUpdatesInBackground(app);
+  };
+  checkIfEnabled();
+  setInterval(checkIfEnabled, oneDayMs);
 }
 
 /** Install the available update and relaunch into it. */

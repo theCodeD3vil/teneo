@@ -1,9 +1,14 @@
 /** User settings, owned by the backend and mirrored in every window. */
 export interface AppSettings {
+  /** look for a new version each time Teneo starts */
+  checkForUpdates: boolean;
   /** Enter pastes into the active app instead of only copying */
   pasteOnEnter: boolean;
   /** skip copies from password managers and the apps in excludedApps */
   ignorePasswords: boolean;
+  /** show API keys and other secrets in history as asterisks; pasting still
+   *  gives the real text */
+  maskSecrets: boolean;
   /** bundle ids of apps the user added to the ignore list; known password
    *  managers are built in and never stored here */
   excludedApps: string[];
@@ -22,8 +27,10 @@ export interface AppSettings {
 export type HistoryDuration = "day" | "week" | "month" | "year" | "forever";
 
 export const defaultSettings: AppSettings = {
+  checkForUpdates: true,
   pasteOnEnter: false,
   ignorePasswords: true,
+  maskSecrets: true,
   excludedApps: [],
   openPanelShortcut: "",
   historyDuration: "forever",
