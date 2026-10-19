@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import CommandIcon from "~icons/hugeicons/command";
 import Settings from "~icons/hugeicons/settings-01";
-import SpaceIcon from "~icons/hugeicons/space";
 
 import { useHotkeyPreview } from "@/composables/useHotkeyPreview";
 
