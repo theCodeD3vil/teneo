@@ -690,11 +690,13 @@ async function openDatabase(app) {
         value TEXT,
         dateCopied INTEGER NOT NULL,
         sourceAppName TEXT,
-        sourceAppBundleId TEXT
+        sourceAppBundleId TEXT,
+        deletedAt INTEGER,
+        pinnedAt INTEGER
       )
     `
   );
-  addSourceAppColumns(database);
+  addMissingColumns(database);
   run(
     database,
     `
@@ -712,7 +714,8 @@ async function saveClipboardItem(item, app) {
   const savedItem = {
     ...item,
     id: generateUUID(),
-    dateCopied
+    dateCopied,
+    pinned: false
   };
   run(
     await initializeDatabase(app),
@@ -735,14 +738,18 @@ async function saveClipboardItem(item, app) {
   return savedItem;
 }
 var deletionCondition = `
-  dateCopied < ? OR id NOT IN (
-    SELECT id FROM "CLIPBOARD_ITEMS" ORDER BY dateCopied DESC LIMIT ?
-  )
+  pinnedAt IS NULL AND (dateCopied < ? OR id NOT IN (
+    SELECT id FROM "CLIPBOARD_ITEMS" WHERE pinnedAt IS NULL
+    ORDER BY dateCopied DESC LIMIT ?
+  ))
 `;
 async function countClipboardItemsToDelete(app, copiedBefore, keepNewest) {
   const [result] = all(
     await initializeDatabase(app),
-    `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    `
+      SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS"
+      WHERE deletedAt IS NULL AND (${deletionCondition})
+    `,
     copiedBefore,
     keepNewest
   );
@@ -773,11 +780,32 @@ async function deleteClipboardItems(app, copiedBefore, keepNewest) {
     }
   }
 }
+async function softDeleteClipboardItem(id, app) {
+  run(
+    await initializeDatabase(app),
+    `
+      UPDATE "CLIPBOARD_ITEMS" SET deletedAt = ?, pinnedAt = NULL
+      WHERE id = ? AND deletedAt IS NULL
+    `,
+    Date.now(),
+    id
+  );
+  notifyClipboardHistoryChanged(app);
+}
+async function setClipboardItemPinned(id, pinned, app) {
+  run(
+    await initializeDatabase(app),
+    `UPDATE "CLIPBOARD_ITEMS" SET pinnedAt = ? WHERE id = ? AND deletedAt IS NULL`,
+    pinned ? Date.now() : null,
+    id
+  );
+  notifyClipboardHistoryChanged(app);
+}
 async function listClipboardItemSizes(app) {
   const rows = all(
     await initializeDatabase(app),
     `
-      SELECT kind, path,
+      SELECT kind, path, pinnedAt,
         ifnull(length(CAST(value AS BLOB)), 0) +
         ifnull(length(CAST(path AS BLOB)), 0) AS rowBytes
       FROM "CLIPBOARD_ITEMS"
@@ -791,7 +819,11 @@ async function listClipboardItemSizes(app) {
         (stat) => stat.size,
         () => 0
       ) : 0;
-      return { kind: row.kind, bytes: row.rowBytes + imageBytes };
+      return {
+        kind: row.kind,
+        bytes: row.rowBytes + imageBytes,
+        pinned: row.pinnedAt != null
+      };
     })
   );
 }
@@ -817,9 +849,10 @@ async function listClipboardItems(app) {
   const rows = all(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt
       FROM "CLIPBOARD_ITEMS"
-      ORDER BY dateCopied DESC
+      WHERE deletedAt IS NULL
+      ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
     `
   );
   return rows.flatMap((row) => {
@@ -848,24 +881,23 @@ function serializeValue(item) {
   if (item.kind === "color") return item.color;
   return null;
 }
-function addSourceAppColumns(database) {
+var addedColumns = {
+  sourceAppName: "TEXT",
+  sourceAppBundleId: "TEXT",
+  deletedAt: "INTEGER",
+  pinnedAt: "INTEGER"
+};
+function addMissingColumns(database) {
   const columnNames = new Set(
     all(
       database,
       `PRAGMA table_info("CLIPBOARD_ITEMS")`
     ).map((column) => column.name)
   );
-  if (!columnNames.has("sourceAppName")) {
-    run(
-      database,
-      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppName TEXT`
-    );
-  }
-  if (!columnNames.has("sourceAppBundleId")) {
-    run(
-      database,
-      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppBundleId TEXT`
-    );
+  for (const [name, type] of Object.entries(addedColumns)) {
+    if (!columnNames.has(name)) {
+      run(database, `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN ${name} ${type}`);
+    }
   }
 }
 function rowToClipboardItem(row, app) {
@@ -885,7 +917,8 @@ function rowToClipboardItem(row, app) {
     color: row.kind === "color" ? row.value : null,
     concealed: false,
     sourceApp: sourceAppFromRow(row),
-    sourceURL: null
+    sourceURL: null,
+    pinned: row.pinnedAt != null
   };
 }
 function sourceAppFromRow(row) {
@@ -950,8 +983,8 @@ async function getDataFolderUsage(app) {
     countClipboardMedia(app)
   ]);
   const clipboardSizeByKind = { text: 0, image: 0, files: 0, color: 0 };
-  for (const { kind, bytes } of itemSizes) {
-    if (kind in clipboardSizeByKind) {
+  for (const { kind, bytes, pinned } of itemSizes) {
+    if (!pinned && kind in clipboardSizeByKind) {
       clipboardSizeByKind[kind] += bytes;
     }
   }
@@ -1047,7 +1080,8 @@ async function countItemsWithinStorage(app, maximumStorage) {
   const itemSizes = await listClipboardItemSizes(app);
   let usedBytes = 0;
   let count = 0;
-  for (const { bytes } of itemSizes) {
+  for (const { bytes, pinned } of itemSizes) {
+    if (pinned) continue;
     usedBytes += bytes;
     if (usedBytes > maximumStorage) break;
     count += 1;
@@ -1275,6 +1309,8 @@ async function installUpdate(app) {
 var api = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
+  deleteClipboardItem: ({ id }, app) => softDeleteClipboardItem(id, app),
+  pinClipboardItem: ({ id, pinned }, app) => setClipboardItemPinned(id, pinned === true, app),
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
   excludedApps: ({ addedBundleIds }, app) => listExcludedApps(addedBundleIds, app),
   filePreview: ({ path }, app) => getFilePreview(path, app),

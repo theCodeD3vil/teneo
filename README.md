@@ -10,7 +10,7 @@
   <a href="https://github.com/theCodeD3vil/teneo/releases/latest"><strong>Download for macOS</strong></a>
 </p>
 
-Teneo is a clipboard manager for your Mac. It sits quietly in the menu bar and remembers what you copy: text, images, files and colors. When you need something again, open Teneo, find it, and copy or paste it back in a keystroke. Your history is stored only on your Mac.
+Teneo is a clipboard manager for your Mac. It sits quietly in the menu bar and remembers everything you copy. Your history is stored locally on your Mac. Nothing ever leaves.
 
 ## Installation
 
@@ -20,12 +20,11 @@ Teneo runs on macOS, on both Apple Silicon and Intel Macs.
    - **Apple Silicon** (M1 or later): `teneo-<version>-macos-arm64.dmg`
    - **Intel**: `teneo-<version>-macos-x86_64.dmg`
 
-   Not sure which you have? Open the Apple menu › **About This Mac**. A **Chip** line means Apple Silicon; a **Processor** line means Intel.
+> Not sure which you have? Open the Apple menu › **About This Mac**. A **Chip** line means Apple Silicon; a **Processor** line means Intel.
 
 2. Open the disk image and drag **Teneo** into **Applications**.
-3. Open Teneo from Applications. macOS blocks it the first time, because Teneo isn't notarized by Apple yet. Click **Done**, then go to **System Settings › Privacy & Security**, scroll down, and click **Open Anyway** next to the message about Teneo. You only need to do this once.
-4. A welcome window walks you through setup. Click **Continue**, then allow Accessibility (see [below](#accessibility-permission)), or click **Set up later** to skip it for now.
-5. Click **Done**. Teneo's icon appears in the menu bar and your clipboard history opens. Click the icon whenever you need it.
+3. Open Teneo from Applications. macOS blocks it the first time, because Teneo isn't notarized by Apple yet. Click **Done**, then go to **System Settings › Privacy & Security**, scroll down to the bottom, and click **Open Anyway** next to the message about Teneo. You only need to do this once.
+4. A welcome window walks you through setup. Complete it and Teneo is ready to be used.
 
 ### Accessibility permission
 
@@ -46,20 +45,20 @@ Teneo keeps itself up to date: when a new version is out, it asks before install
 - **Finds it fast.** Search your whole history, or narrow it down with the **Files**, **Image**, **Color** and **Text** tabs.
 - **Works from the keyboard.** Set your own shortcut to open Teneo from any app, then:
 
-  | Action                     | Keys  |
-  | -------------------------- | ----- |
-  | Move between items         | ↑ / ↓ |
-  | Move between tabs          | ← / → |
-  | Copy the selected item     | Enter |
-  | Copy one of the first nine | ⌘ 1–9 |
-  | Paste the selected item    | ⌘ V   |
-  | Preview the selected item  | Space |
-  | Jump to the search field   | ⌘ /   |
+  | Action                                   | Keys      |
+  | ---------------------------------------- | --------- |
+  | Move between items                       | `↑` / `↓` |
+  | Move between tabs                        | `←` / `→` |
+  | Copy the selected item                   | `Enter`   |
+  | Copy one of the first nine               | `⌘ 1–9`   |
+  | Paste the selected item into focused app | `⌘ V`     |
+  | Pin or unpin the selected item           | `P`       |
+  | Delete the selected item                 | `D`       |
+  | Jump to the search field                 | `⌘ /`     |
 
-- **Pastes for you.** Paste straight into the app you were using, or turn on **Paste on Enter** to paste every time you pick an item.
+- **Pastes for you.** Paste straight into the app you were using, or turn on **Paste on Enter** to paste every time you pick an item. This also happens automatically with the `⌘ + 1-9` hotkeys and `⌘ + V` keys
 - **Leaves passwords alone.** Anything copied from a password manager is skipped, and you can add any other app you want Teneo to ignore.
-- **Keeps only what you want.** Choose how long to keep history (1 day to forever), how many items to keep, and how much space it may use. Before a change deletes anything, Teneo tells you how many items will go and asks first. See how much space your history uses, or clear it all at once.
-- **Starts with your Mac.** Turn on **Launch at login** and Teneo is ready whenever you are.
+- **Keeps only what you want.** Choose how long to keep history (1 day to forever), how many items to keep, and how much space it may use. Pinned items always stay, and don't count toward these limits.
 
 ## Screenshots
 

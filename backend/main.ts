@@ -7,6 +7,8 @@ import {
   initializeDatabase,
   listClipboardItems,
   saveClipboardItem,
+  setClipboardItemPinned,
+  softDeleteClipboardItem,
 } from "./database";
 import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
 import { getFilePreview } from "./file-previews";
@@ -40,6 +42,9 @@ import {
 export const api: Record<string, TinyApiHandler> = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
   clipboardItems: (_parameters, app) => listClipboardItems(app),
+  deleteClipboardItem: ({ id }, app) => softDeleteClipboardItem(id, app),
+  pinClipboardItem: ({ id, pinned }, app) =>
+    setClipboardItemPinned(id, pinned === true, app),
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
   excludedApps: ({ addedBundleIds }, app) =>
     listExcludedApps(addedBundleIds, app),

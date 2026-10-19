@@ -121,12 +121,28 @@ function previewActiveItem(): boolean {
   return allTabContent.value?.previewActiveItem(activeItemId.value) ?? false;
 }
 
+function deleteActiveItem(): boolean {
+  const items = selectedItems.value;
+  const index = items.findIndex((item) => item.id === activeItemId.value);
+  if (!allTabContent.value?.deleteActiveItem(activeItemId.value)) return false;
+
+  // Select the next item (or the previous, when deleting the last) so D can be pressed again
+  activeItemId.value = (items[index + 1] ?? items[index - 1])?.id ?? null;
+  return true;
+}
+
+function pinActiveItem(): boolean {
+  return allTabContent.value?.pinActiveItem(activeItemId.value) ?? false;
+}
+
 useHotkeys({
   moveActiveTab,
   moveActiveItem,
   copyActiveItem,
   pasteSelectedItem: pasteActiveItem,
   previewSelectedItem: previewActiveItem,
+  deleteSelectedItem: deleteActiveItem,
+  pinSelectedItem: pinActiveItem,
 });
 
 watch(

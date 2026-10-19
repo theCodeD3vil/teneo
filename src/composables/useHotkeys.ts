@@ -51,5 +51,13 @@ function runHandler(hotkey: HotkeyMatch, handlers: HotkeyHandlers): boolean {
       const handler = handlers.copyActiveItem;
       return handler ? handler() !== false : false;
     }
+    case "deleteSelectedItem": {
+      const handler = handlers.deleteSelectedItem;
+      return handler ? handler() !== false : false;
+    }
+    case "pinSelectedItem": {
+      const handler = handlers.pinSelectedItem;
+      return handler ? handler() !== false : false;
+    }
   }
 }

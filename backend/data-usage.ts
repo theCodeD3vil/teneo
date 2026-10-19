@@ -10,8 +10,9 @@ export async function getDataFolderUsage(
     countClipboardMedia(app),
   ]);
   const clipboardSizeByKind = { text: 0, image: 0, files: 0, color: 0 };
-  for (const { kind, bytes } of itemSizes) {
-    if (kind in clipboardSizeByKind) {
+  // Pinned items don't count toward the storage limit, so the bar leaves them out
+  for (const { kind, bytes, pinned } of itemSizes) {
+    if (!pinned && kind in clipboardSizeByKind) {
       clipboardSizeByKind[kind as keyof typeof clipboardSizeByKind] += bytes;
     }
   }

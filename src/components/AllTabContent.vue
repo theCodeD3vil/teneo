@@ -1,5 +1,11 @@
 <script lang="ts" setup>
-import { computed, type ComponentPublicInstance } from "vue";
+import {
+  computed,
+  onUnmounted,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from "vue";
 import AlertCircleIcon from "~icons/hugeicons/alert-circle";
 import ClipboardListIcon from "~icons/hugeicons/clipboard-list";
 import FileIcon from "~icons/hugeicons/file-01";
@@ -34,13 +40,15 @@ const props = withDefaults(
 type ClipboardItemCardAction =
   | "copyAndHideWindow"
   | "pasteAndHideWindow"
-  | "previewItem";
+  | "previewItem"
+  | "deleteItem"
+  | "pinItem";
 
 type ClipboardItemCardReference = ComponentPublicInstance &
   Record<ClipboardItemCardAction, () => boolean>;
 
 interface ClipboardItemGroup {
-  key: number;
+  key: number | "pinned";
   label: string;
   items: Array<{ item: ClipboardHistoryItem; index: number }>;
 }
@@ -48,10 +56,21 @@ interface ClipboardItemGroup {
 const cardReferences = new Map<string, ClipboardItemCardReference>();
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 
+// Pinned items come first from the backend, so they also get the first ⌘ numbers
 const groupedItems = computed<ClipboardItemGroup[]>(() => {
+  const pinnedGroup: ClipboardItemGroup = {
+    key: "pinned",
+    label: "Pinned",
+    items: [],
+  };
   const groups = new Map<number, ClipboardItemGroup>();
 
   for (const [index, item] of props.items.entries()) {
+    if (item.pinned) {
+      pinnedGroup.items.push({ item, index });
+      continue;
+    }
+
     const dayStart = getDayStart(item.dateCopied);
     const existingGroup = groups.get(dayStart);
 
@@ -67,8 +86,59 @@ const groupedItems = computed<ClipboardItemGroup[]>(() => {
     });
   }
 
-  return [...groups.values()].sort((first, second) => second.key - first.key);
+  const dayGroups = [...groups.values()].sort(
+    (first, second) => Number(second.key) - Number(first.key),
+  );
+  return pinnedGroup.items.length ? [pinnedGroup, ...dayGroups] : dayGroups;
 });
+
+// Headers and cards in one flat keyed list: a card that moves to another group
+// keeps its instance (and loaded preview), so TransitionGroup can slide it there
+const listRows = computed(() =>
+  groupedItems.value.flatMap((group, groupIndex) => [
+    {
+      type: "header" as const,
+      key: `group-${group.key}`,
+      label: group.label,
+      isFirst: groupIndex === 0,
+    },
+    ...group.items.map(({ item, index }, itemIndex) => ({
+      type: "item" as const,
+      key: item.id,
+      item,
+      index,
+      isFirst: itemIndex === 0,
+    })),
+  ]),
+);
+
+// Only pinning or unpinning slides cards; tab switches, searches and new copies
+// change the list instantly, as before
+const pinMoveDuration = 300;
+const isAnimatingPinMove = ref(false);
+let pinMoveTimeout: ReturnType<typeof setTimeout> | undefined;
+
+watch(
+  () => props.items,
+  (items, previousItems) => {
+    const wasPinned = new Map(
+      previousItems.map((item) => [item.id, item.pinned]),
+    );
+    const pinChanged = items.some(
+      (item) =>
+        wasPinned.has(item.id) && wasPinned.get(item.id) !== item.pinned,
+    );
+    if (!pinChanged) return;
+
+    isAnimatingPinMove.value = true;
+    clearTimeout(pinMoveTimeout);
+    pinMoveTimeout = setTimeout(() => {
+      isAnimatingPinMove.value = false;
+    }, pinMoveDuration);
+  },
+);
+
+onUnmounted(() => clearTimeout(pinMoveTimeout));
 
 function getDayStart(timestamp: number): number {
   const date = new Date(timestamp);
@@ -124,6 +194,9 @@ defineExpose({
     runCardAction(itemId, "pasteAndHideWindow"),
   previewActiveItem: (itemId: string | null) =>
     runCardAction(itemId, "previewItem"),
+  deleteActiveItem: (itemId: string | null) =>
+    runCardAction(itemId, "deleteItem"),
+  pinActiveItem: (itemId: string | null) => runCardAction(itemId, "pinItem"),
 });
 </script>
 <template>
@@ -147,26 +220,37 @@ defineExpose({
     <!-- each card awaits its source-app icon in setup, so it only renders inside Suspense -->
     <Suspense v-else>
       <div>
-        <div v-if="props.items.length" class="flex flex-col gap-5">
-          <section
-            v-for="group in groupedItems"
-            :key="group.key"
-            class="space-y-2">
-            <h2 class="text-foreground/50 px-1 text-xs font-medium">
-              {{ group.label }}
+        <!-- css=false: items appear and disappear instantly; only moves animate.
+             transition-transform! beats the card's own transition property. -->
+        <TransitionGroup
+          v-if="props.items.length"
+          tag="div"
+          class="flex flex-col gap-2"
+          :css="false"
+          :move-class="
+            isAnimatingPinMove
+              ? 'transition-transform! duration-300 ease-out'
+              : ''
+          ">
+          <template v-for="row in listRows" :key="row.key">
+            <h2
+              v-if="row.type === 'header'"
+              :class="[
+                'text-foreground/50 px-1 text-xs font-medium',
+                !row.isFirst && 'mt-3',
+              ]">
+              {{ row.label }}
             </h2>
-            <div class="flex flex-col gap-4">
-              <ClipboardItemCard
-                v-for="{ item, index } in group.items"
-                :key="item.id"
-                :ref="(card) => setCardReference(item.id, card)"
-                :item-details="item"
-                :is-active="item.id === props.activeItemId"
-                :quick-paste-index="index + 1"
-                :supports-quick-paste="index + 1 < 10" />
-            </div>
-          </section>
-        </div>
+            <ClipboardItemCard
+              v-else
+              :ref="(card) => setCardReference(row.item.id, card)"
+              :class="!row.isFirst && 'mt-2'"
+              :item-details="row.item"
+              :is-active="row.item.id === props.activeItemId"
+              :quick-paste-index="row.index + 1"
+              :supports-quick-paste="row.index + 1 < 10" />
+          </template>
+        </TransitionGroup>
         <Empty v-else>
           <EmptyHeader>
             <EmptyMedia

@@ -34,11 +34,13 @@ async function openDatabase(app: TinyApp): Promise<Database> {
         value TEXT,
         dateCopied INTEGER NOT NULL,
         sourceAppName TEXT,
-        sourceAppBundleId TEXT
+        sourceAppBundleId TEXT,
+        deletedAt INTEGER,
+        pinnedAt INTEGER
       )
     `,
   );
-  addSourceAppColumns(database);
+  addMissingColumns(database);
   run(
     database,
     `
@@ -64,6 +66,7 @@ export async function saveClipboardItem(
     ...item,
     id: generateUUID(),
     dateCopied,
+    pinned: false,
   };
 
   run(
@@ -88,14 +91,17 @@ export async function saveClipboardItem(
   return savedItem;
 }
 
-// Matches items copied before ?1 (ms) or beyond the newest ?2 (-1 = no limit)
+// Matches unpinned items copied before ?1 (ms) or beyond the newest ?2
+// unpinned ones (-1 = no limit). Pinned items are never deleted or counted.
 const deletionCondition = `
-  dateCopied < ? OR id NOT IN (
-    SELECT id FROM "CLIPBOARD_ITEMS" ORDER BY dateCopied DESC LIMIT ?
-  )
+  pinnedAt IS NULL AND (dateCopied < ? OR id NOT IN (
+    SELECT id FROM "CLIPBOARD_ITEMS" WHERE pinnedAt IS NULL
+    ORDER BY dateCopied DESC LIMIT ?
+  ))
 `;
 
-/** How many items deleteClipboardItems would delete with these limits. */
+/** How many items in the history deleteClipboardItems would delete with
+ *  these limits. Already-deleted items still get removed, but aren't counted. */
 export async function countClipboardItemsToDelete(
   app: TinyApp,
   copiedBefore: number,
@@ -103,7 +109,10 @@ export async function countClipboardItemsToDelete(
 ): Promise<number> {
   const [result] = all<{ count: number }>(
     await initializeDatabase(app),
-    `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+    `
+      SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS"
+      WHERE deletedAt IS NULL AND (${deletionCondition})
+    `,
     copiedBefore,
     keepNewest,
   );
@@ -149,17 +158,51 @@ export async function deleteClipboardItems(
   }
 }
 
+/** Hide an item from the history but keep its row and image, so it can be
+ *  restored. It's unpinned too, so history limits count it and delete it in time. */
+export async function softDeleteClipboardItem(
+  id: string,
+  app: TinyApp,
+): Promise<void> {
+  run(
+    await initializeDatabase(app),
+    `
+      UPDATE "CLIPBOARD_ITEMS" SET deletedAt = ?, pinnedAt = NULL
+      WHERE id = ? AND deletedAt IS NULL
+    `,
+    Date.now(),
+    id,
+  );
+  notifyClipboardHistoryChanged(app);
+}
+
+/** Pinned items list first, newest pin first, and history
+ *  limits leave them alone. */
+export async function setClipboardItemPinned(
+  id: string,
+  pinned: boolean,
+  app: TinyApp,
+): Promise<void> {
+  run(
+    await initializeDatabase(app),
+    `UPDATE "CLIPBOARD_ITEMS" SET pinnedAt = ? WHERE id = ? AND deletedAt IS NULL`,
+    pinned ? Date.now() : null,
+    id,
+  );
+  notifyClipboardHistoryChanged(app);
+}
+
 /** Bytes each history item takes, newest first: its text, color or file
- *  list, plus its saved image. This is what the storage limit counts. */
+ *  list, plus its saved image. The storage limit counts the unpinned ones. */
 export async function listClipboardItemSizes(
   app: TinyApp,
-): Promise<Array<{ kind: string; bytes: number }>> {
+): Promise<Array<{ kind: string; bytes: number; pinned: boolean }>> {
   const rows = all<
-    Pick<ClipboardItemRow, "kind" | "path"> & { rowBytes: number }
+    Pick<ClipboardItemRow, "kind" | "path" | "pinnedAt"> & { rowBytes: number }
   >(
     await initializeDatabase(app),
     `
-      SELECT kind, path,
+      SELECT kind, path, pinnedAt,
         ifnull(length(CAST(value AS BLOB)), 0) +
         ifnull(length(CAST(path AS BLOB)), 0) AS rowBytes
       FROM "CLIPBOARD_ITEMS"
@@ -177,7 +220,11 @@ export async function listClipboardItemSizes(
             () => 0,
           )
         : 0;
-      return { kind: row.kind, bytes: row.rowBytes + imageBytes };
+      return {
+        kind: row.kind,
+        bytes: row.rowBytes + imageBytes,
+        pinned: row.pinnedAt != null,
+      };
     }),
   );
 }
@@ -212,9 +259,10 @@ export async function listClipboardItems(
   const rows = all<ClipboardItemRow>(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt
       FROM "CLIPBOARD_ITEMS"
-      ORDER BY dateCopied DESC
+      WHERE deletedAt IS NULL
+      ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
     `,
   );
 
@@ -251,24 +299,25 @@ function serializeValue(item: TinyClipboardData): string | null {
   return null;
 }
 
-function addSourceAppColumns(database: Database): void {
+// Columns added after the first release; older databases lack them
+const addedColumns = {
+  sourceAppName: "TEXT",
+  sourceAppBundleId: "TEXT",
+  deletedAt: "INTEGER",
+  pinnedAt: "INTEGER",
+};
+
+function addMissingColumns(database: Database): void {
   const columnNames = new Set(
     all<ClipboardItemColumn>(
       database,
       `PRAGMA table_info("CLIPBOARD_ITEMS")`,
     ).map((column) => column.name),
   );
-  if (!columnNames.has("sourceAppName")) {
-    run(
-      database,
-      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppName TEXT`,
-    );
-  }
-  if (!columnNames.has("sourceAppBundleId")) {
-    run(
-      database,
-      `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN sourceAppBundleId TEXT`,
-    );
+  for (const [name, type] of Object.entries(addedColumns)) {
+    if (!columnNames.has(name)) {
+      run(database, `ALTER TABLE "CLIPBOARD_ITEMS" ADD COLUMN ${name} ${type}`);
+    }
   }
 }
 
@@ -294,6 +343,7 @@ function rowToClipboardItem(
     concealed: false,
     sourceApp: sourceAppFromRow(row),
     sourceURL: null,
+    pinned: row.pinnedAt != null,
   };
 }
 

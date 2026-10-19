@@ -2,13 +2,17 @@
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import ClipboardIcon from "~icons/hugeicons/clipboard";
 import CommandIcon from "~icons/hugeicons/command";
+import DeleteIcon from "~icons/hugeicons/delete-02";
 import FileIcon from "~icons/hugeicons/file-01";
 import FileVerifiedIcon from "~icons/hugeicons/file-verified";
 import ImageIcon from "~icons/hugeicons/image-01";
 import ImageDoneIcon from "~icons/hugeicons/image-done-01";
+import PinIcon from "~icons/hugeicons/pin";
+import PinOffIcon from "~icons/hugeicons/pin-off";
 import TextAlignLeftIcon from "~icons/hugeicons/text-align-left";
 import TickIcon from "~icons/hugeicons/tick-02";
 
+import Button from "@/components/ui/button/Button.vue";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
 import type { QuickCopyItemNumber } from "@/constants/hotkeys";
@@ -23,7 +27,13 @@ const props = defineProps<{
   quickPasteIndex?: number;
 }>();
 
-defineExpose({ copyAndHideWindow, pasteAndHideWindow, previewItem });
+defineExpose({
+  copyAndHideWindow,
+  pasteAndHideWindow,
+  previewItem,
+  deleteItem,
+  pinItem,
+});
 
 const cardElement = ref<HTMLElement | null>(null);
 const isCopying = ref(false);
@@ -143,6 +153,25 @@ function copyItem(hideWindow = false, paste = false): boolean {
 }
 
 // Posting ⌘V needs the Accessibility permission; ask for it when it is missing.
+// Soft delete: the history refreshes once the backend reports the change
+function deleteItem(): boolean {
+  void tiny.api
+    .call("deleteClipboardItem", { id: props.itemDetails.id })
+    .catch(() => undefined);
+  return true;
+}
+
+// Toggles: P and the button unpin an already pinned item
+function pinItem(): boolean {
+  void tiny.api
+    .call("pinClipboardItem", {
+      id: props.itemDetails.id,
+      pinned: !props.itemDetails.pinned,
+    })
+    .catch(() => undefined);
+  return true;
+}
+
 async function pasteIntoFrontmostApp(): Promise<void> {
   const { trusted } = await tiny.app.paste();
   if (!trusted) await tiny.app.permissions.request("accessibility");
@@ -199,10 +228,11 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
 <template>
   <div
     ref="cardElement"
+    :data-active="isActive || undefined"
     @click="copyItem()"
     :class="
       cn([
-        'hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]',
+        'group/card hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]',
         props.isActive && 'bg-foreground/5',
       ])
     ">
@@ -327,13 +357,33 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
           </template>
         </div>
       </div>
-      <!-- actions + quick paste -->
-      <div class="shrink-0 p-2">
+      <!-- quick paste, swapped for the actions when hovered or selected; both share one grid cell so nothing shifts -->
+      <div class="grid shrink-0 place-items-center p-2">
         <div
-          class="bg-foreground/1 text-foreground/60 flex w-max items-center gap-0.5 rounded p-1"
+          class="bg-foreground/1 text-foreground/60 actions-visible:opacity-0 col-start-1 row-start-1 flex w-max items-center gap-0.5 rounded p-1"
           v-if="supportsQuickPaste">
           <CommandIcon />
           <span class="text-xs">{{ quickPasteIndex }}</span>
+        </div>
+        <div
+          class="actions-visible:opacity-100 col-start-1 row-start-1 flex items-center gap-0.5 opacity-0">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            :title="itemDetails.pinned ? 'Unpin' : 'Pin'"
+            class="text-foreground/60 hover:text-foreground hover:bg-foreground/10!"
+            @click.stop="pinItem">
+            <PinOffIcon v-if="itemDetails.pinned" class="size-3.5" />
+            <PinIcon v-else class="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            title="Delete"
+            class="text-foreground/60 hover:text-destructive hover:bg-destructive/10!"
+            @click.stop="deleteItem">
+            <DeleteIcon class="size-3.5" />
+          </Button>
         </div>
       </div>
     </div>

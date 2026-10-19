@@ -59,7 +59,7 @@ async function getTrimLimits(
   };
 }
 
-/** How many of the newest items fit in maximumStorage bytes. */
+/** How many of the newest unpinned items fit in maximumStorage bytes. */
 async function countItemsWithinStorage(
   app: TinyApp,
   maximumStorage: number,
@@ -67,7 +67,8 @@ async function countItemsWithinStorage(
   const itemSizes = await listClipboardItemSizes(app);
   let usedBytes = 0;
   let count = 0;
-  for (const { bytes } of itemSizes) {
+  for (const { bytes, pinned } of itemSizes) {
+    if (pinned) continue;
     usedBytes += bytes;
     if (usedBytes > maximumStorage) break;
     count += 1;

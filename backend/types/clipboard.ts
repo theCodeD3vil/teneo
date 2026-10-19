@@ -15,6 +15,7 @@ export interface ClipboardItemRow {
   dateCopied: number;
   sourceAppName: string | null;
   sourceAppBundleId: string | null;
+  pinnedAt: number | null;
 }
 
 export interface ClipboardItemColumn {

@@ -28,4 +28,5 @@ export interface ClipboardHistoryItem {
   concealed: boolean;
   sourceApp: ClipboardSourceApp | null;
   sourceURL: string | null;
+  pinned: boolean;
 }
