@@ -37,7 +37,7 @@ You can allow it in either of two ways:
 
 Teneo's **Settings › Security** tab shows whether access is allowed.
 
-Teneo keeps itself up to date: when a new version is out, it asks before installing it. You can also check any time from **Settings › About › Check now**.
+Teneo keeps itself up to date: when it starts and once a day after that, it looks for a new version and asks before installing it. You can turn this off with **Settings › General › Check for updates**, and check any time from **Settings › About › Check now**.
 
 ## Features
 

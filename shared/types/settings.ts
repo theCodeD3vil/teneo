@@ -1,5 +1,7 @@
 /** User settings, owned by the backend and mirrored in every window. */
 export interface AppSettings {
+  /** look for a new version each time Teneo starts */
+  checkForUpdates: boolean;
   /** Enter pastes into the active app instead of only copying */
   pasteOnEnter: boolean;
   /** skip copies from password managers and the apps in excludedApps */
@@ -25,6 +27,7 @@ export interface AppSettings {
 export type HistoryDuration = "day" | "week" | "month" | "year" | "forever";
 
 export const defaultSettings: AppSettings = {
+  checkForUpdates: true,
   pasteOnEnter: false,
   ignorePasswords: true,
   maskSecrets: true,

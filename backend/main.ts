@@ -30,7 +30,11 @@ import {
   quitIfSetupClosedEarly,
   showMenuBarOrSetup,
 } from "./setup";
-import { installUpdate } from "./updates";
+import {
+  checkForUpdatesInBackground,
+  installUpdate,
+  startCheckingForUpdates,
+} from "./updates";
 import {
   closeUpdateWindow,
   getAvailableUpdate,
@@ -63,9 +67,14 @@ export const api: Record<string, TinyApiHandler> = {
     pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
+    const wasCheckingForUpdates = getSettings().checkForUpdates;
     const settings = await updateSettings(changes, app);
     syncOpenPanelShortcut(app);
     await trimClipboardHistory(app); // a tighter history limit applies now
+    // turning update checks on looks now, not only at the next launch
+    if (settings.checkForUpdates && !wasCheckingForUpdates) {
+      void checkForUpdatesInBackground(app);
+    }
     return settings;
   },
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
@@ -104,6 +113,7 @@ export async function init(app: TinyApp) {
   // Open the panel on the current Space, over full-screen apps too
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  startCheckingForUpdates(app);
   await previewUpdateWindow(app);
 }
 

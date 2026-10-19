@@ -20,7 +20,6 @@
   },
   "activation": "accessory",
   "update": {
-    "url": "https://github.com/theCodeD3vil/teneo/releases/latest/download/manifest.json",
-    "auto": "launch"
+    "url": "https://github.com/theCodeD3vil/teneo/releases/latest/download/manifest.json"
   }
 }

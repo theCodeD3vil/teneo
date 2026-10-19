@@ -528,6 +528,7 @@ function splitWhitespace(value) {
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/settings.ts
 var defaultSettings = {
+  checkForUpdates: true,
   pasteOnEnter: false,
   ignorePasswords: true,
   maskSecrets: true,
@@ -1525,6 +1526,24 @@ function trackDownload(response, app) {
   );
   response.arrayBuffer = () => new Response(countedBody).arrayBuffer();
 }
+async function checkForUpdatesInBackground(app) {
+  if (!tjs.exePath.includes(".app/Contents/MacOS/")) return;
+  try {
+    const { available, current, latest, notes } = await app.update.check();
+    if (available && latest) {
+      await openUpdateWindow({ current, latest, notes }, app);
+    }
+  } catch {
+  }
+}
+var oneDayMs = 24 * 60 * 60 * 1e3;
+function startCheckingForUpdates(app) {
+  const checkIfEnabled = () => {
+    if (getSettings().checkForUpdates) void checkForUpdatesInBackground(app);
+  };
+  checkIfEnabled();
+  setInterval(checkIfEnabled, oneDayMs);
+}
 async function installUpdate(app) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init2) => {
@@ -1561,9 +1580,13 @@ var api = {
   pauseOpenPanelShortcut: ({ paused }, app) => pauseOpenPanelShortcut(paused, app),
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
+    const wasCheckingForUpdates = getSettings().checkForUpdates;
     const settings = await updateSettings(changes, app);
     syncOpenPanelShortcut(app);
     await trimClipboardHistory(app);
+    if (settings.checkForUpdates && !wasCheckingForUpdates) {
+      void checkForUpdatesInBackground(app);
+    }
     return settings;
   },
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
@@ -1592,6 +1615,7 @@ async function init(app) {
   app.setHideOnClose(true);
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  startCheckingForUpdates(app);
   await previewUpdateWindow(app);
 }
 async function previewUpdateWindow(app) {
