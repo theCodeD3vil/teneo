@@ -35,10 +35,10 @@ function openSettings(): void {
       leave-to-class="-translate-y-1 opacity-0 scale-95">
       <HotkeyPreview v-if="hotkeyProgress" :progress="hotkeyProgress" />
       <div v-else class="text-foreground/70 flex items-center gap-x-3 text-xs">
-        <div class="flex items-center gap-1">
+        <!-- <div class="flex items-center gap-1">
           <Kbd class="bg-foreground/10"> <SpaceIcon /> Space </Kbd>
           to preview
-        </div>
+        </div> -->
         <div class="flex items-center gap-1">
           <Kbd class="bg-foreground/10"> <CommandIcon /> V </Kbd>
           to paste

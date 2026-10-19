@@ -183,7 +183,9 @@ const clearHistoryMutation = useMutation({
 
       <SettingsField>
         <template #label>Keep history for</template>
-        <template #description>Older items are deleted automatically</template>
+        <template #description>
+          Older items are deleted automatically; pinned items stay
+        </template>
         <NativeSelect
           :key="`duration-${limitSelectRevision}`"
           v-model="historyDuration"
@@ -201,7 +203,9 @@ const clearHistoryMutation = useMutation({
 
       <SettingsField>
         <template #label>Maximum items</template>
-        <template #description>The oldest items go first</template>
+        <template #description>
+          The oldest items go first; pinned items don't count
+        </template>
         <NativeSelect
           :key="`items-${limitSelectRevision}`"
           v-model="maximumItems"
@@ -292,7 +296,9 @@ const clearHistoryMutation = useMutation({
             class="text-destructive">
             Couldn't clear history
           </span>
-          <template v-else>Delete every item and saved image</template>
+          <template v-else>
+            Delete every item and saved image, except pinned items
+          </template>
         </template>
         <AlertDialog>
           <AlertDialogTrigger as-child>
@@ -307,8 +313,8 @@ const clearHistoryMutation = useMutation({
             <AlertDialogHeader>
               <AlertDialogTitle>Clear clipboard history?</AlertDialogTitle>
               <AlertDialogDescription>
-                Every item and saved image will be deleted. This can't be
-                undone.
+                Every item and saved image will be deleted, except pinned items.
+                This can't be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

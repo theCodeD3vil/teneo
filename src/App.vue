@@ -36,8 +36,10 @@ async function showWindow() {
   tiny.win.setPosition(calulatedXPosition, calculatedYPosition);
 
   tabManager.value?.activateFirstItem();
+  // Open on the list, not the search field, so letter hotkeys (P, D) work;
+  // ⌘ / focuses search. Blur too: focus left in search last time comes back on show.
+  searchInput.value?.blur();
   await tiny.win.show();
-  searchInput.value?.focus();
 }
 
 async function isCursorOverTray(): Promise<boolean> {

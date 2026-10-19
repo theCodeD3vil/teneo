@@ -121,12 +121,39 @@ function previewActiveItem(): boolean {
   return allTabContent.value?.previewActiveItem(activeItemId.value) ?? false;
 }
 
+// D and P take the selected card away from where the user is, so selection
+// stays in place on its neighbour and they can carry on down the list
+function deleteActiveItem(): boolean {
+  const neighbourId = getActiveItemNeighbourId();
+  if (!allTabContent.value?.deleteActiveItem(activeItemId.value)) return false;
+
+  activeItemId.value = neighbourId;
+  return true;
+}
+
+function pinActiveItem(): boolean {
+  const neighbourId = getActiveItemNeighbourId();
+  if (!allTabContent.value?.pinActiveItem(activeItemId.value)) return false;
+
+  activeItemId.value = neighbourId ?? activeItemId.value; // a lone item stays selected
+  return true;
+}
+
+// The item after the selected one, or before it when it's the last
+function getActiveItemNeighbourId(): string | null {
+  const items = selectedItems.value;
+  const index = items.findIndex((item) => item.id === activeItemId.value);
+  return (items[index + 1] ?? items[index - 1])?.id ?? null;
+}
+
 useHotkeys({
   moveActiveTab,
   moveActiveItem,
   copyActiveItem,
   pasteSelectedItem: pasteActiveItem,
   previewSelectedItem: previewActiveItem,
+  deleteSelectedItem: deleteActiveItem,
+  pinSelectedItem: pinActiveItem,
 });
 
 watch(

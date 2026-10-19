@@ -15,7 +15,11 @@ function focus(): void {
   searchInputContainer.value?.querySelector("input")?.focus();
 }
 
-defineExpose({ focus });
+function blur(): void {
+  searchInputContainer.value?.querySelector("input")?.blur();
+}
+
+defineExpose({ focus, blur });
 </script>
 
 <template>
@@ -25,7 +29,8 @@ defineExpose({ focus });
         v-model="searchQuery"
         placeholder="Search clipboard"
         class="text-sm font-light"
-        data-hotkeys />
+        data-hotkeys
+        @keydown.esc="blur" />
       <InputGroupAddon>
         <SearchIcon />
       </InputGroupAddon>

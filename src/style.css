@@ -5,6 +5,8 @@
 @import "shadcn-vue/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+/* a clipboard card shows its actions while hovered, selected, or keyboard-focused */
+@custom-variant actions-visible (&:is(:where(.group\/card):is(:hover, [data-active], :has(:focus-visible)) *));
 
 @theme inline {
   --font-heading: var(--font-sans);

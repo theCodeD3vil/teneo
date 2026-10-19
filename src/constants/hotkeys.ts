@@ -1,4 +1,4 @@
-import { hasTypedText } from "@/utils/keyboard";
+import { hasTypedText, isEditableKeyboardTarget } from "@/utils/keyboard";
 
 const quickCopyItemNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
@@ -26,6 +26,12 @@ export const hotkeyDefinitions = {
     shortcut: "⌘ /",
     description: "Focus the search field",
   },
+  // Listed only: SearchInput handles Esc itself
+  leaveSearch: {
+    id: "leave-search",
+    shortcut: "Esc",
+    description: "Leave the search field",
+  },
   moveActiveTab: {
     id: "move-active-tab",
     shortcut: "← / →",
@@ -43,8 +49,7 @@ export const hotkeyDefinitions = {
   },
 } as const;
 
-export type HotkeyName = keyof typeof hotkeyDefinitions;
-
+// D and P are left out of hotkeyDefinitions so Settings doesn't list them; the README does
 export type HotkeyMatch =
   | { name: "previewSelectedItem" }
   | { name: "copyItemByNumber"; itemNumber: QuickCopyItemNumber }
@@ -52,14 +57,16 @@ export type HotkeyMatch =
   | { name: "focusSearch" }
   | { name: "moveActiveTab"; direction: NavigationDirection }
   | { name: "moveActiveItem"; direction: NavigationDirection }
-  | { name: "copyActiveItem" };
+  | { name: "copyActiveItem" }
+  | { name: "deleteSelectedItem" }
+  | { name: "pinSelectedItem" };
 
 export type HotkeyPreviewKey =
   | { type: "modifier"; value: "command" | "option" | "control" | "shift" }
   | { type: "key"; value: string };
 
 export type HotkeyProgress = {
-  hotkeyName: HotkeyName | null;
+  hotkeyName: HotkeyMatch["name"] | null;
   keys: HotkeyPreviewKey[];
   state: "partial" | "complete";
 };
@@ -72,6 +79,8 @@ export type HotkeyHandlers = {
   moveActiveTab?: (direction: NavigationDirection) => boolean | void;
   moveActiveItem?: (direction: NavigationDirection) => boolean | void;
   copyActiveItem?: () => boolean | void;
+  deleteSelectedItem?: () => boolean | void;
+  pinSelectedItem?: () => boolean | void;
 };
 
 export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
@@ -96,6 +105,13 @@ export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
       return { name: "moveActiveItem", direction: 1 };
     }
     if (event.key === "Enter") return { name: "copyActiveItem" };
+
+    // Letters type into the focused search field instead
+    if (!isEditableKeyboardTarget(event.target)) {
+      const key = event.key.toLowerCase();
+      if (key === "d") return { name: "deleteSelectedItem" };
+      if (key === "p") return { name: "pinSelectedItem" };
+    }
   }
 
   if (!hasOnlyCommandModifier(event)) return null;
@@ -195,6 +211,18 @@ function progressFromHotkey(
       return {
         hotkeyName: hotkey.name,
         keys: [{ type: "key", value: "Enter" }],
+        state: "complete",
+      };
+    case "deleteSelectedItem":
+      return {
+        hotkeyName: hotkey.name,
+        keys: [{ type: "key", value: "D" }],
+        state: "complete",
+      };
+    case "pinSelectedItem":
+      return {
+        hotkeyName: hotkey.name,
+        keys: [{ type: "key", value: "P" }],
         state: "complete",
       };
   }

@@ -6,6 +6,10 @@ import type {
 
 export type { ClipboardHistoryItem, ClipboardItemKind };
 
+/** A clipboard read, ready for history; pasteAsFile marks an image saved from
+ *  a screenshot tool's temp file, which pastes back as that file. */
+export type ClipboardItemToSave = TinyClipboardData & { pasteAsFile?: boolean };
+
 export interface ClipboardItemRow {
   id: string;
   kind: ClipboardItemKind;
@@ -15,6 +19,8 @@ export interface ClipboardItemRow {
   dateCopied: number;
   sourceAppName: string | null;
   sourceAppBundleId: string | null;
+  pinnedAt: number | null;
+  pasteAsFile: number | null;
 }
 
 export interface ClipboardItemColumn {

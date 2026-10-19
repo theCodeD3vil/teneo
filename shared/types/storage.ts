@@ -4,8 +4,8 @@ import type { ClipboardItemKind } from "./clipboard";
 export interface DataFolderUsage {
   /** total bytes: history database, saved images, app icons, settings */
   size: number;
-  /** bytes counted against the storage limit, per kind of history item: its
-   *  text, color or file list, plus its saved image */
+  /** bytes counted against the storage limit, per kind of unpinned history
+   *  item: its text, color or file list, plus its saved image */
   clipboardSizeByKind: Record<ClipboardItemKind, number>;
   /** image items in history */
   imageCount: number;
