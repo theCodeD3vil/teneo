@@ -207,7 +207,8 @@ function getClipboardDataForQuickCopy(
     case "files":
       return item.paths.length ? { paths: item.paths } : null;
     case "image":
-      return item.image ? { image: item.image } : null;
+      if (!item.image) return null;
+      return item.pasteAsFile ? { paths: [item.image] } : { image: item.image };
     case "color":
       return item.color ? { color: item.color } : null;
   }
@@ -360,29 +361,29 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
       <!-- quick paste, swapped for the actions when hovered or selected; both share one grid cell so nothing shifts -->
       <div class="grid shrink-0 place-items-center p-2">
         <div
-          class="bg-foreground/1 text-foreground/60 actions-visible:opacity-0 col-start-1 row-start-1 flex w-max items-center gap-0.5 rounded p-1"
+          class="bg-foreground/1 text-foreground/60 actions-visible:invisible col-start-1 row-start-1 flex w-max items-center gap-0.5 rounded p-1"
           v-if="supportsQuickPaste">
           <CommandIcon />
           <span class="text-xs">{{ quickPasteIndex }}</span>
         </div>
         <div
-          class="actions-visible:opacity-100 col-start-1 row-start-1 flex items-center gap-0.5 opacity-0">
+          class="actions-visible:opacity-100 col-start-1 row-start-1 flex items-center gap-1 opacity-0">
           <Button
             variant="ghost"
-            size="icon-xs"
+            size="icon-sm"
             :title="itemDetails.pinned ? 'Unpin' : 'Pin'"
             class="text-foreground/60 hover:text-foreground hover:bg-foreground/10!"
             @click.stop="pinItem">
-            <PinOffIcon v-if="itemDetails.pinned" class="size-3.5" />
-            <PinIcon v-else class="size-3.5" />
+            <PinOffIcon v-if="itemDetails.pinned" />
+            <PinIcon v-else />
           </Button>
           <Button
             variant="ghost"
-            size="icon-xs"
+            size="icon-sm"
             title="Delete"
             class="text-foreground/60 hover:text-destructive hover:bg-destructive/10!"
             @click.stop="deleteItem">
-            <DeleteIcon class="size-3.5" />
+            <DeleteIcon />
           </Button>
         </div>
       </div>

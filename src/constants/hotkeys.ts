@@ -26,6 +26,12 @@ export const hotkeyDefinitions = {
     shortcut: "⌘ /",
     description: "Focus the search field",
   },
+  // Listed only: SearchInput handles Esc itself
+  leaveSearch: {
+    id: "leave-search",
+    shortcut: "Esc",
+    description: "Leave the search field",
+  },
   moveActiveTab: {
     id: "move-active-tab",
     shortcut: "← / →",

@@ -640,6 +640,7 @@ function generateUUID() {
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/clipboard-history.ts
+var imageFilePattern = /\.(png|jpe?g|gif|heic|webp|tiff?|bmp)$/i;
 function isFromPasswordManager(item) {
   if (item.concealed) return true;
   const bundleId = item.sourceApp?.bundleId;
@@ -655,11 +656,26 @@ async function readClipboardItem(app) {
       (error) => logError(`saving icon for ${bundleId} failed:`, error)
     );
   }
-  return normalizeClipboardColor(await saveClipboardImage(item, app));
+  return saveClipboardImage(
+    tempImageFileAsImage(normalizeClipboardColor(item), app),
+    app
+  );
+}
+function tempImageFileAsImage(item, app) {
+  const [path] = item.paths;
+  const isTempImageFile = item.kind === "files" && item.paths.length === 1 && item.image !== null && // the picture is on the clipboard too
+  imageFilePattern.test(path) && isInTempFolder(path, app);
+  if (!isTempImageFile) return item;
+  return { ...item, kind: "image", image: path, paths: [], pasteAsFile: true };
+}
+function isInTempFolder(path, app) {
+  const tempFolder = app.paths.temp.replace(/\/$/, "");
+  return path.startsWith(`${tempFolder}/`) || path.startsWith(`/private${tempFolder}/`);
 }
 async function saveClipboardImage(item, app) {
   if (item.kind !== "image" || !item.image) return item;
-  const savedPath = `${await dataFolder(app, "images")}/${generateUUID()}-${item.changeCount}.png`;
+  const fileName = item.pasteAsFile ? item.image.split("/").pop() : `${item.changeCount}.png`;
+  const savedPath = `${await dataFolder(app, "images")}/${generateUUID()}-${fileName}`;
   await tjs.copyFile(item.image, savedPath);
   return { ...item, image: savedPath };
 }
@@ -692,7 +708,8 @@ async function openDatabase(app) {
         sourceAppName TEXT,
         sourceAppBundleId TEXT,
         deletedAt INTEGER,
-        pinnedAt INTEGER
+        pinnedAt INTEGER,
+        pasteAsFile INTEGER
       )
     `
   );
@@ -715,15 +732,16 @@ async function saveClipboardItem(item, app) {
     ...item,
     id: generateUUID(),
     dateCopied,
-    pinned: false
+    pinned: false,
+    pasteAsFile: item.pasteAsFile === true
   };
   run(
     await initializeDatabase(app),
     `
       INSERT INTO "CLIPBOARD_ITEMS" (
-        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
@@ -732,7 +750,8 @@ async function saveClipboardItem(item, app) {
     serializeValue(savedItem),
     savedItem.dateCopied,
     savedItem.sourceApp?.name ?? null,
-    savedItem.sourceApp?.bundleId ?? null
+    savedItem.sourceApp?.bundleId ?? null,
+    savedItem.pasteAsFile ? 1 : null
   );
   notifyClipboardHistoryChanged(app);
   return savedItem;
@@ -849,7 +868,7 @@ async function listClipboardItems(app) {
   const rows = all(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile
       FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL
       ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
@@ -885,7 +904,8 @@ var addedColumns = {
   sourceAppName: "TEXT",
   sourceAppBundleId: "TEXT",
   deletedAt: "INTEGER",
-  pinnedAt: "INTEGER"
+  pinnedAt: "INTEGER",
+  pasteAsFile: "INTEGER"
 };
 function addMissingColumns(database) {
   const columnNames = new Set(
@@ -918,7 +938,8 @@ function rowToClipboardItem(row, app) {
     concealed: false,
     sourceApp: sourceAppFromRow(row),
     sourceURL: null,
-    pinned: row.pinnedAt != null
+    pinned: row.pinnedAt != null,
+    pasteAsFile: row.kind === "image" && row.pasteAsFile === 1
   };
 }
 function sourceAppFromRow(row) {

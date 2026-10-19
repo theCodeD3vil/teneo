@@ -55,6 +55,7 @@ Teneo keeps itself up to date: when a new version is out, it asks before install
   | Pin or unpin the selected item           | `P`       |
   | Delete the selected item                 | `D`       |
   | Jump to the search field                 | `⌘ /`     |
+  | Leave the search field                   | `Esc`     |
 
 - **Pastes for you.** Paste straight into the app you were using, or turn on **Paste on Enter** to paste every time you pick an item. This also happens automatically with the `⌘ + 1-9` hotkeys and `⌘ + V` keys
 - **Leaves passwords alone.** Anything copied from a password manager is skipped, and you can add any other app you want Teneo to ignore.

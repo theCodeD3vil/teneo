@@ -5,7 +5,10 @@ import { normalizeClipboardColor } from "./color";
 import { isExcludedApp } from "./excluded-apps";
 import { dataFolder, logError } from "./files";
 import { getSettings } from "./settings";
+import type { ClipboardItemToSave } from "./types/clipboard";
 import { generateUUID } from "./utils/uuid-generator";
+
+const imageFilePattern = /\.(png|jpe?g|gif|heic|webp|tiff?|bmp)$/i;
 
 function isFromPasswordManager(item: TinyClipboardData): boolean {
   // concealed = the org.nspasteboard marker well-behaved password managers set
@@ -17,7 +20,7 @@ function isFromPasswordManager(item: TinyClipboardData): boolean {
 /** Read the clipboard as a history item, or null for items history must skip. */
 export async function readClipboardItem(
   app: TinyApp,
-): Promise<TinyClipboardData | null> {
+): Promise<ClipboardItemToSave | null> {
   const item = await app.clipboard.read();
   if (item.kind === "empty") return null;
   if (getSettings().ignorePasswords && isFromPasswordManager(item)) return null;
@@ -29,18 +32,54 @@ export async function readClipboardItem(
       logError(`saving icon for ${bundleId} failed:`, error),
     );
   }
-  return normalizeClipboardColor(await saveClipboardImage(item, app));
+  return saveClipboardImage(
+    tempImageFileAsImage(normalizeClipboardColor(item), app),
+    app,
+  );
+}
+
+/** Screenshot tools such as BetterShot copy an image file in the temp folder
+ *  along with the picture itself. History keeps it as an image, since macOS
+ *  clears the temp folder, but pastes it back as a file, like the tool does.
+ *  sourceApp stays the app in front, usually the one in the screenshot. */
+function tempImageFileAsImage(
+  item: TinyClipboardData,
+  app: TinyApp,
+): ClipboardItemToSave {
+  const [path] = item.paths;
+  const isTempImageFile =
+    item.kind === "files" &&
+    item.paths.length === 1 &&
+    item.image !== null && // the picture is on the clipboard too
+    imageFilePattern.test(path) &&
+    isInTempFolder(path, app);
+  if (!isTempImageFile) return item;
+
+  // image points at the tool's file, so the real file is what gets saved
+  return { ...item, kind: "image", image: path, paths: [], pasteAsFile: true };
+}
+
+function isInTempFolder(path: string, app: TinyApp): boolean {
+  const tempFolder = app.paths.temp.replace(/\/$/, "");
+  // /var is a symlink to /private/var, so a path can use either form
+  return (
+    path.startsWith(`${tempFolder}/`) ||
+    path.startsWith(`/private${tempFolder}/`)
+  );
 }
 
 /** Copy a clipboard image out of its temp file, which is replaced on the next
  *  copy. Returns the item pointing at the saved copy. */
 async function saveClipboardImage(
-  item: TinyClipboardData,
+  item: ClipboardItemToSave,
   app: TinyApp,
-): Promise<TinyClipboardData> {
+): Promise<ClipboardItemToSave> {
   if (item.kind !== "image" || !item.image) return item;
-  // changeCount restarts at boot, so the timestamp keeps names unique across reboots
-  const savedPath = `${await dataFolder(app, "images")}/${generateUUID()}-${item.changeCount}.png`;
+  // A file pasted back keeps its name and type; the UUID keeps names unique
+  const fileName = item.pasteAsFile
+    ? item.image.split("/").pop()
+    : `${item.changeCount}.png`;
+  const savedPath = `${await dataFolder(app, "images")}/${generateUUID()}-${fileName}`;
   await tjs.copyFile(item.image, savedPath);
   return { ...item, image: savedPath };
 }

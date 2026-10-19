@@ -29,4 +29,7 @@ export interface ClipboardHistoryItem {
   sourceApp: ClipboardSourceApp | null;
   sourceURL: string | null;
   pinned: boolean;
+  /** an image from a screenshot tool's temp file: copying it back puts the
+   *  saved image on the clipboard as a file, as the tool itself does */
+  pasteAsFile: boolean;
 }

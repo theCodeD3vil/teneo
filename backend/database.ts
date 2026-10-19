@@ -6,6 +6,7 @@ import type {
   ClipboardItemColumn,
   ClipboardItemKind,
   ClipboardItemRow,
+  ClipboardItemToSave,
 } from "./types/clipboard";
 import { clipboardHistoryChangedEvent } from "./types/clipboard";
 import { generateUUID } from "./utils/uuid-generator";
@@ -36,7 +37,8 @@ async function openDatabase(app: TinyApp): Promise<Database> {
         sourceAppName TEXT,
         sourceAppBundleId TEXT,
         deletedAt INTEGER,
-        pinnedAt INTEGER
+        pinnedAt INTEGER,
+        pasteAsFile INTEGER
       )
     `,
   );
@@ -54,7 +56,7 @@ async function openDatabase(app: TinyApp): Promise<Database> {
 
 /** Save a clipboard item after transient clipboard data, such as images, is durable. */
 export async function saveClipboardItem(
-  item: TinyClipboardData,
+  item: ClipboardItemToSave,
   app: TinyApp,
 ): Promise<ClipboardHistoryItem> {
   if (item.kind === "empty") {
@@ -67,15 +69,16 @@ export async function saveClipboardItem(
     id: generateUUID(),
     dateCopied,
     pinned: false,
+    pasteAsFile: item.pasteAsFile === true,
   };
 
   run(
     await initializeDatabase(app),
     `
       INSERT INTO "CLIPBOARD_ITEMS" (
-        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
@@ -85,6 +88,7 @@ export async function saveClipboardItem(
     savedItem.dateCopied,
     savedItem.sourceApp?.name ?? null,
     savedItem.sourceApp?.bundleId ?? null,
+    savedItem.pasteAsFile ? 1 : null,
   );
   notifyClipboardHistoryChanged(app);
 
@@ -259,7 +263,7 @@ export async function listClipboardItems(
   const rows = all<ClipboardItemRow>(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile
       FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL
       ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
@@ -305,6 +309,7 @@ const addedColumns = {
   sourceAppBundleId: "TEXT",
   deletedAt: "INTEGER",
   pinnedAt: "INTEGER",
+  pasteAsFile: "INTEGER",
 };
 
 function addMissingColumns(database: Database): void {
@@ -344,6 +349,7 @@ function rowToClipboardItem(
     sourceApp: sourceAppFromRow(row),
     sourceURL: null,
     pinned: row.pinnedAt != null,
+    pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
   };
 }
 
