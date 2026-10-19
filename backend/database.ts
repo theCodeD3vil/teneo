@@ -1,5 +1,6 @@
 import { Database } from "tjs:sqlite";
 
+import { getFileSize } from "./file-previews";
 import { logError } from "./files";
 import type {
   ClipboardHistoryItem,
@@ -70,6 +71,7 @@ export async function saveClipboardItem(
     dateCopied,
     pinned: false,
     pasteAsFile: item.pasteAsFile === true,
+    fileSize: null, // read when history is listed
   };
 
   run(
@@ -270,10 +272,19 @@ export async function listClipboardItems(
     `,
   );
 
-  return rows.flatMap((row) => {
+  const items = rows.flatMap((row) => {
     const item = rowToClipboardItem(row, app);
     return item ? [item] : [];
   });
+  // Only for a single copied file: next to "+N" the first file's size would
+  // read as the total. Read now, not when copied, since the file may change.
+  await Promise.all(
+    items.map(async (item) => {
+      if (item.paths.length === 1)
+        item.fileSize = await getFileSize(item.paths[0]);
+    }),
+  );
+  return items;
 }
 
 function serializeImageSize(item: TinyClipboardData): string | null {
@@ -350,6 +361,7 @@ function rowToClipboardItem(
     sourceURL: null,
     pinned: row.pinnedAt != null,
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
+    fileSize: null, // filled in by listClipboardItems
   };
 }
 

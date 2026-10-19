@@ -1,5 +1,6 @@
 <script lang="ts" setup>
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { useQuery } from "@tanstack/vue-query";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import ClipboardIcon from "~icons/hugeicons/clipboard";
 import CommandIcon from "~icons/hugeicons/command";
 import DeleteIcon from "~icons/hugeicons/delete-02";
@@ -57,13 +58,23 @@ function getClipboardThemeClasses() {
   }
 }
 
+// The app icon and preview load after the card shows, so a card never waits on
+// the backend; they're cached, so a card seen before shows them at once.
+const sourceAppBundleId = props.itemDetails.sourceApp?.bundleId;
 // data: URL of the app's icon, or null when the app can't be found
-const sourceAppIconUrl = await tiny.api.call("appIcon", {
-  bundleId: props.itemDetails.sourceApp?.bundleId,
+const { data: sourceAppIconUrl } = useQuery({
+  queryKey: ["app-icon", sourceAppBundleId],
+  queryFn: (): Promise<string | null> =>
+    tiny.api.call("appIcon", { bundleId: sourceAppBundleId }),
+  enabled: Boolean(sourceAppBundleId),
+  // an app's icon doesn't change while Teneo runs
+  staleTime: Infinity,
+  gcTime: Infinity,
 });
 
 // Images and files are previewed from disk: the saved image copy, or the first copied file.
-// A null preview means that file was moved or deleted since it was copied.
+// The preview is a data: URL, or null when that file was moved or deleted since
+// it was copied; until it loads, the kind icon holds its place at the same size.
 const isImage = props.itemDetails.kind === "image";
 const isFiles = props.itemDetails.kind === "files";
 const firstPath = props.itemDetails.paths[0];
@@ -74,21 +85,28 @@ const previewPath = isImage
     ? firstPath
     : null;
 
-const preview: { url: string; size: number | null } | null = previewPath
-  ? await tiny.api.call("filePreview", { path: previewPath })
-  : null;
-const previewUrl = preview?.url ?? null;
+const { data: previewUrl } = useQuery({
+  queryKey: ["file-preview", previewPath],
+  queryFn: (): Promise<string | null> =>
+    tiny.api.call("filePreview", { path: previewPath }),
+  enabled: Boolean(previewPath),
+  // the panel only hides, so this would redo every preview each time it opens
+  refetchOnWindowFocus: false,
+});
 
-const isPreviewMissing = (isImage || isFiles) && !previewUrl;
+const isPreviewMissing = computed(
+  () => (isImage || isFiles) && (!previewPath || previewUrl.value === null),
+);
 
 const fileName = firstPath?.split("/").pop();
 const otherFileCount = props.itemDetails.paths.length - 1;
 
-// Only for a single copied file: next to "+N" the first file's size would read as the total.
-const fileSize =
-  isFiles && otherFileCount === 0 && preview?.size != null
-    ? formatFileSize(preview.size)
-    : null;
+// comes with the history list, so the line under the name never shifts
+const fileSize = computed(() =>
+  props.itemDetails.fileSize == null
+    ? null
+    : formatFileSize(props.itemDetails.fileSize),
+);
 
 const dateCopied = useRelativeTimeAgo(props.itemDetails.dateCopied);
 
@@ -116,7 +134,7 @@ function handleQuickCopy(itemNumber: QuickCopyItemNumber): boolean {
   if (
     !props.supportsQuickPaste ||
     props.quickPasteIndex !== itemNumber ||
-    isPreviewMissing
+    isPreviewMissing.value
   ) {
     return false;
   }
@@ -134,7 +152,7 @@ function pasteAndHideWindow(): boolean {
 
 /** Quick Look the copied file(s) or image; text and colors have no file to show. */
 function previewItem(): boolean {
-  if (isPreviewMissing || !previewPath) return false;
+  if (isPreviewMissing.value || !previewPath) return false;
 
   void tiny.macos
     .quickLook(isFiles ? props.itemDetails.paths : [previewPath])
@@ -143,7 +161,7 @@ function previewItem(): boolean {
 }
 
 function copyItem(hideWindow = false, paste = false): boolean {
-  if (isPreviewMissing || isCopying.value) return false;
+  if (isPreviewMissing.value || isCopying.value) return false;
 
   const clipboardData = getClipboardDataForQuickCopy(props.itemDetails);
   if (!clipboardData) return false;
@@ -334,12 +352,18 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
         </p>
 
         <div class="flex items-center gap-x-2">
+          <!-- shown while the icon loads, its place kept, so the line doesn't shift -->
           <span
-            v-if="sourceAppIconUrl"
+            v-if="sourceAppBundleId && sourceAppIconUrl !== null"
             class="text-foreground/50 flex items-center gap-x-1 text-xs">
             <img
               :src="sourceAppIconUrl"
-              class="aspect-square size-4 overflow-hidden rounded" />
+              :class="
+                cn([
+                  'aspect-square size-4 overflow-hidden rounded',
+                  !sourceAppIconUrl && 'invisible',
+                ])
+              " />
             {{ itemDetails.sourceApp?.name }}
           </span>
           <template v-if="fileSize">

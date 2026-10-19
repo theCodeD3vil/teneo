@@ -32,4 +32,7 @@ export interface ClipboardHistoryItem {
   /** an image from a screenshot tool's temp file: copying it back puts the
    *  saved image on the clipboard as a file, as the tool itself does */
   pasteAsFile: boolean;
+  /** bytes of a single copied file, read each time history is listed; null
+   *  for a folder, a missing file, several files and other kinds */
+  fileSize: number | null;
 }

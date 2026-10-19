@@ -683,6 +683,25 @@ async function saveClipboardImage(item, app) {
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/database.ts
 import { Database } from "tjs:sqlite";
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
+var PREVIEW_SIZE = 64;
+async function getFilePreview(path, app) {
+  if (typeof path !== "string" || !path.startsWith("/")) return null;
+  const stats = await tjs.stat(path).catch(() => null);
+  if (!stats) return null;
+  try {
+    const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
+    return await pngDataUrl(thumbnail.path);
+  } catch (error) {
+    logError(`filePreview failed for ${path}:`, error);
+    return null;
+  }
+}
+async function getFileSize(path) {
+  const stats = await tjs.stat(path).catch(() => null);
+  return stats && !stats.isDirectory ? stats.size : null;
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/clipboard.ts
 var clipboardHistoryChangedEvent = "clipboard-history-changed";
 
@@ -733,7 +752,9 @@ async function saveClipboardItem(item, app) {
     id: generateUUID(),
     dateCopied,
     pinned: false,
-    pasteAsFile: item.pasteAsFile === true
+    pasteAsFile: item.pasteAsFile === true,
+    fileSize: null
+    // read when history is listed
   };
   run(
     await initializeDatabase(app),
@@ -874,10 +895,17 @@ async function listClipboardItems(app) {
       ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
     `
   );
-  return rows.flatMap((row) => {
+  const items = rows.flatMap((row) => {
     const item = rowToClipboardItem(row, app);
     return item ? [item] : [];
   });
+  await Promise.all(
+    items.map(async (item) => {
+      if (item.paths.length === 1)
+        item.fileSize = await getFileSize(item.paths[0]);
+    })
+  );
+  return items;
 }
 function serializeImageSize(item) {
   return item.kind === "image" && item.imageSize ? JSON.stringify(item.imageSize) : null;
@@ -939,7 +967,9 @@ function rowToClipboardItem(row, app) {
     sourceApp: sourceAppFromRow(row),
     sourceURL: null,
     pinned: row.pinnedAt != null,
-    pasteAsFile: row.kind === "image" && row.pasteAsFile === 1
+    pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
+    fileSize: null
+    // filled in by listClipboardItems
   };
 }
 function sourceAppFromRow(row) {
@@ -1030,24 +1060,6 @@ async function getFolderSize(folder) {
     );
   }
   return size;
-}
-
-// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
-var PREVIEW_SIZE = 64;
-async function getFilePreview(path, app) {
-  if (typeof path !== "string" || !path.startsWith("/")) return null;
-  const stats = await tjs.stat(path).catch(() => null);
-  if (!stats) return null;
-  try {
-    const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
-    return {
-      url: await pngDataUrl(thumbnail.path),
-      size: stats.isDirectory ? null : stats.size
-    };
-  } catch (error) {
-    logError(`filePreview failed for ${path}:`, error);
-    return null;
-  }
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/global-shortcut.ts

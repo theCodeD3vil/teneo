@@ -217,60 +217,55 @@ defineExpose({
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
-    <!-- each card awaits its source-app icon in setup, so it only renders inside Suspense -->
-    <Suspense v-else>
-      <div>
-        <!-- css=false: items appear and disappear instantly; only moves animate.
+    <div v-else>
+      <!-- css=false: items appear and disappear instantly; only moves animate.
              transition-transform! beats the card's own transition property. -->
-        <TransitionGroup
-          v-if="props.items.length"
-          tag="div"
-          class="flex flex-col gap-2"
-          :css="false"
-          :move-class="
-            isAnimatingPinMove
-              ? 'transition-transform! duration-300 ease-out'
-              : ''
-          ">
-          <template v-for="row in listRows" :key="row.key">
-            <h2
-              v-if="row.type === 'header'"
-              :class="[
-                'text-foreground/50 px-1 text-xs font-medium',
-                !row.isFirst && 'mt-3',
-              ]">
-              {{ row.label }}
-            </h2>
-            <ClipboardItemCard
-              v-else
-              :ref="(card) => setCardReference(row.item.id, card)"
-              :class="!row.isFirst && 'mt-2'"
-              :item-details="row.item"
-              :is-active="row.item.id === props.activeItemId"
-              :quick-paste-index="row.index + 1"
-              :supports-quick-paste="row.index + 1 < 10" />
-          </template>
-        </TransitionGroup>
-        <Empty v-else>
-          <EmptyHeader>
-            <EmptyMedia
-              variant="icon"
-              class="bg-foreground/5 text-foreground/70">
-              <ImageIcon v-if="props.tab === 'image'" />
-              <FileIcon v-else-if="props.tab === 'files'" />
-              <PaletteIcon v-else-if="props.tab === 'color'" />
-              <TextAlignLeftIcon v-else-if="props.tab === 'text'" />
-              <ClipboardListIcon v-else />
-            </EmptyMedia>
-            <EmptyTitle class="text-foreground/70">
-              {{ props.emptyMessage }}
-            </EmptyTitle>
-            <EmptyDescription class="text-foreground/50">
-              Copy something to see it here.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      </div>
-    </Suspense>
+      <TransitionGroup
+        v-if="props.items.length"
+        tag="div"
+        class="flex flex-col gap-2"
+        :css="false"
+        :move-class="
+          isAnimatingPinMove
+            ? 'transition-transform! duration-300 ease-out'
+            : ''
+        ">
+        <template v-for="row in listRows" :key="row.key">
+          <h2
+            v-if="row.type === 'header'"
+            :class="[
+              'text-foreground/50 px-1 text-xs font-medium',
+              !row.isFirst && 'mt-3',
+            ]">
+            {{ row.label }}
+          </h2>
+          <ClipboardItemCard
+            v-else
+            :ref="(card) => setCardReference(row.item.id, card)"
+            :class="!row.isFirst && 'mt-2'"
+            :item-details="row.item"
+            :is-active="row.item.id === props.activeItemId"
+            :quick-paste-index="row.index + 1"
+            :supports-quick-paste="row.index + 1 < 10" />
+        </template>
+      </TransitionGroup>
+      <Empty v-else>
+        <EmptyHeader>
+          <EmptyMedia variant="icon" class="bg-foreground/5 text-foreground/70">
+            <ImageIcon v-if="props.tab === 'image'" />
+            <FileIcon v-else-if="props.tab === 'files'" />
+            <PaletteIcon v-else-if="props.tab === 'color'" />
+            <TextAlignLeftIcon v-else-if="props.tab === 'text'" />
+            <ClipboardListIcon v-else />
+          </EmptyMedia>
+          <EmptyTitle class="text-foreground/70">
+            {{ props.emptyMessage }}
+          </EmptyTitle>
+          <EmptyDescription class="text-foreground/50">
+            Copy something to see it here.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </div>
   </ScrollArea>
 </template>

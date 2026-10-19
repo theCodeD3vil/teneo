@@ -8,7 +8,7 @@ const app = await createApp({
   htmlPath: FRONTEND,
   title: "Teneo",
   size: "560x640",
-  version: "0.1.3",
+  version: "0.1.4",
   tinyjsVersion: "v0.53.1",
   id: "com.michael.teneo",
   resourcesPath: RESOURCES,
