@@ -101,3 +101,12 @@ Teneo keeps itself up to date: when it starts and once a day after that, it look
   <br>
   <em>Every shortcut, in one place</em>
 </p>
+
+## Roadmap
+
+Here's what's planned next. More will be added over time.
+
+- **Previews.** Open any item in your history to see it in full, and do more with it than copy and paste.
+- **Landing page.** A proper home for Teneo, where you can explore what it does and download it.
+- **Sync engine.** Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).
+- **Android app.** Sync your clipboard history between your Android phone and your Mac.

@@ -5,5 +5,10 @@ export default defineConfig({
   sortImports: true,
   sortTailwindcss: true,
   bracketSameLine: true,
-  ignorePatterns: ["src/components/ui/**", ".build/**"],
+  ignorePatterns: [
+    "src/components/ui/**",
+    ".build/**",
+    "site/src/components/ui/**",
+    "site/dist/**",
+  ],
 });
