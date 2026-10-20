@@ -21,7 +21,7 @@ import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
 import { useSettings } from "@/composables/useSettings";
 import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import { cn } from "@/lib/utils";
-import type { ClipboardHistoryItem } from "@/types/clipboard";
+import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { formatFileSize } from "@/utils/file-size";
 import { maskSecrets } from "@/utils/secrets";
 
@@ -89,14 +89,20 @@ const previewPath = isImage
     ? firstPath
     : null;
 
-const { data: previewUrl } = useQuery({
+const { data: filePreview } = useQuery({
   queryKey: ["file-preview", previewPath],
-  queryFn: (): Promise<string | null> =>
+  queryFn: (): Promise<FilePreview> =>
     tiny.api.call("filePreview", { path: previewPath }),
   enabled: Boolean(previewPath),
   // the panel only hides, so this would redo every preview each time it opens
   refetchOnWindowFocus: false,
 });
+
+const previewUrl = computed(() => filePreview.value?.url ?? null);
+// macOS keeps Teneo out of the file's folder: no preview, but it still pastes
+const isFolderBlocked = computed(
+  () => isFiles && filePreview.value?.isMissing === false && !previewUrl.value,
+);
 
 // A link shows its site's icon, fetched by the backend from the site itself.
 // Until it loads, or when previews are off, the link icon holds its place.
@@ -121,7 +127,7 @@ const mediaUrl = computed(
 );
 
 const isPreviewMissing = computed(
-  () => (isImage || isFiles) && (!previewPath || previewUrl.value === null),
+  () => (isImage || isFiles) && (!previewPath || filePreview.value?.isMissing),
 );
 
 const fileName = firstPath?.split("/").pop();
@@ -323,7 +329,14 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             class="text-success pointer-events-none absolute inset-0 m-auto size-5" />
         </Transition>
       </div>
-      <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
+      <div
+        v-else
+        :class="cn(['rounded-md p-2', getClipboardThemeClasses()])"
+        :title="
+          isFolderBlocked
+            ? 'Allow Teneo to see this folder in System Settings › Privacy & Security › Files and Folders to preview it'
+            : undefined
+        ">
         <Transition v-bind="copyFeedbackTransition" mode="out-in">
           <TickIcon v-if="isCopying" class="text-success size-5" />
           <LinkIcon v-else-if="link" class="size-5" />

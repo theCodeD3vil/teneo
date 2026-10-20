@@ -37,6 +37,19 @@ You can allow it in either of two ways:
 
 Teneo's **Settings › Security** tab shows whether access is allowed.
 
+### Desktop, Documents and Downloads
+
+When you copy a file from your Desktop, Documents or Downloads folder (or iCloud Drive, or another drive), Teneo shows its preview and size. macOS asks whether Teneo can see each of those folders. Setup asks for all three at once; you can skip it, and macOS asks the first time it's needed.
+
+If you don't allow a folder, files you copy from it still paste, just without a preview. To change your answer, open **System Settings › Privacy & Security › Files and Folders** and find **Teneo**.
+
+### Keychain (only if you encrypt API keys)
+
+**Encrypt API keys** is off unless you turn it on, in setup or in **Settings › Security**. When it's on, Teneo keeps the key that unlocks your saved API keys in your macOS Keychain, and macOS may ask for your Mac password to let Teneo use it. Click **Always Allow** so it doesn't ask every time.
+
+> [!NOTE]
+> **macOS asks again after each Teneo update.** Teneo isn't signed with an Apple Developer ID yet, so macOS treats every new version as a new app and asks for your Mac password once more. Enter it and click **Always Allow**. This goes away once Teneo is signed with a Developer ID. If you'd rather not see it, turn off **Encrypt API keys**: your keys stay hidden in history either way.
+
 Teneo keeps itself up to date: when it starts and once a day after that, it looks for a new version and asks before installing it. You can turn this off with **Settings › General › Check for updates**, and check any time from **Settings › About › Check now**.
 
 ## Features
@@ -58,8 +71,9 @@ Teneo keeps itself up to date: when it starts and once a day after that, it look
   | Leave the search field                   | `Esc`     |
 
 - **Pastes for you.** Paste straight into the app you were using, or turn on **Paste on Enter** to paste every time you pick an item. This also happens automatically with the `⌘ + 1-9` hotkeys and `⌘ + V` keys
+- **Shows where links go.** A link you copy shows its site's icon and name, so you can tell links apart at a glance. Teneo gets the icon from the site itself, never from a third-party service, and never opens sign-in, password-reset or local network links. Turn it off in **Settings › Security**.
 - **Leaves passwords alone.** Anything copied from a password manager is skipped, and you can add any other app you want Teneo to ignore.
-- **Hides API keys (beta).** Keys from GitHub, OpenAI, Anthropic, Stripe, AWS and other services, private keys, and passwords in URLs show as asterisks (`***`) in history, but paste in full. Text holding a key is saved encrypted, with the key to it in your Keychain. Teneo finds them on your Mac and never sends them anywhere. Turn it off in **Settings › Security**.
+- **Hides API keys (beta).** Keys from GitHub, OpenAI, Anthropic, Stripe, AWS and other services, private keys, and passwords in URLs show as asterisks (`***`) in history, but paste in full. Teneo finds them on your Mac and never sends them anywhere. Turn it off in **Settings › Security**, where you can also have them saved encrypted (see [Keychain](#keychain-only-if-you-encrypt-api-keys)).
 - **Keeps only what you want.** Choose how long to keep history (1 day to forever), how many items to keep, and how much space it may use. Pinned items always stay, and don't count toward these limits.
 
 ## Screenshots

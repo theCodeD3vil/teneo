@@ -1,3 +1,31 @@
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/settings.ts
+var defaultSettings = {
+  checkForUpdates: true,
+  pasteOnEnter: false,
+  ignorePasswords: true,
+  maskSecrets: true,
+  encryptSecrets: false,
+  showLinkPreviews: true,
+  excludedApps: [],
+  openPanelShortcut: "",
+  historyDuration: "forever",
+  maximumItems: 0,
+  maximumStorage: 0
+};
+var openPanelHotkeyId = "open-panel";
+var settingsChangedEvent = "settings-changed";
+function pickSettings(value) {
+  if (typeof value !== "object" || value === null) return {};
+  const settings = {};
+  for (const key of Object.keys(defaultSettings)) {
+    const setting = value[key];
+    const defaultSetting = defaultSettings[key];
+    const isValid = Array.isArray(defaultSetting) ? Array.isArray(setting) && setting.every((entry) => typeof entry === "string") : typeof setting === typeof defaultSetting;
+    if (isValid) settings[key] = setting;
+  }
+  return settings;
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/files.ts
 async function fileExists(path) {
   try {
@@ -526,33 +554,6 @@ function splitWhitespace(value) {
   return values;
 }
 
-// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/shared/types/settings.ts
-var defaultSettings = {
-  checkForUpdates: true,
-  pasteOnEnter: false,
-  ignorePasswords: true,
-  maskSecrets: true,
-  showLinkPreviews: true,
-  excludedApps: [],
-  openPanelShortcut: "",
-  historyDuration: "forever",
-  maximumItems: 0,
-  maximumStorage: 0
-};
-var openPanelHotkeyId = "open-panel";
-var settingsChangedEvent = "settings-changed";
-function pickSettings(value) {
-  if (typeof value !== "object" || value === null) return {};
-  const settings = {};
-  for (const key of Object.keys(defaultSettings)) {
-    const setting = value[key];
-    const defaultSetting = defaultSettings[key];
-    const isValid = Array.isArray(defaultSetting) ? Array.isArray(setting) && setting.every((entry) => typeof entry === "string") : typeof setting === typeof defaultSetting;
-    if (isValid) settings[key] = setting;
-  }
-  return settings;
-}
-
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/settings.ts
 var settingsStoreKey = "settings";
 var currentSettings = { ...defaultSettings };
@@ -568,6 +569,9 @@ async function updateSettings(changes, app) {
   await app.store.set(settingsStoreKey, currentSettings);
   app.push(settingsChangedEvent, currentSettings);
   return currentSettings;
+}
+async function isSettingSaved(key, app) {
+  return key in pickSettings(await app.store.get(settingsStoreKey));
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/excluded-apps.ts
@@ -689,16 +693,25 @@ import { Database } from "tjs:sqlite";
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
 var PREVIEW_SIZE = 64;
 async function getFilePreview(path, app) {
-  if (typeof path !== "string" || !path.startsWith("/")) return null;
-  const stats = await tjs.stat(path).catch(() => null);
-  if (!stats) return null;
+  if (typeof path !== "string" || !path.startsWith("/")) {
+    return { url: null, isMissing: true };
+  }
+  try {
+    await tjs.stat(path);
+  } catch (error) {
+    return { url: null, isMissing: !isAccessDenied(error) };
+  }
   try {
     const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
-    return await pngDataUrl(thumbnail.path);
+    return { url: await pngDataUrl(thumbnail.path), isMissing: false };
   } catch (error) {
     logError(`filePreview failed for ${path}:`, error);
-    return null;
+    return { url: null, isMissing: true };
   }
+}
+function isAccessDenied(error) {
+  const code = error?.code;
+  return code === "EPERM" || code === "EACCES";
 }
 async function getFileSize(path) {
   const stats = await tjs.stat(path).catch(() => null);
@@ -843,15 +856,34 @@ function findLink(text) {
 }
 function isLocalAddress(url) {
   const host = url.hostname.toLowerCase();
-  if (host.startsWith("[")) return true;
+  if (host.startsWith("[")) return isLocalIp(host.slice(1, -1));
   if (!host.includes(".")) return true;
   if (/\.(?:localhost|local|lan|home|internal|home\.arpa)$/.test(host)) {
     return true;
   }
-  const ipv4 = host.match(/^(\d+)\.(\d+)\.\d+\.\d+$/);
-  if (!ipv4) return false;
-  const [first, second] = [Number(ipv4[1]), Number(ipv4[2])];
+  return /^[\d.]+$/.test(host) && isLocalIp(host);
+}
+function isLocalIp(ip) {
+  const address = ip.toLowerCase();
+  if (address.includes(":")) {
+    const ipv4 = address.match(/^::ffff:([\d.]+)$/)?.[1];
+    if (ipv4) return isLocalIp(ipv4);
+    return address === "::" || address === "::1" || /^f[cd]/.test(address) || // unique local, fc00::/7
+    /^fe[89ab]/.test(address);
+  }
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !(part >= 0 && part <= 255))) {
+    return true;
+  }
+  const [first, second] = parts;
   return first === 0 || first === 10 || first === 127 || first === 100 && second >= 64 && second <= 127 || first === 169 && second === 254 || first === 172 && second >= 16 && second <= 31 || first === 192 && second === 168;
+}
+async function resolvesToLocalAddress(url) {
+  if (url.hostname.startsWith("[") || /^[\d.]+$/.test(url.hostname)) {
+    return false;
+  }
+  const addresses = await tjs.lookup(url.hostname, { all: true });
+  return [addresses].flat().some((address) => isLocalIp(address.ip));
 }
 function canOpenPage(url) {
   if (url.username || url.password) return false;
@@ -1035,7 +1067,9 @@ function resolveUrl(href, base) {
 async function fetchFollowingRedirects(url, accept, signal, isBlocked) {
   let target = new URL(url);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-    if (isBlocked(target)) return null;
+    if (isBlocked(target) || await resolvesToLocalAddress(target)) {
+      return null;
+    }
     const response = await fetch(target.href, {
       redirect: "manual",
       signal,
@@ -1140,11 +1174,28 @@ function getEncryptionKey(app) {
   return encryptionKeyPromise;
 }
 async function loadOrCreateEncryptionKey(app) {
-  const savedKey = await app.secrets.get(keychainKeyName);
-  if (savedKey) return importEncryptionKey(Uint8Array.fromBase64(savedKey));
+  const savedKey = await loadSavedEncryptionKey(app);
+  if (savedKey) return savedKey;
   const keyBytes = crypto.getRandomValues(new Uint8Array(32));
   await app.secrets.set(keychainKeyName, keyBytes.toBase64());
   return importEncryptionKey(keyBytes);
+}
+async function loadSavedEncryptionKey(app) {
+  const savedKey = await app.secrets.get(keychainKeyName);
+  return savedKey ? importEncryptionKey(Uint8Array.fromBase64(savedKey)) : null;
+}
+async function prepareEncryptionKey(app) {
+  encryptionKeyPromise = loadOrCreateEncryptionKey(app);
+  await encryptionKeyPromise;
+}
+async function restrictToSavedEncryptionKey(app) {
+  const savedKey = await loadSavedEncryptionKey(app);
+  encryptionKeyPromise = savedKey ? Promise.resolve(savedKey) : null;
+  return savedKey !== null;
+}
+async function deleteEncryptionKey(app) {
+  encryptionKeyPromise = null;
+  await app.secrets.delete(keychainKeyName);
 }
 function importEncryptionKey(keyBytes) {
   return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, [
@@ -1234,7 +1285,7 @@ async function saveClipboardItem(item, app) {
     link: item.kind === "text" && item.text ? findLink(item.text) : null
   };
   const value = serializeValue(savedItem);
-  const isEncrypted = value !== null && savedItem.secrets.length > 0;
+  const isEncrypted = getSettings().encryptSecrets && value !== null && savedItem.secrets.length > 0;
   const storedValue = isEncrypted ? await encryptText(value, app) : value;
   run(
     await initializeDatabase(app),
@@ -1419,6 +1470,58 @@ async function encryptSecretsInHistory(app) {
     );
   }
 }
+async function turnOnSecretEncryption(app) {
+  try {
+    await prepareEncryptionKey(app);
+  } catch (error) {
+    logError("reading the encryption key failed:", error);
+    return false;
+  }
+  await updateSettings({ encryptSecrets: true }, app);
+  await encryptSecretsInHistory(app);
+  return true;
+}
+async function turnOffSecretEncryption(app) {
+  let hasKey;
+  try {
+    hasKey = await restrictToSavedEncryptionKey(app);
+  } catch (error) {
+    logError("reading the encryption key failed:", error);
+    return false;
+  }
+  const database = await initializeDatabase(app);
+  const rows = all(
+    database,
+    `SELECT id, value FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1`
+  );
+  for (const { id, value } of rows) {
+    const plaintext = hasKey && value !== null ? await decryptText(value, app).catch(() => null) : null;
+    if (plaintext === null) {
+      run(database, `DELETE FROM "CLIPBOARD_ITEMS" WHERE id = ?`, id);
+    } else {
+      run(
+        database,
+        `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = NULL WHERE id = ?`,
+        plaintext,
+        id
+      );
+    }
+  }
+  if (rows.length) notifyClipboardHistoryChanged(app);
+  await updateSettings({ encryptSecrets: false }, app);
+  if (hasKey) await deleteEncryptionKey(app);
+  return true;
+}
+async function keepEncryptionFromEarlierVersion(app) {
+  if (await isSettingSaved("encryptSecrets", app)) return;
+  const [result] = all(
+    await initializeDatabase(app),
+    `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1`
+  );
+  if ((result?.count ?? 0) > 0) {
+    await updateSettings({ encryptSecrets: true }, app);
+  }
+}
 function serializeImageSize(item) {
   return item.kind === "image" && item.imageSize ? JSON.stringify(item.imageSize) : null;
 }
@@ -1577,6 +1680,27 @@ async function getFolderSize(folder) {
     );
   }
   return size;
+}
+
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/folder-access.ts
+var protectedFolders = ["Desktop", "Documents", "Downloads"];
+async function requestFolderAccess() {
+  const results = [];
+  for (const name of protectedFolders) {
+    results.push({ name, status: await openFolder(`${tjs.env.HOME}/${name}`) });
+  }
+  return results;
+}
+async function openFolder(path) {
+  try {
+    const entries = await tjs.readDir(path);
+    await entries.next();
+    await entries.close();
+    return "granted";
+  } catch (error) {
+    const code = error?.code;
+    return code === "ENOENT" ? "missing" : "denied";
+  }
 }
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/global-shortcut.ts
@@ -1885,6 +2009,7 @@ var api = {
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
   excludedApps: ({ addedBundleIds }, app) => listExcludedApps(addedBundleIds, app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
+  requestFolderAccess: () => requestFolderAccess(),
   linkPreview: ({ url }, app) => getLinkPreview(url, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
@@ -1898,7 +2023,8 @@ var api = {
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
     const wasCheckingForUpdates = getSettings().checkForUpdates;
-    const settings = await updateSettings(changes, app);
+    const { encryptSecrets: _, ...otherChanges } = pickSettings(changes);
+    const settings = await updateSettings(otherChanges, app);
     syncOpenPanelShortcut(app);
     await trimClipboardHistory(app);
     if (settings.checkForUpdates && !wasCheckingForUpdates) {
@@ -1906,6 +2032,7 @@ var api = {
     }
     return settings;
   },
+  setSecretEncryption: ({ enabled }, app) => enabled === true ? turnOnSecretEncryption(app) : turnOffSecretEncryption(app),
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
   countItemsDeletedBy: ({ changes }, app) => countItemsDeletedBy(changes, app),
   dataFolderUsage: (_parameters, app) => getDataFolderUsage(app)
@@ -1925,14 +2052,18 @@ function onWindowClosed(windowId, app) {
 async function init(app) {
   await loadSettings(app);
   await initializeDatabase(app);
-  void encryptSecretsInHistory(app).catch(
-    (error) => logError("encrypting secrets in history failed:", error)
-  );
+  await keepEncryptionFromEarlierVersion(app);
+  if (getSettings().encryptSecrets) {
+    void encryptSecretsInHistory(app).catch(
+      (error) => logError("encrypting secrets in history failed:", error)
+    );
+  }
   startTrimmingClipboardHistory(app);
   void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  if (tjs.env.TENEO_PREVIEW_SETUP) await openSetupWindow(app);
   startCheckingForUpdates(app);
   await previewUpdateWindow(app);
 }

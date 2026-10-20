@@ -14,3 +14,10 @@ export interface DataFolderUsage {
   /** files across every copied-files item in history */
   fileCount: number;
 }
+
+/** Whether macOS lets Teneo into one of the folders it protects. */
+export interface FolderAccess {
+  name: "Desktop" | "Documents" | "Downloads";
+  /** missing: there's no such folder on this Mac */
+  status: "granted" | "denied" | "missing";
+}

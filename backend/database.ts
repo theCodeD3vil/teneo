@@ -4,7 +4,14 @@ import { getFileSize } from "./file-previews";
 import { logError } from "./files";
 import { findLink } from "./link-previews";
 import { findSecrets } from "./secret-detection";
-import { decryptText, encryptText } from "./secret-encryption";
+import {
+  decryptText,
+  deleteEncryptionKey,
+  encryptText,
+  prepareEncryptionKey,
+  restrictToSavedEncryptionKey,
+} from "./secret-encryption";
+import { getSettings, isSettingSaved, updateSettings } from "./settings";
 import type {
   ClipboardHistoryItem,
   ClipboardItemColumn,
@@ -80,10 +87,13 @@ export async function saveClipboardItem(
     secrets: item.kind === "text" && item.text ? findSecrets(item.text) : [],
     link: item.kind === "text" && item.text ? findLink(item.text) : null,
   };
-  // Text holding a secret is only ever saved encrypted: when the key can't be
-  // read, encryptText throws and the item isn't saved at all
+  // With encryption on, text holding a secret is only ever saved encrypted:
+  // when the key can't be read, encryptText throws and the item isn't saved
   const value = serializeValue(savedItem);
-  const isEncrypted = value !== null && savedItem.secrets.length > 0;
+  const isEncrypted =
+    getSettings().encryptSecrets &&
+    value !== null &&
+    savedItem.secrets.length > 0;
   const storedValue = isEncrypted ? await encryptText(value, app) : value;
 
   run(
@@ -319,9 +329,9 @@ async function decryptRow(
   }
 }
 
-/** Encrypt saved text that holds a secret but was saved before it could be
- *  found: copied before Teneo looked for secrets, or caught by a rule added
- *  since. Run at startup; text is never changed once saved. */
+/** Encrypt saved text that holds a secret but isn't encrypted yet: copied
+ *  while encryption was off or before Teneo looked for secrets, or caught by
+ *  a rule added since. Run at startup and when encryption is turned on. */
 export async function encryptSecretsInHistory(app: TinyApp): Promise<void> {
   const database = await initializeDatabase(app);
   const rows = all<Pick<ClipboardItemRow, "id" | "value">>(
@@ -339,6 +349,76 @@ export async function encryptSecretsInHistory(app: TinyApp): Promise<void> {
       await encryptText(value, app),
       id,
     );
+  }
+}
+
+/** Turn "Encrypt API keys" on: get the Keychain key first, so a denied
+ *  Keychain leaves it off, then encrypt the keys already in history. */
+export async function turnOnSecretEncryption(app: TinyApp): Promise<boolean> {
+  try {
+    await prepareEncryptionKey(app);
+  } catch (error) {
+    logError("reading the encryption key failed:", error);
+    return false;
+  }
+  await updateSettings({ encryptSecrets: true }, app);
+  await encryptSecretsInHistory(app);
+  return true;
+}
+
+/** Turn "Encrypt API keys" off: save the keys in history as plain text and
+ *  delete the Keychain key. Items that key can't decrypt could never be read
+ *  again, so they're deleted. False, and still on, when the Keychain can't be
+ *  read: decrypting needs the key. */
+export async function turnOffSecretEncryption(app: TinyApp): Promise<boolean> {
+  let hasKey: boolean;
+  try {
+    hasKey = await restrictToSavedEncryptionKey(app);
+  } catch (error) {
+    logError("reading the encryption key failed:", error);
+    return false;
+  }
+
+  const database = await initializeDatabase(app);
+  const rows = all<Pick<ClipboardItemRow, "id" | "value">>(
+    database,
+    `SELECT id, value FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1`,
+  );
+  for (const { id, value } of rows) {
+    const plaintext =
+      hasKey && value !== null
+        ? await decryptText(value, app).catch(() => null)
+        : null;
+    if (plaintext === null) {
+      run(database, `DELETE FROM "CLIPBOARD_ITEMS" WHERE id = ?`, id);
+    } else {
+      run(
+        database,
+        `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = NULL WHERE id = ?`,
+        plaintext,
+        id,
+      );
+    }
+  }
+  if (rows.length) notifyClipboardHistoryChanged(app);
+
+  await updateSettings({ encryptSecrets: false }, app);
+  if (hasKey) await deleteEncryptionKey(app);
+  return true;
+}
+
+/** Earlier versions always encrypted keys. When this one first starts with
+ *  encrypted items in history, encryption stays on for them. */
+export async function keepEncryptionFromEarlierVersion(
+  app: TinyApp,
+): Promise<void> {
+  if (await isSettingSaved("encryptSecrets", app)) return;
+  const [result] = all<{ count: number }>(
+    await initializeDatabase(app),
+    `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1`,
+  );
+  if ((result?.count ?? 0) > 0) {
+    await updateSettings({ encryptSecrets: true }, app);
   }
 }
 

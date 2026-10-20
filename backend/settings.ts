@@ -30,3 +30,11 @@ export async function updateSettings(
   app.push(settingsChangedEvent, currentSettings);
   return currentSettings;
 }
+
+/** Whether this setting was ever saved, i.e. not just its default. */
+export async function isSettingSaved(
+  key: keyof AppSettings,
+  app: TinyApp,
+): Promise<boolean> {
+  return key in pickSettings(await app.store.get(settingsStoreKey));
+}

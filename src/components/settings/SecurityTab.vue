@@ -20,6 +20,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
 import { useExcludedApps } from "@/composables/useExcludedApps";
+import { useSecretEncryption } from "@/composables/useSecretEncryption";
 import { useSettings } from "@/composables/useSettings";
 
 import SettingsField from "./SettingsField.vue";
@@ -53,6 +54,21 @@ const maskSecrets = computed({
 const showLinkPreviews = computed({
   get: () => settings.value.showLinkPreviews,
   set: (enabled) => updateSettings({ showLinkPreviews: enabled }),
+});
+
+// Turning it off decrypts saved keys, so it asks first
+const {
+  isChanging: isChangingEncryption,
+  error: encryptionError,
+  setEncryption: setSecretEncryption,
+} = useSecretEncryption();
+const isDecryptWarningOpen = ref(false);
+const encryptSecrets = computed({
+  get: () => settings.value.encryptSecrets,
+  set: (enabled) => {
+    if (enabled) void setSecretEncryption(true);
+    else isDecryptWarningOpen.value = true;
+  },
 });
 
 function showSecretsInHistory(): void {
@@ -174,9 +190,23 @@ const {
         </template>
         <template #description>
           Show keys and other secrets as asterisks in history. Pasting still
-          gives the full key, and they're always saved encrypted.
+          gives the full key.
         </template>
         <Switch v-model="maskSecrets" />
+      </SettingsField>
+
+      <SettingsField>
+        <template #label>Encrypt API keys</template>
+        <template #description>
+          Save keys encrypted, with the key that unlocks them in your Keychain.
+          macOS may ask for your Mac password to allow it, and again after
+          updates.
+          <span v-if="encryptionError" class="text-destructive block">
+            {{ encryptionError }}
+          </span>
+        </template>
+        <Spinner v-if="isChangingEncryption" />
+        <Switch v-else v-model="encryptSecrets" />
       </SettingsField>
     </SettingsSection>
 
@@ -191,6 +221,27 @@ const {
         <Switch v-model="showLinkPreviews" />
       </SettingsField>
     </SettingsSection>
+
+    <AlertDialog v-model:open="isDecryptWarningOpen">
+      <AlertDialogContent class="bg-card/35 border-card/45">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Stop encrypting API keys?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Keys already in your history will be saved unencrypted on this Mac,
+            and Teneo's key is removed from your Keychain. Any key Teneo can't
+            decrypt is deleted from history.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            @click="setSecretEncryption(false)">
+            Stop encrypting
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
     <AlertDialog v-model:open="isMaskSecretsWarningOpen">
       <AlertDialogContent class="bg-card/35 border-card/45">

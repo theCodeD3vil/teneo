@@ -1,19 +1,24 @@
 // tinyjs backend — full system access via txiki.js (the 'tjs' global).
 // Every api method is callable from the page: await tiny.api.call('hello', {...})
+import { pickSettings } from "../shared/types/settings";
 import { getAppIconUrl } from "./app-icons";
 import { readClipboardItem } from "./clipboard-history";
 import { getDataFolderUsage } from "./data-usage";
 import {
   encryptSecretsInHistory,
   initializeDatabase,
+  keepEncryptionFromEarlierVersion,
   listClipboardItems,
   saveClipboardItem,
   setClipboardItemPinned,
   softDeleteClipboardItem,
+  turnOffSecretEncryption,
+  turnOnSecretEncryption,
 } from "./database";
 import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
 import { getFilePreview } from "./file-previews";
 import { logError } from "./files";
+import { requestFolderAccess } from "./folder-access";
 import {
   pauseOpenPanelShortcut,
   syncOpenPanelShortcut,
@@ -56,6 +61,7 @@ export const api: Record<string, TinyApiHandler> = {
   excludedApps: ({ addedBundleIds }, app) =>
     listExcludedApps(addedBundleIds, app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
+  requestFolderAccess: () => requestFolderAccess(),
   linkPreview: ({ url }, app) => getLinkPreview(url, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
@@ -70,7 +76,9 @@ export const api: Record<string, TinyApiHandler> = {
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
     const wasCheckingForUpdates = getSettings().checkForUpdates;
-    const settings = await updateSettings(changes, app);
+    // encryption moves saved keys too, so it only changes through setSecretEncryption
+    const { encryptSecrets: _, ...otherChanges } = pickSettings(changes);
+    const settings = await updateSettings(otherChanges, app);
     syncOpenPanelShortcut(app);
     await trimClipboardHistory(app); // a tighter history limit applies now
     // turning update checks on looks now, not only at the next launch
@@ -79,6 +87,10 @@ export const api: Record<string, TinyApiHandler> = {
     }
     return settings;
   },
+  setSecretEncryption: ({ enabled }, app) =>
+    enabled === true
+      ? turnOnSecretEncryption(app)
+      : turnOffSecretEncryption(app),
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
   countItemsDeletedBy: ({ changes }, app) => countItemsDeletedBy(changes, app),
   dataFolderUsage: (_parameters, app) => getDataFolderUsage(app),
@@ -107,15 +119,20 @@ export async function init(app: TinyApp) {
   await loadSettings(app);
   await initializeDatabase(app);
   // not awaited: the menu bar icon shouldn't wait on a Keychain prompt
-  void encryptSecretsInHistory(app).catch((error) =>
-    logError("encrypting secrets in history failed:", error),
-  );
+  await keepEncryptionFromEarlierVersion(app);
+  if (getSettings().encryptSecrets) {
+    void encryptSecretsInHistory(app).catch((error) =>
+      logError("encrypting secrets in history failed:", error),
+    );
+  }
   startTrimmingClipboardHistory(app);
   void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);
   // Open the panel on the current Space, over full-screen apps too
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);
+  // `TENEO_PREVIEW_SETUP=1 tinyjs dev` opens setup even when it's done
+  if (tjs.env.TENEO_PREVIEW_SETUP) await openSetupWindow(app);
   startCheckingForUpdates(app);
   await previewUpdateWindow(app);
 }
