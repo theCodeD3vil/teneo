@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import HeroSection from "@/components/HeroSection.vue";
 import SiteNavbar from "@/components/SiteNavbar.vue";
 </script>
 
 <template>
   <SiteNavbar />
-  <main id="top" class="bg-background min-h-screen" />
+  <main>
+    <HeroSection />
+  </main>
 </template>
