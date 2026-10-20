@@ -9,6 +9,8 @@ export interface AppSettings {
   /** show API keys and other secrets in history as asterisks; pasting still
    *  gives the real text */
   maskSecrets: boolean;
+  /** show a copied link's site icon, fetched from the site itself */
+  showLinkPreviews: boolean;
   /** bundle ids of apps the user added to the ignore list; known password
    *  managers are built in and never stored here */
   excludedApps: string[];
@@ -31,6 +33,7 @@ export const defaultSettings: AppSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
   maskSecrets: true,
+  showLinkPreviews: true,
   excludedApps: [],
   openPanelShortcut: "",
   historyDuration: "forever",

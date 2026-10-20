@@ -11,12 +11,14 @@ export async function getDataFolderUsage(
   ]);
   const clipboardSizeByKind = { text: 0, image: 0, files: 0, color: 0 };
   // Pinned items don't count toward the storage limit, so the bar leaves them out
+  let itemCount = 0;
   for (const { kind, bytes, pinned } of itemSizes) {
+    if (!pinned) itemCount += 1;
     if (!pinned && kind in clipboardSizeByKind) {
       clipboardSizeByKind[kind as keyof typeof clipboardSizeByKind] += bytes;
     }
   }
-  return { size, clipboardSizeByKind, ...counts };
+  return { size, clipboardSizeByKind, itemCount, ...counts };
 }
 
 /** Total bytes of every file in folder and its subfolders. */

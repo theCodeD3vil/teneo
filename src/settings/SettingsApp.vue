@@ -35,18 +35,19 @@ function openSetup(): void {
       <img class="aspect-square size-8" src="/icon.png" alt="Teneo Icon" />
       <span class="text-lg font-medium">Teneo</span>
     </div>
-    <Alert
-      v-if="isSetupUnfinished"
-      class="border-warning/30 bg-warning/10 mx-auto mb-6 max-w-xl shrink-0 has-data-[slot=alert-action]:pr-36">
-      <AlertCircleIcon class="text-warning!" />
-      <AlertTitle>Finish setting up Teneo</AlertTitle>
-      <AlertDescription class="text-foreground/60">
-        Teneo can't paste into other apps until you allow Accessibility.
-      </AlertDescription>
-      <AlertAction class="top-1/2 -translate-y-1/2">
-        <Button size="sm" @click="openSetup"> Finish setup </Button>
-      </AlertAction>
-    </Alert>
-    <SettingsTabManager />
+    <SettingsTabManager>
+      <Alert
+        v-if="isSetupUnfinished"
+        class="border-warning/30 bg-warning/10 mx-auto mt-4 max-w-xl shrink-0 has-data-[slot=alert-action]:pr-36">
+        <AlertCircleIcon class="text-warning!" />
+        <AlertTitle>Finish setting up Teneo</AlertTitle>
+        <AlertDescription class="text-foreground/60 text-xs">
+          Teneo can't paste into other apps until you allow Accessibility.
+        </AlertDescription>
+        <AlertAction class="top-1/2 -translate-y-1/2">
+          <Button size="sm" @click="openSetup"> Finish setup </Button>
+        </AlertAction>
+      </Alert>
+    </SettingsTabManager>
   </div>
 </template>

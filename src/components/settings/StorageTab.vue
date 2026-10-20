@@ -19,6 +19,12 @@ import {
   NativeSelectOption,
 } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useDataFolderUsage } from "@/composables/useDataFolderUsage";
 import { useSettings } from "@/composables/useSettings";
 import { formatFileSize } from "@/utils/file-size";
@@ -152,6 +158,21 @@ const storageSegments = computed(() => {
     .filter((segment) => segment.bytes > 0);
 });
 
+// How full the item limit is. While a tighter limit waits for confirmation,
+// it shows that limit, so the ring matches the choice in the select.
+const itemLimitUsage = computed(() => {
+  const limit =
+    pendingLimitChange.value?.changes.maximumItems ??
+    settings.value.maximumItems;
+  if (!usage.value || limit === 0) return null;
+  const count = usage.value.itemCount;
+  const percent = Math.min(Math.round((count / limit) * 100), 100);
+  return {
+    percent,
+    label: `${count.toLocaleString()} of ${limit.toLocaleString()} items (${percent}%)`,
+  };
+});
+
 const storageLimitSummary = computed(() => {
   const used = formatFileSize(clipboardSize.value);
   const limit = settings.value.maximumStorage;
@@ -206,17 +227,57 @@ const clearHistoryMutation = useMutation({
         <template #description>
           The oldest items go first; pinned items don't count
         </template>
-        <NativeSelect
-          :key="`items-${limitSelectRevision}`"
-          v-model="maximumItems"
-          size="sm">
-          <NativeSelectOption
-            v-for="option in maximumItemsOptions"
-            :key="option.value"
-            :value="String(option.value)">
-            {{ option.label }}
-          </NativeSelectOption>
-        </NativeSelect>
+        <div class="flex items-center gap-3">
+          <!-- pathLength=100 makes the dash offset a percentage -->
+          <TooltipProvider v-if="itemLimitUsage">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <svg
+                  viewBox="0 0 24 24"
+                  class="size-6 shrink-0 -rotate-90"
+                  role="progressbar"
+                  :aria-valuenow="itemLimitUsage.percent"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-label="itemLimitUsage.label">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    fill="none"
+                    stroke-width="3"
+                    class="stroke-foreground/10" />
+                  <circle
+                    v-if="itemLimitUsage.percent > 0"
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    fill="none"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                    pathLength="100"
+                    stroke-dasharray="100"
+                    :style="{ strokeDashoffset: 100 - itemLimitUsage.percent }"
+                    class="stroke-primary transition-[stroke-dashoffset] duration-300 ease-out" />
+                </svg>
+              </TooltipTrigger>
+              <TooltipContent>
+                {{ itemLimitUsage.percent }}% used
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <NativeSelect
+            :key="`items-${limitSelectRevision}`"
+            v-model="maximumItems"
+            size="sm">
+            <NativeSelectOption
+              v-for="option in maximumItemsOptions"
+              :key="option.value"
+              :value="String(option.value)">
+              {{ option.label }}
+            </NativeSelectOption>
+          </NativeSelect>
+        </div>
       </SettingsField>
     </SettingsSection>
 
@@ -258,7 +319,6 @@ const clearHistoryMutation = useMutation({
                 <span class="size-2 rounded-full" :class="segment.colorClass" />
                 {{ segment.label }} {{ formatFileSize(segment.bytes) }}
               </span>
-              <span class="ml-auto">{{ storageLimitSummary }}</span>
             </div>
           </div>
         </template>

@@ -24,6 +24,7 @@ import {
   startTrimmingClipboardHistory,
   trimClipboardHistory,
 } from "./history-limits";
+import { getLinkPreview, removeStaleLinkPreviews } from "./link-previews";
 import { getSettings, loadSettings, updateSettings } from "./settings";
 import {
   finishSetup,
@@ -55,6 +56,7 @@ export const api: Record<string, TinyApiHandler> = {
   excludedApps: ({ addedBundleIds }, app) =>
     listExcludedApps(addedBundleIds, app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
+  linkPreview: ({ url }, app) => getLinkPreview(url, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
   finishSetup: (_parameters, app) => finishSetup(app),
@@ -109,6 +111,7 @@ export async function init(app: TinyApp) {
     logError("encrypting secrets in history failed:", error),
   );
   startTrimmingClipboardHistory(app);
+  void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);
   // Open the panel on the current Space, over full-screen apps too
   app.setAllSpaces(true);

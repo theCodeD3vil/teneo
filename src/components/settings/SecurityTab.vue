@@ -50,6 +50,11 @@ const maskSecrets = computed({
   },
 });
 
+const showLinkPreviews = computed({
+  get: () => settings.value.showLinkPreviews,
+  set: (enabled) => updateSettings({ showLinkPreviews: enabled }),
+});
+
 function showSecretsInHistory(): void {
   void updateSettings({ maskSecrets: false });
 }
@@ -172,6 +177,18 @@ const {
           gives the full key, and they're always saved encrypted.
         </template>
         <Switch v-model="maskSecrets" />
+      </SettingsField>
+    </SettingsSection>
+
+    <SettingsSection>
+      <template #section-title>Links</template>
+
+      <SettingsField>
+        <template #label>Show link previews</template>
+        <template #description>
+          Show the site's icon next to links you copy.
+        </template>
+        <Switch v-model="showLinkPreviews" />
       </SettingsField>
     </SettingsSection>
 

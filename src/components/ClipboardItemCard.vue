@@ -8,6 +8,7 @@ import FileIcon from "~icons/hugeicons/file-01";
 import FileVerifiedIcon from "~icons/hugeicons/file-verified";
 import ImageIcon from "~icons/hugeicons/image-01";
 import ImageDoneIcon from "~icons/hugeicons/image-done-01";
+import LinkIcon from "~icons/hugeicons/link-01";
 import PinIcon from "~icons/hugeicons/pin";
 import PinOffIcon from "~icons/hugeicons/pin-off";
 import TextAlignLeftIcon from "~icons/hugeicons/text-align-left";
@@ -97,6 +98,28 @@ const { data: previewUrl } = useQuery({
   refetchOnWindowFocus: false,
 });
 
+// A link shows its site's icon, fetched by the backend from the site itself.
+// Until it loads, or when previews are off, the link icon holds its place.
+const link = props.itemDetails.link;
+const { settings } = useSettings();
+const { data: linkPreviewUrl } = useQuery({
+  queryKey: ["link-preview", link?.url],
+  queryFn: (): Promise<string | null> =>
+    tiny.api.call("linkPreview", { url: link?.url }),
+  enabled: computed(() => Boolean(link) && settings.value.showLinkPreviews),
+  // saved on disk by the backend; a site that couldn't be reached is asked
+  // again when the card next mounts, not retried in a loop
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+  retry: false,
+});
+
+const mediaUrl = computed(
+  () =>
+    previewUrl.value ??
+    (settings.value.showLinkPreviews ? linkPreviewUrl.value : null),
+);
+
 const isPreviewMissing = computed(
   () => (isImage || isFiles) && (!previewPath || previewUrl.value === null),
 );
@@ -115,7 +138,6 @@ const dateCopied = useRelativeTimeAgo(props.itemDetails.dateCopied);
 
 // Secrets in the text show as asterisks unless masking is off in Settings; copying
 // and pasting always give the real text
-const { settings } = useSettings();
 const textParts = computed(() => {
   const text = props.itemDetails.text ?? "";
   return settings.value.maskSecrets
@@ -275,14 +297,15 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
     ">
     <div class="flex items-start gap-4">
       <!-- media -->
-      <div v-if="previewUrl" class="relative size-9 shrink-0">
+      <div v-if="mediaUrl" class="relative size-9 shrink-0">
+        <!-- a link's icon fills the square like an app icon -->
         <img
-          :src="previewUrl"
-          :alt="isImage ? imageName : fileName"
+          :src="mediaUrl"
+          :alt="isImage ? imageName : isFiles ? fileName : link?.host"
           :class="
             cn([
               'size-full rounded-md',
-              isImage ? 'object-cover' : 'object-contain',
+              isFiles ? 'object-contain' : 'object-cover',
             ])
           " />
         <div
@@ -295,11 +318,15 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
           <FileVerifiedIcon
             v-else-if="isCopying && isFiles"
             class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
+          <TickIcon
+            v-else-if="isCopying"
+            class="text-success pointer-events-none absolute inset-0 m-auto size-5" />
         </Transition>
       </div>
       <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
         <Transition v-bind="copyFeedbackTransition" mode="out-in">
           <TickIcon v-if="isCopying" class="text-success size-5" />
+          <LinkIcon v-else-if="link" class="size-5" />
           <TextAlignLeftIcon
             v-else-if="itemDetails.kind === 'text'"
             class="size-5" />
@@ -394,6 +421,12 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
           <template v-if="fileSize">
             <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 text-xs">{{ fileSize }}</span>
+          </template>
+          <template v-if="link">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 truncate text-xs">{{
+              link.host
+            }}</span>
           </template>
           <template v-if="itemDetails.dateCopied">
             <span class="text-foreground/50">·</span>
