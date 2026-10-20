@@ -532,6 +532,7 @@ var defaultSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
   maskSecrets: true,
+  showLinkPreviews: true,
   excludedApps: [],
   openPanelShortcut: "",
   historyDuration: "forever",
@@ -820,6 +821,316 @@ function findSecrets(text) {
   return separateSecrets;
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/link-previews.ts
+var PREVIEW_SIZE2 = 64;
+var CACHE_LIFETIME = 7 * 24 * 60 * 60 * 1e3;
+var FETCH_TIMEOUT = 8e3;
+var MAX_HTML_BYTES = 256 * 1024;
+var MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+var MAX_REDIRECTS = 5;
+var MAX_FETCHES = 4;
+var USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15 Teneo";
+var oneTimeLinkWords = /(?<![a-z])(?:token|password|passwd|auth|oauth|otp|magic|reset|verify|verification|confirm|activate|invite|login|signin|sign-in|logout|unsubscribe|download)(?![a-z])/i;
+var oneTimeParameters = /[?&](?:code|key|sig|signature|secret|session|state|ticket|nonce)=/i;
+var tokenLike = /[\w-]{32,}/;
+function findLink(text) {
+  const trimmed = text.trim();
+  if (trimmed.length > 2048 || /\s/.test(trimmed)) return null;
+  if (!/^https?:\/\//i.test(trimmed) || !URL.canParse(trimmed)) return null;
+  const url = new URL(trimmed);
+  if (!url.hostname) return null;
+  return { url: url.href, host: url.hostname.replace(/^www\./, "") };
+}
+function isLocalAddress(url) {
+  const host = url.hostname.toLowerCase();
+  if (host.startsWith("[")) return true;
+  if (!host.includes(".")) return true;
+  if (/\.(?:localhost|local|lan|home|internal|home\.arpa)$/.test(host)) {
+    return true;
+  }
+  const ipv4 = host.match(/^(\d+)\.(\d+)\.\d+\.\d+$/);
+  if (!ipv4) return false;
+  const [first, second] = [Number(ipv4[1]), Number(ipv4[2])];
+  return first === 0 || first === 10 || first === 127 || first === 100 && second >= 64 && second <= 127 || first === 169 && second === 254 || first === 172 && second >= 16 && second <= 31 || first === 192 && second === 168;
+}
+function canOpenPage(url) {
+  if (url.username || url.password) return false;
+  let pathAndQuery = url.pathname + url.search;
+  try {
+    pathAndQuery = decodeURIComponent(pathAndQuery);
+  } catch {
+  }
+  if (oneTimeLinkWords.test(pathAndQuery) || oneTimeParameters.test(url.search) || tokenLike.test(pathAndQuery)) {
+    return false;
+  }
+  return findSecrets(url.href).length === 0;
+}
+async function getLinkPreview(url, app) {
+  if (!getSettings().showLinkPreviews || typeof url !== "string") return null;
+  const link = findLink(url);
+  if (!link) return null;
+  const page = new URL(link.url);
+  if (isLocalAddress(page)) return null;
+  const siteIcon = await cached(
+    `site-${await hash(page.origin)}`,
+    app,
+    () => findSiteIcon(page.origin, app)
+  );
+  if (siteIcon || !canOpenPage(page)) return siteIcon;
+  return cached(
+    `page-${await hash(page.href)}`,
+    app,
+    () => findPageImage(page.href, app)
+  );
+}
+async function clearLinkPreviews(app) {
+  await tjs.remove(cacheFolder(app)).catch(
+    (error) => logError("clearing link previews failed:", error)
+  );
+}
+async function removeStaleLinkPreviews(app) {
+  const folder = cacheFolder(app);
+  const entries = await tjs.readDir(folder).catch(() => null);
+  if (!entries) return;
+  for await (const entry of entries) {
+    const path = `${folder}/${entry.name}`;
+    if (!await isFresh(path)) await tjs.remove(path).catch(() => void 0);
+  }
+}
+function cacheFolder(app) {
+  return `${app.paths.cache.replace(/\/$/, "")}/link-previews`;
+}
+async function hash(text) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text)
+  );
+  return new Uint8Array(digest).toHex();
+}
+async function isFresh(path) {
+  const stats = await tjs.stat(path).catch(() => null);
+  return stats !== null && Date.now() - stats.mtim.getTime() < CACHE_LIFETIME;
+}
+var fetchesInProgress = /* @__PURE__ */ new Map();
+function cached(key, app, makePng) {
+  const inProgress = fetchesInProgress.get(key);
+  if (inProgress) return inProgress;
+  const preview = (async () => {
+    const folder = cacheFolder(app);
+    const pngPath = `${folder}/${key}.png`;
+    const nonePath = `${folder}/${key}.none`;
+    if (await isFresh(pngPath)) return pngDataUrl(pngPath);
+    if (await isFresh(nonePath)) return null;
+    const png = await limitFetches(makePng);
+    await tjs.makeDir(folder, { recursive: true });
+    await tjs.writeFile(png ? pngPath : nonePath, png ?? new Uint8Array());
+    await tjs.remove(png ? nonePath : pngPath).catch(() => void 0);
+    return png ? pngDataUrl(pngPath) : null;
+  })();
+  fetchesInProgress.set(key, preview);
+  void preview.finally(() => fetchesInProgress.delete(key)).catch(() => {
+  });
+  return preview;
+}
+var runningFetches = 0;
+var waitingFetches = [];
+async function limitFetches(task) {
+  if (runningFetches < MAX_FETCHES) runningFetches += 1;
+  else await new Promise((start) => waitingFetches.push(start));
+  try {
+    return await task();
+  } finally {
+    const next = waitingFetches.shift();
+    if (next) next();
+    else runningFetches -= 1;
+  }
+}
+async function findSiteIcon(origin, app) {
+  const homePage = await fetchHtml(origin, isLocalAddress).catch(() => null);
+  const icons = homePage ? findIcons(homePage.html, homePage.url) : [];
+  const bitmapIcons = icons.filter((icon) => !icon.isSvg).slice(0, 2);
+  const svgIcon = icons.find((icon) => icon.isSvg);
+  const tryOrder = [
+    ...bitmapIcons.map((icon) => icon.url),
+    `${origin}/favicon.ico`,
+    ...svgIcon ? [svgIcon.url] : []
+  ];
+  for (const iconUrl of tryOrder) {
+    const png = await downloadThumbnail(iconUrl, app);
+    if (png) return png;
+  }
+  return null;
+}
+async function findPageImage(pageUrl, app) {
+  const page = await fetchHtml(
+    pageUrl,
+    (url) => isLocalAddress(url) || !canOpenPage(url)
+  );
+  const imageUrl = page && findPageImageUrl(page.html, page.url);
+  return imageUrl ? downloadThumbnail(imageUrl, app) : null;
+}
+function findHeadTags(html) {
+  const headEnd = html.search(/<\/head\s*>|<body[\s>]/i);
+  const head = headEnd === -1 ? html : html.slice(0, headEnd);
+  return [...head.matchAll(/<(link|meta)\b([^>]*)>/gi)].map((tag) => ({
+    name: tag[1].toLowerCase(),
+    attributes: new Map(
+      [
+        ...tag[2].matchAll(
+          /([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g
+        )
+      ].map((attribute) => [
+        attribute[1].toLowerCase(),
+        decodeEntities(attribute[2] ?? attribute[3] ?? attribute[4])
+      ])
+    )
+  }));
+}
+function decodeEntities(text) {
+  return text.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'");
+}
+function findIcons(html, pageUrl) {
+  const icons = findHeadTags(html).flatMap((tag) => {
+    const rel = tag.attributes.get("rel")?.toLowerCase().split(/\s+/) ?? [];
+    const href = tag.attributes.get("href");
+    if (tag.name !== "link" || !href) return [];
+    const isTouchIcon = rel.some((word2) => word2.startsWith("apple-touch-icon"));
+    if (!isTouchIcon && !rel.includes("icon")) return [];
+    const url = resolveUrl(href, pageUrl);
+    if (!url) return [];
+    const sizes = tag.attributes.get("sizes") ?? "";
+    const isSvg = sizes === "any" || tag.attributes.get("type") === "image/svg+xml" || /\.svg$/i.test(new URL(url).pathname);
+    const largestSize = Math.max(
+      0,
+      ...[...sizes.matchAll(/(\d+)x\d+/gi)].map((size2) => Number(size2[1]))
+    );
+    const size = isTouchIcon ? 1e3 + largestSize : isSvg ? 0 : largestSize || 32;
+    return [{ url, isSvg, size }];
+  });
+  return icons.sort((a, b) => b.size - a.size).map(({ url, isSvg }) => ({ url, isSvg }));
+}
+function findPageImageUrl(html, pageUrl) {
+  const imageNames = [
+    "og:image",
+    "og:image:url",
+    "og:image:secure_url",
+    "twitter:image",
+    "twitter:image:src"
+  ];
+  for (const tag of findHeadTags(html)) {
+    const name = (tag.attributes.get("property") ?? tag.attributes.get("name"))?.toLowerCase();
+    const content = tag.attributes.get("content");
+    if (tag.name === "meta" && name && imageNames.includes(name) && content) {
+      const url = resolveUrl(content, pageUrl);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+function resolveUrl(href, base) {
+  if (!URL.canParse(href, base)) return null;
+  const url = new URL(href, base);
+  return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+}
+async function fetchFollowingRedirects(url, accept, signal, isBlocked) {
+  let target = new URL(url);
+  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+    if (isBlocked(target)) return null;
+    const response = await fetch(target.href, {
+      redirect: "manual",
+      signal,
+      headers: { accept, "user-agent": USER_AGENT }
+    });
+    const location = response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
+    if (!location && response.ok) return response;
+    void response.body?.cancel().catch(() => {
+    });
+    if (!location) return null;
+    if (!URL.canParse(location, target)) return null;
+    target = new URL(location, target);
+    if (target.protocol !== "https:" && target.protocol !== "http:") {
+      return null;
+    }
+  }
+  return null;
+}
+async function readAtMost(response, maxBytes, allowCut) {
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks = [];
+  let length = 0;
+  while (length < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    length += value.length;
+  }
+  if (length >= maxBytes) {
+    void reader.cancel().catch(() => {
+    });
+    if (!allowCut) return null;
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes.subarray(0, Math.min(length, maxBytes));
+}
+async function fetchHtml(url, isBlocked) {
+  const signal = AbortSignal.timeout(FETCH_TIMEOUT);
+  const response = await fetchFollowingRedirects(
+    url,
+    "text/html,application/xhtml+xml",
+    signal,
+    isBlocked
+  );
+  if (!response?.headers.get("content-type")?.includes("html")) return null;
+  const bytes = await readAtMost(response, MAX_HTML_BYTES, true);
+  const pageUrl = response.url || url;
+  return bytes && { html: new TextDecoder().decode(bytes), url: pageUrl };
+}
+var imageExtensions = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/svg+xml": "svg",
+  "image/x-icon": "ico",
+  "image/vnd.microsoft.icon": "ico",
+  "image/bmp": "bmp"
+};
+async function downloadThumbnail(url, app) {
+  const signal = AbortSignal.timeout(FETCH_TIMEOUT);
+  const response = await fetchFollowingRedirects(
+    url,
+    "image/*",
+    signal,
+    isLocalAddress
+  );
+  const contentType = response?.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  const extension = contentType && imageExtensions[contentType];
+  if (!response || !extension) return null;
+  const image = await readAtMost(response, MAX_IMAGE_BYTES, false);
+  if (!image?.length) return null;
+  const imagePath = `${cacheFolder(app)}/download-${generateUUID()}.${extension}`;
+  await tjs.makeDir(cacheFolder(app), { recursive: true });
+  await tjs.writeFile(imagePath, image);
+  try {
+    const thumbnail = await app.thumbnail(imagePath, PREVIEW_SIZE2);
+    const png = await tjs.readFile(thumbnail.path);
+    await tjs.remove(thumbnail.path).catch(() => void 0);
+    return png;
+  } catch (error) {
+    logError(`link preview thumbnail failed for ${url}:`, error);
+    return null;
+  } finally {
+    await tjs.remove(imagePath).catch(() => void 0);
+  }
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/secret-encryption.ts
 var keychainKeyName = "history-encryption-key";
 var ivLength = 12;
@@ -919,7 +1230,8 @@ async function saveClipboardItem(item, app) {
     pasteAsFile: item.pasteAsFile === true,
     fileSize: null,
     // read when history is listed
-    secrets: item.kind === "text" && item.text ? findSecrets(item.text) : []
+    secrets: item.kind === "text" && item.text ? findSecrets(item.text) : [],
+    link: item.kind === "text" && item.text ? findLink(item.text) : null
   };
   const value = serializeValue(savedItem);
   const isEncrypted = value !== null && savedItem.secrets.length > 0;
@@ -1171,7 +1483,8 @@ function rowToClipboardItem(row, app) {
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
     fileSize: null,
     // filled in by listClipboardItems
-    secrets: row.kind === "text" && row.value ? findSecrets(row.value) : []
+    secrets: row.kind === "text" && row.value ? findSecrets(row.value) : [],
+    link: row.kind === "text" && row.value ? findLink(row.value) : null
   };
 }
 function sourceAppFromRow(row) {
@@ -1236,12 +1549,14 @@ async function getDataFolderUsage(app) {
     countClipboardMedia(app)
   ]);
   const clipboardSizeByKind = { text: 0, image: 0, files: 0, color: 0 };
+  let itemCount = 0;
   for (const { kind, bytes, pinned } of itemSizes) {
+    if (!pinned) itemCount += 1;
     if (!pinned && kind in clipboardSizeByKind) {
       clipboardSizeByKind[kind] += bytes;
     }
   }
-  return { size, clipboardSizeByKind, ...counts };
+  return { size, clipboardSizeByKind, itemCount, ...counts };
 }
 async function getFolderSize(folder) {
   let size = 0;
@@ -1325,8 +1640,9 @@ async function countItemsWithinStorage(app, maximumStorage) {
   }
   return Math.max(count, 1);
 }
-function clearClipboardHistory(app) {
-  return deleteClipboardItems(app, 0, 0);
+async function clearClipboardHistory(app) {
+  await deleteClipboardItems(app, 0, 0);
+  await clearLinkPreviews(app);
 }
 function startTrimmingClipboardHistory(app) {
   const trim = () => trimClipboardHistory(app).catch(
@@ -1403,7 +1719,7 @@ async function openSettingsWindow(app) {
   app.openWindow(settingsWindowId, {
     page: "settings.html",
     title: "Settings",
-    size: "820x520",
+    size: "820x640",
     chrome: windowChrome
   });
 }
@@ -1429,7 +1745,7 @@ async function openUpdateWindow(update, app) {
     app.openWindow(updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
-      size: "480x640",
+      size: "480x720",
       chrome: { ...windowChrome, windowControls: false }
     });
     app.window(updateWindowId).setLevel("floating");
@@ -1569,6 +1885,7 @@ var api = {
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
   excludedApps: ({ addedBundleIds }, app) => listExcludedApps(addedBundleIds, app),
   filePreview: ({ path }, app) => getFilePreview(path, app),
+  linkPreview: ({ url }, app) => getLinkPreview(url, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
   finishSetup: (_parameters, app) => finishSetup(app),
@@ -1612,6 +1929,7 @@ async function init(app) {
     (error) => logError("encrypting secrets in history failed:", error)
   );
   startTrimmingClipboardHistory(app);
+  void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);
   app.setAllSpaces(true);
   await showMenuBarOrSetup(app);

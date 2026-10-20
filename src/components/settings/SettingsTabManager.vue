@@ -39,6 +39,8 @@ const selectedTab = ref<SettingsTab>("general");
         {{ tab.value }}
       </TabsTrigger>
     </TabsList>
+    <!-- e.g. the unfinished-setup warning, shown above every tab -->
+    <slot />
     <TabsContent
       v-for="tab in settingsTabs"
       :key="tab.value"

@@ -38,6 +38,9 @@ async function showWindow() {
   // Open on the list, not the search field, so letter hotkeys (P, D) work;
   // ⌘ / focuses search. Blur too: focus left in search last time comes back on show.
   searchInput.value?.blur();
+  // Put the window on this Space before activating: activating a hidden app
+  // with no window on screen makes macOS leave a full-screen Space for a desktop
+  await tiny.win.show({ activate: false });
   await tiny.win.show();
 }
 

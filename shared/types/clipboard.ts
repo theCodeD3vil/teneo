@@ -21,6 +21,13 @@ export interface SecretSpan {
   label: string;
 }
 
+/** A copied text that is a single http(s) URL. */
+export interface ClipboardLink {
+  url: string;
+  /** shown under the link, without "www." */
+  host: string;
+}
+
 /** Data returned from the backend to every frontend window through tiny.api. */
 export interface ClipboardHistoryItem {
   id: string;
@@ -46,4 +53,6 @@ export interface ClipboardHistoryItem {
   /** secrets in the text, found each time history is listed, so a rule
    *  added later covers older copies too */
   secrets: SecretSpan[];
+  /** set when the text is a link, found each time history is listed */
+  link: ClipboardLink | null;
 }

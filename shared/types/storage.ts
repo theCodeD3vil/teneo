@@ -7,6 +7,8 @@ export interface DataFolderUsage {
   /** bytes counted against the storage limit, per kind of unpinned history
    *  item: its text, color or file list, plus its saved image */
   clipboardSizeByKind: Record<ClipboardItemKind, number>;
+  /** unpinned history items, the ones counted against the item limit */
+  itemCount: number;
   /** image items in history */
   imageCount: number;
   /** files across every copied-files item in history */

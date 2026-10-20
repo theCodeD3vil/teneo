@@ -11,6 +11,7 @@ import {
   listClipboardItemSizes,
 } from "./database";
 import { logError } from "./files";
+import { clearLinkPreviews } from "./link-previews";
 import { getSettings } from "./settings";
 
 const day = 24 * 60 * 60 * 1000;
@@ -80,8 +81,10 @@ async function countItemsWithinStorage(
   return Math.max(count, 1);
 }
 
-export function clearClipboardHistory(app: TinyApp): Promise<void> {
-  return deleteClipboardItems(app, 0, 0);
+export async function clearClipboardHistory(app: TinyApp): Promise<void> {
+  await deleteClipboardItems(app, 0, 0);
+  // pinned links fetch theirs again
+  await clearLinkPreviews(app);
 }
 
 export function startTrimmingClipboardHistory(app: TinyApp): void {

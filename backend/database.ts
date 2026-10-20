@@ -2,6 +2,7 @@ import { Database } from "tjs:sqlite";
 
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";
+import { findLink } from "./link-previews";
 import { findSecrets } from "./secret-detection";
 import { decryptText, encryptText } from "./secret-encryption";
 import type {
@@ -77,6 +78,7 @@ export async function saveClipboardItem(
     pasteAsFile: item.pasteAsFile === true,
     fileSize: null, // read when history is listed
     secrets: item.kind === "text" && item.text ? findSecrets(item.text) : [],
+    link: item.kind === "text" && item.text ? findLink(item.text) : null,
   };
   // Text holding a secret is only ever saved encrypted: when the key can't be
   // read, encryptText throws and the item isn't saved at all
@@ -417,6 +419,7 @@ function rowToClipboardItem(
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
     fileSize: null, // filled in by listClipboardItems
     secrets: row.kind === "text" && row.value ? findSecrets(row.value) : [],
+    link: row.kind === "text" && row.value ? findLink(row.value) : null,
   };
 }
 

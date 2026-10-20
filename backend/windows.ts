@@ -106,7 +106,7 @@ export async function openSettingsWindow(app: TinyApp): Promise<void> {
   app.openWindow(settingsWindowId, {
     page: "settings.html",
     title: "Settings",
-    size: "820x520",
+    size: "820x640",
     chrome: windowChrome,
   });
 }
@@ -143,7 +143,7 @@ export async function openUpdateWindow(
     app.openWindow(updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
-      size: "480x640",
+      size: "480x720",
       chrome: { ...windowChrome, windowControls: false },
     });
     // Like an alert: above other apps, and on any Space or full-screen app
