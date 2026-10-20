@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useActiveSection } from "@/composables/useActiveSection";
 import { useGithubStars } from "@/composables/useGithubStars";
 
 const REPO = "theCodeD3vil/teneo";
@@ -24,6 +25,11 @@ const links = [
 ];
 
 const stars = useGithubStars(REPO);
+
+const activeSection = useActiveSection(
+  links.filter((link) => !link.external).map((link) => link.href.slice(1)),
+);
+const isActive = (href: string) => href === `#${activeSection.value}`;
 
 // Refraction width in px, and how far the backdrop is pulled at the very edge.
 const BEZEL = 15;
@@ -126,7 +132,13 @@ useResizeObserver(nav, () => {
             :href="link.href"
             :target="link.external ? '_blank' : undefined"
             :rel="link.external ? 'noopener noreferrer' : undefined"
-            class="text-foreground/80 hover:bg-foreground/8 hover:text-foreground block rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors">
+            :aria-current="isActive(link.href) ? 'location' : undefined"
+            :class="
+              isActive(link.href)
+                ? 'text-primary bg-white'
+                : 'text-foreground/80 hover:bg-foreground/8 hover:text-foreground'
+            "
+            class="block rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors">
             {{ link.label }}
           </a>
         </li>
@@ -204,13 +216,13 @@ useResizeObserver(nav, () => {
 </template>
 
 <style scoped>
-/* Liquid glass: near-clear body, light blur, and bright specular edges that read as a thick bevel. */
+/* Liquid glass: near-clear body, light blur, and soft specular edges that read as a bevel. */
 .glass {
   --glass-fill: oklch(1 0 0 / 0.14);
-  --glass-edge: oklch(1 0 0 / 0.5);
-  --glass-highlight: oklch(1 0 0 / 0.95);
-  --glass-highlight-soft: oklch(1 0 0 / 0.6);
-  --glass-glow: oklch(1 0 0 / 0.14);
+  --glass-edge: oklch(1 0 0 / 0.18);
+  --glass-highlight: oklch(1 0 0 / 0.4);
+  --glass-highlight-soft: oklch(1 0 0 / 0.2);
+  --glass-glow: oklch(1 0 0 / 0.06);
   --glass-hairline: oklch(0 0 0 / 0.07);
   --glass-drop: oklch(0 0 0 / 0.18);
 
@@ -239,7 +251,7 @@ useResizeObserver(nav, () => {
   content: "";
   position: absolute;
   inset: 0;
-  padding: 1.5px;
+  padding: 1px;
   border-radius: inherit;
   background: linear-gradient(
     135deg,
@@ -260,10 +272,10 @@ useResizeObserver(nav, () => {
 
 :global(.dark) .glass {
   --glass-fill: oklch(1 0 0 / 0.06);
-  --glass-edge: oklch(1 0 0 / 0.22);
-  --glass-highlight: oklch(1 0 0 / 0.7);
-  --glass-highlight-soft: oklch(1 0 0 / 0.35);
-  --glass-glow: oklch(1 0 0 / 0.06);
+  --glass-edge: oklch(1 0 0 / 0.1);
+  --glass-highlight: oklch(1 0 0 / 0.3);
+  --glass-highlight-soft: oklch(1 0 0 / 0.15);
+  --glass-glow: oklch(1 0 0 / 0.03);
   --glass-hairline: oklch(0 0 0 / 0.35);
   --glass-drop: oklch(0 0 0 / 0.55);
 }

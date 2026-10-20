@@ -1,5 +1,5 @@
 /* Teneo's theme and font, from the app's src/style.css. Keep the two in step. */
-@import url("https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap");
 
 @import "tailwindcss";
 @import "tw-animate-css";
