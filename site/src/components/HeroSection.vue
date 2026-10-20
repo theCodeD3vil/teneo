@@ -30,6 +30,21 @@ const fan = [
     rotate: -10,
     origin: "100% 100%",
     cardSide: "mr-auto",
+    side: "left" as const,
+    threadSide: "left-2",
+    loop: {
+      front: "M22 0 C 24 14 13 28 18 50 S 24 86 22 102",
+      back: "M22 0 C 20 16 32 32 27 54 S 19 88 22 102",
+    },
+    // The card swings from its window's hole; the card itself lags a touch.
+    sway: {
+      "--sway-origin": "30px -78px",
+      "--sway-duration": "4.8s",
+      "--sway-delay": "-2.1s",
+      "--card-origin": "30px 24px",
+      "--card-duration": "3.6s",
+      "--card-delay": "-0.9s",
+    },
     cardColor: "bg-primary text-white",
     iconColor: "bg-white text-primary",
     icon: SecurityLockIcon,
@@ -49,6 +64,20 @@ const fan = [
     rotate: 10,
     origin: "0% 100%",
     cardSide: "ml-auto",
+    side: "right" as const,
+    threadSide: "right-2",
+    loop: {
+      front: "M22 0 C 19 15 31 30 26 52 S 20 86 22 102",
+      back: "M22 0 C 25 14 14 34 19 56 S 25 88 22 102",
+    },
+    sway: {
+      "--sway-origin": "calc(100% - 30px) -78px",
+      "--sway-duration": "5.6s",
+      "--sway-delay": "-3.9s",
+      "--card-origin": "calc(100% - 30px) 24px",
+      "--card-duration": "4.2s",
+      "--card-delay": "-2.3s",
+    },
     cardColor: "bg-warning text-black",
     iconColor: "bg-black text-warning",
     icon: KeyboardIcon,
@@ -60,12 +89,36 @@ const fan = [
     ],
   },
 ];
+
+// Each card hangs from one cord, looped through a single hole near the bottom
+// of its window and a single hole near the top of the card. The holes are real
+// cut-outs (a mask), so the page shows through them. Distances are in px, and
+// the markup below must match them: the loop sits 30px in from the card's
+// outer edge, 22px up from the window's bottom edge and 24px down from the
+// card's top edge, across a 56px gap (mt-14).
+const HOLE_INSET = 30;
+const WINDOW_HOLE_RISE = 22;
+const CARD_HOLE_DROP = 24;
+
+type Side = "left" | "right";
+
+function hole(side: Side, radius: number, y: string) {
+  const x =
+    side === "left" ? `${HOLE_INSET}px` : `calc(100% - ${HOLE_INSET}px)`;
+  return {
+    "--hole": `radial-gradient(circle ${radius}px at ${x} ${y}, transparent ${radius - 1}px, #000 ${radius}px)`,
+  };
+}
+
+const windowHole = (side: Side) =>
+  hole(side, 8, `calc(100% - ${WINDOW_HOLE_RISE}px)`);
+const cardHole = (side: Side) => hole(side, 7, `${CARD_HOLE_DROP}px`);
 </script>
 
 <template>
   <section
     id="top"
-    class="relative flex min-h-svh flex-col items-center overflow-x-clip px-4 pt-32 pb-44 sm:pt-40">
+    class="relative flex min-h-svh flex-col items-center overflow-x-clip px-4 pt-32 pb-52 sm:pt-40">
     <div
       class="absolute inset-x-0 top-0 h-svh overflow-hidden [mask-image:linear-gradient(to_bottom,black_50%,transparent)]">
       <img
@@ -123,31 +176,83 @@ const fan = [
           transform: `rotate(${card.rotate}deg)`,
           transformOrigin: card.origin,
         }">
-        <img :src="card.src" :alt="card.alt" class="w-full" />
+        <img
+          :src="card.src"
+          :alt="card.alt"
+          :style="windowHole(card.side)"
+          class="w-full lg:[mask-image:var(--hole)] lg:[-webkit-mask-image:var(--hole)]" />
         <div
-          :class="[card.cardSide, card.cardColor]"
-          class="mt-5 hidden min-h-56 w-[56%] flex-col justify-between gap-8 rounded-3xl p-5 text-left shadow-[0_8px_28px_rgb(30_80_160/0.14)] lg:flex">
-          <div>
-            <span
-              :class="card.iconColor"
-              class="grid size-14 place-items-center rounded-2xl">
-              <HugeiconsIcon :icon="card.icon" class="size-8" />
-            </span>
-            <h3 class="mt-3 text-2xl leading-tight font-bold">
-              {{ card.featureTitle }}
-            </h3>
+          :class="card.cardSide"
+          :style="card.sway"
+          class="sway relative mt-14 hidden w-[56%] lg:block">
+          <span
+            aria-hidden="true"
+            :class="card.threadSide"
+            class="absolute -top-[78px] h-[102px] w-11">
+            <svg
+              viewBox="0 0 44 102"
+              fill="none"
+              class="size-full overflow-visible"
+              stroke-width="2"
+              stroke-linecap="round">
+              <!-- The back strand runs behind the window and the card, so it
+                   only shows in the gap and through the two holes. -->
+              <clipPath :id="`loop-${card.side}`">
+                <circle cx="22" cy="0" r="7.5" />
+                <rect x="0" y="22" width="44" height="56" />
+                <circle cx="22" cy="102" r="6.5" />
+              </clipPath>
+              <path
+                :d="card.loop.back"
+                :clip-path="`url(#loop-${card.side})`"
+                class="stroke-neutral-800/45" />
+            </svg>
+          </span>
+          <div
+            :class="card.cardColor"
+            :style="cardHole(card.side)"
+            class="sway-card relative z-10 flex min-h-56 flex-col justify-between gap-8 rounded-3xl [mask-image:var(--hole)] p-5 text-left [-webkit-mask-image:var(--hole)]">
+            <div>
+              <span
+                :class="card.iconColor"
+                class="grid size-14 place-items-center rounded-2xl">
+                <HugeiconsIcon :icon="card.icon" class="size-8" />
+              </span>
+              <h3 class="mt-3 text-2xl leading-tight font-bold">
+                {{ card.featureTitle }}
+              </h3>
+            </div>
+            <ul class="space-y-2">
+              <li
+                v-for="feature in card.features"
+                :key="feature"
+                class="flex items-start gap-2 text-sm leading-snug font-medium">
+                <HugeiconsIcon
+                  :icon="CheckmarkCircle02Icon"
+                  class="mt-px size-4 shrink-0" />
+                {{ feature }}
+              </li>
+            </ul>
           </div>
-          <ul class="space-y-2">
-            <li
-              v-for="feature in card.features"
-              :key="feature"
-              class="flex items-start gap-2 text-sm leading-snug font-medium">
-              <HugeiconsIcon
-                :icon="CheckmarkCircle02Icon"
-                class="mt-px size-4 shrink-0" />
-              {{ feature }}
-            </li>
-          </ul>
+          <span
+            aria-hidden="true"
+            :class="card.threadSide"
+            class="pointer-events-none absolute -top-[78px] z-20 h-[102px] w-11">
+            <span
+              class="absolute top-0 left-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.22)]" />
+            <span
+              class="absolute bottom-0 left-1/2 size-3.5 -translate-x-1/2 translate-y-1/2 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.22)]" />
+            <!-- The front strand passes over the window and the card, so
+                 unlike the back strand it is never hidden by either. -->
+            <svg
+              viewBox="0 0 44 102"
+              fill="none"
+              class="size-full overflow-visible"
+              stroke-width="2"
+              stroke-linecap="round">
+              <path :d="card.loop.front" class="stroke-neutral-800/75" />
+            </svg>
+          </span>
         </div>
       </div>
       <img
@@ -157,3 +262,49 @@ const fan = [
     </div>
   </section>
 </template>
+
+<style scoped>
+/* A gentle breeze. Each card swings like a pendulum from the hole in its
+   window, and the card itself lags a little behind the thread. The angles are
+   tiny, the swings are slow and eased, and the two layers drift out of step. */
+.sway {
+  transform-origin: var(--sway-origin);
+  animation: sway var(--sway-duration) ease-in-out var(--sway-delay) infinite
+    alternate;
+  /* a mask on the card would clip its own shadow, so the shadow lives here */
+  filter: drop-shadow(0 8px 28px rgb(30 80 160 / 0.14));
+  will-change: transform;
+}
+
+.sway-card {
+  transform-origin: var(--card-origin);
+  animation: sway-card var(--card-duration) ease-in-out var(--card-delay)
+    infinite alternate;
+  will-change: transform;
+}
+
+@keyframes sway {
+  from {
+    transform: rotate(-1.6deg);
+  }
+  to {
+    transform: rotate(1.6deg);
+  }
+}
+
+@keyframes sway-card {
+  from {
+    transform: rotate(-0.9deg);
+  }
+  to {
+    transform: rotate(0.9deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sway,
+  .sway-card {
+    animation: none;
+  }
+}
+</style>
