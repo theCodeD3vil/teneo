@@ -33,8 +33,14 @@ const fan = [
     side: "left" as const,
     threadSide: "left-2",
     loop: {
-      front: "M22 0 C 24 14 13 28 18 50 S 24 86 22 102",
-      back: "M22 0 C 20 16 32 32 27 54 S 19 88 22 102",
+      front: [
+        "M22 0 C 23 14 11 28 15 50 S 23 86 22 102",
+        "M22 0 C 25 14 15 28 21 50 S 25 86 22 102",
+      ],
+      back: [
+        "M22 0 C 19 16 30 32 24 54 S 18 88 22 102",
+        "M22 0 C 21 16 34 32 30 54 S 20 88 22 102",
+      ],
     },
     // The card swings from its window's hole; the card itself lags a touch.
     sway: {
@@ -67,8 +73,14 @@ const fan = [
     side: "right" as const,
     threadSide: "right-2",
     loop: {
-      front: "M22 0 C 19 15 31 30 26 52 S 20 86 22 102",
-      back: "M22 0 C 25 14 14 34 19 56 S 25 88 22 102",
+      front: [
+        "M22 0 C 18 15 29 30 23 52 S 19 86 22 102",
+        "M22 0 C 20 15 33 30 29 52 S 21 86 22 102",
+      ],
+      back: [
+        "M22 0 C 24 14 12 34 16 56 S 24 88 22 102",
+        "M22 0 C 26 14 16 34 22 56 S 26 88 22 102",
+      ],
     },
     sway: {
       "--sway-origin": "calc(100% - 30px) -78px",
@@ -113,6 +125,13 @@ function hole(side: Side, radius: number, y: string) {
 const windowHole = (side: Side) =>
   hole(side, 8, `calc(100% - ${WINDOW_HOLE_RISE}px)`);
 const cardHole = (side: Side) => hole(side, 7, `${CARD_HOLE_DROP}px`);
+
+// Each strand has two shapes that differ only in how far the middle bows to
+// one side. Both end at the holes, and the CSS morphs between them.
+const cord = (shapes: string[]) => ({
+  "--cord-from": `path('${shapes[0]}')`,
+  "--cord-to": `path('${shapes[1]}')`,
+});
 </script>
 
 <template>
@@ -203,9 +222,10 @@ const cardHole = (side: Side) => hole(side, 7, `${CARD_HOLE_DROP}px`);
                 <circle cx="22" cy="102" r="6.5" />
               </clipPath>
               <path
-                :d="card.loop.back"
+                :d="card.loop.back[0]"
+                :style="cord(card.loop.back)"
                 :clip-path="`url(#loop-${card.side})`"
-                class="stroke-neutral-800/45" />
+                class="cord stroke-neutral-800/45" />
             </svg>
           </span>
           <div
@@ -250,7 +270,10 @@ const cardHole = (side: Side) => hole(side, 7, `${CARD_HOLE_DROP}px`);
               class="size-full overflow-visible"
               stroke-width="2"
               stroke-linecap="round">
-              <path :d="card.loop.front" class="stroke-neutral-800/75" />
+              <path
+                :d="card.loop.front[0]"
+                :style="cord(card.loop.front)"
+                class="cord stroke-neutral-800/75" />
             </svg>
           </span>
         </div>
@@ -301,9 +324,28 @@ const cardHole = (side: Side) => hole(side, 7, `${CARD_HOLE_DROP}px`);
   }
 }
 
+/* The cord bows as its card swings. It runs on the card's beat, a quarter
+   cycle out of step, so the bow peaks while the card moves fastest. Browsers
+   that can't animate `d` in CSS keep the static `d` attribute. */
+.cord {
+  d: var(--cord-from);
+  animation: cord var(--card-duration) ease-in-out
+    calc(var(--card-delay) - var(--card-duration) / 2) infinite alternate;
+}
+
+@keyframes cord {
+  from {
+    d: var(--cord-from);
+  }
+  to {
+    d: var(--cord-to);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sway,
-  .sway-card {
+  .sway-card,
+  .cord {
     animation: none;
   }
 }

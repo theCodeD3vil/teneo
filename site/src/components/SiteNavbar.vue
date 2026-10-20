@@ -18,7 +18,6 @@ const REPO = "theCodeD3vil/teneo";
 const REPO_URL = `https://github.com/${REPO}`;
 
 const links = [
-  { label: "Home", href: "#top" },
   { label: "Features", href: "#features" },
   { label: "Install", href: "#install" },
   { label: "Docs", href: `${REPO_URL}#readme`, external: true },
