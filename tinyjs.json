@@ -15,7 +15,7 @@
   "chrome": {
     "windowControls": false,
     "frame": false,
-    "vibrancy": "popover",
+    "vibrancy": "sheet",
     "transparent": true
   },
   "activation": "accessory",

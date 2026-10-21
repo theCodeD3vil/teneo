@@ -36,7 +36,7 @@ const isActive = (href: string) => href === `#${activeSection.value}`;
          keeps its contrast whether the content behind is dark or light. -->
     <nav
       aria-label="Primary"
-      class="mx-auto grid max-w-4xl grid-cols-[1fr_auto_1fr] items-center rounded-full bg-white/50 py-2 pr-2 pl-3.5 shadow-lg ring-1 shadow-black/10 ring-black/8 backdrop-blur-md backdrop-saturate-150">
+      class="mx-auto grid max-w-4xl grid-cols-[1fr_auto_1fr] items-center rounded-full bg-white/30 py-2 pr-2 pl-3.5 shadow-lg ring-1 shadow-black/10 ring-black/8 backdrop-blur-md backdrop-saturate-150">
       <a href="#top" class="flex items-center gap-2.5 justify-self-start">
         <img src="/favicon.svg" alt="" class="size-8" />
         <span class="text-base font-semibold tracking-tight">Teneo</span>
