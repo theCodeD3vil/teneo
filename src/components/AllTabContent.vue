@@ -6,12 +6,12 @@ import {
   watch,
   type ComponentPublicInstance,
 } from "vue";
-import AlertCircleIcon from "~icons/hugeicons/alert-circle";
-import ClipboardListIcon from "~icons/hugeicons/clipboard-list";
-import FileIcon from "~icons/hugeicons/file-01";
-import ImageIcon from "~icons/hugeicons/image-01";
-import PaletteIcon from "~icons/hugeicons/palette";
-import TextAlignLeftIcon from "~icons/hugeicons/text-align-left";
+import AlertCircleIcon from "~icons/tabler/alert-circle";
+import TextAlignLeftIcon from "~icons/tabler/align-left";
+import ClipboardListIcon from "~icons/tabler/clipboard-list";
+import FileIcon from "~icons/tabler/file";
+import PaletteIcon from "~icons/tabler/palette";
+import ImageIcon from "~icons/tabler/photo";
 
 import {
   Empty,

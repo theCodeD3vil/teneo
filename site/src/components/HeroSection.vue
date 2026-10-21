@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import {
-  CheckmarkCircle02Icon,
-  KeyboardIcon,
-  SecurityLockIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/vue";
-import AppleIcon from "~icons/ph/apple-logo-fill";
+import AppleIcon from "~icons/tabler/brand-apple-filled";
+import CircleCheckIcon from "~icons/tabler/circle-check";
+import KeyboardIcon from "~icons/tabler/keyboard";
+import ShieldLockIcon from "~icons/tabler/shield-lock";
 
 import appHotkeys from "@/assets/app-hotkeys.webp";
 import appPanel from "@/assets/app-panel.webp";
@@ -62,7 +59,7 @@ const fan = [
     ],
     cardColor: "bg-primary text-white",
     iconColor: "bg-white text-primary",
-    icon: SecurityLockIcon,
+    icon: ShieldLockIcon,
     featureTitle: "Private by design",
     features: [
       "History stays on your Mac",
@@ -265,7 +262,7 @@ const cord = (shapes: string[]) => ({
               <span
                 :class="card.iconColor"
                 class="grid size-14 place-items-center rounded-2xl">
-                <HugeiconsIcon :icon="card.icon" class="size-8" />
+                <component :is="card.icon" class="size-8" />
               </span>
               <h3 class="mt-3 text-2xl leading-tight font-bold">
                 {{ card.featureTitle }}
@@ -276,9 +273,7 @@ const cord = (shapes: string[]) => ({
                 v-for="feature in card.features"
                 :key="feature"
                 class="flex items-start gap-2 text-sm leading-snug font-medium">
-                <HugeiconsIcon
-                  :icon="CheckmarkCircle02Icon"
-                  class="mt-px size-4 shrink-0" />
+                <CircleCheckIcon class="mt-px size-4 shrink-0" />
                 {{ feature }}
               </li>
             </ul>

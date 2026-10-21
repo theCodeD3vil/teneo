@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import CommandIcon from "~icons/hugeicons/command";
-import Settings from "~icons/hugeicons/settings-01";
-import ShutDownIcon from "~icons/hugeicons/shut-down";
+import CommandIcon from "~icons/tabler/command";
+import ShutDownIcon from "~icons/tabler/power";
+import Settings from "~icons/tabler/settings";
 
 import { useHotkeyPreview } from "@/composables/useHotkeyPreview";
 

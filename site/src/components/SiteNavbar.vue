@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ExternalLinkIcon, Menu01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/vue";
+import ExternalLinkIcon from "~icons/tabler/external-link";
+import MenuIcon from "~icons/tabler/menu-2";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -36,7 +36,7 @@ const isActive = (href: string) => href === `#${activeSection.value}`;
          keeps its contrast whether the content behind is dark or light. -->
     <nav
       aria-label="Primary"
-      class="mx-auto grid max-w-4xl grid-cols-[1fr_auto_1fr] items-center rounded-full bg-white/50 py-2 pr-2 pl-3.5 shadow-lg ring-1 shadow-black/10 ring-black/8 backdrop-blur-md backdrop-saturate-150">
+      class="mx-auto grid max-w-4xl grid-cols-[1fr_auto_1fr] items-center rounded-full bg-white/30 py-2 pr-2 pl-3.5 shadow-lg ring-1 shadow-black/10 ring-black/8 backdrop-blur-md backdrop-saturate-150">
       <a href="#top" class="flex items-center gap-2.5 justify-self-start">
         <img src="/favicon.svg" alt="" class="size-8" />
         <span class="text-base font-semibold tracking-tight">Teneo</span>
@@ -91,8 +91,7 @@ const isActive = (href: string) => href === `#${activeSection.value}`;
                 <polygon
                   points="12 2.5 14.9 8.9 21.9 9.6 16.6 14.3 18.2 21.2 12 17.6 5.8 21.2 7.4 14.3 2.1 9.6 9.1 8.9" />
               </svg>
-              <HugeiconsIcon
-                :icon="ExternalLinkIcon"
+              <ExternalLinkIcon
                 class="size-4 scale-50 -rotate-45 opacity-0 transition-all duration-200 group-hover/button:scale-100 group-hover/button:rotate-0 group-hover/button:opacity-100" />
             </span>
           </template>
@@ -105,7 +104,7 @@ const isActive = (href: string) => href === `#${activeSection.value}`;
               size="icon"
               aria-label="Open menu"
               class="hover:bg-foreground/8 rounded-full md:hidden">
-              <HugeiconsIcon :icon="Menu01Icon" />
+              <MenuIcon />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent

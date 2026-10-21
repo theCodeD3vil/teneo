@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { useEventListener } from "@vueuse/core";
 import { computed, onUnmounted, ref } from "vue";
-import CancelIcon from "~icons/hugeicons/cancel-01";
+import CancelIcon from "~icons/tabler/x";
 
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { useIntervalFn } from "@vueuse/core";
 import { computed, ref, watch } from "vue";
-import CheckmarkCircleIcon from "~icons/hugeicons/checkmark-circle-02";
-import ComputerIcon from "~icons/hugeicons/computer";
-import DownloadCircleIcon from "~icons/hugeicons/download-circle-01";
-import FileIcon from "~icons/hugeicons/file-01";
-import LinkIcon from "~icons/hugeicons/link-square-02";
-import TickIcon from "~icons/hugeicons/tick-02";
+import TickIcon from "~icons/tabler/check";
+import CheckmarkCircleIcon from "~icons/tabler/circle-check";
+import ComputerIcon from "~icons/tabler/device-desktop";
+import DownloadCircleIcon from "~icons/tabler/download";
+import LinkIcon from "~icons/tabler/external-link";
+import FileIcon from "~icons/tabler/file";
 
 import SettingsField from "@/components/settings/SettingsField.vue";
 import SettingsSection from "@/components/settings/SettingsSection.vue";

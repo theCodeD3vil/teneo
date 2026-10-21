@@ -1789,7 +1789,7 @@ var windowChrome = {
   frame: false,
   windowControls: true,
   transparent: true,
-  vibrancy: "popover"
+  vibrancy: "sheet"
 };
 async function isWindowOpen(app, windowId) {
   return (await app.windows()).includes(windowId);

@@ -11,7 +11,7 @@ const windowChrome: TinyChromeOptions = {
   frame: false,
   windowControls: true,
   transparent: true,
-  vibrancy: "popover",
+  vibrancy: "sheet",
 };
 
 async function isWindowOpen(app: TinyApp, windowId: string): Promise<boolean> {

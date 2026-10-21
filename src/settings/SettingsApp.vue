@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import AlertCircleIcon from "~icons/hugeicons/alert-circle";
+import AlertCircleIcon from "~icons/tabler/alert-circle";
 
 import SettingsTabManager from "@/components/settings/SettingsTabManager.vue";
 import {

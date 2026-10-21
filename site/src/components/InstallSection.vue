@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import AppleIcon from "~icons/ph/apple-logo-fill";
-import DownloadIcon from "~icons/ph/download-simple-fill";
-import GearIcon from "~icons/ph/gear-fill";
-import HandIcon from "~icons/ph/hand-grabbing-fill";
-import ShieldIcon from "~icons/ph/shield-check-fill";
+import AppsIcon from "~icons/tabler/apps-filled";
+import AppleIcon from "~icons/tabler/brand-apple-filled";
+import DownloadIcon from "~icons/tabler/download-filled";
+import GearIcon from "~icons/tabler/settings-filled";
+import ShieldIcon from "~icons/tabler/shield-check-filled";
 
 import { Button } from "@/components/ui/button";
 
@@ -19,7 +19,7 @@ const steps = [
     note: "Not sure? Apple menu › About This Mac shows Chip for Apple Silicon or Processor for Intel.",
   },
   {
-    icon: HandIcon,
+    icon: AppsIcon,
     title: "Drag it to Applications",
     description: "Open the disk image and drag Teneo into Applications.",
   },

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import ClipboardIcon from "~icons/ph/clipboard-fill";
-import PasteIcon from "~icons/ph/clipboard-text-fill";
-import DatabaseIcon from "~icons/ph/database-fill";
-import KeyIcon from "~icons/ph/key-fill";
-import KeyboardIcon from "~icons/ph/keyboard-fill";
-import LinkIcon from "~icons/ph/link-fill";
-import PasswordIcon from "~icons/ph/lock-key-fill";
-import SearchIcon from "~icons/ph/magnifying-glass-fill";
+import ClipboardIcon from "~icons/tabler/clipboard-filled";
+import PasteIcon from "~icons/tabler/clipboard-text-filled";
+import DatabaseIcon from "~icons/tabler/database-filled";
+import KeyIcon from "~icons/tabler/key-filled";
+import KeyboardIcon from "~icons/tabler/keyboard-filled";
+import LinkIcon from "~icons/tabler/link-filled";
+import PasswordIcon from "~icons/tabler/lock-filled";
+import SearchIcon from "~icons/tabler/search-filled";
 
 const features = [
   {

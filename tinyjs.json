@@ -3,7 +3,7 @@
   "title": "Teneo",
   "size": "560x640",
   "id": "com.michael.teneo",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "backend": "backend/main.ts",
   "frontend": {
     "build": "bun run build",
@@ -15,7 +15,7 @@
   "chrome": {
     "windowControls": false,
     "frame": false,
-    "vibrancy": "popover",
+    "vibrancy": "sheet",
     "transparent": true
   },
   "activation": "accessory",

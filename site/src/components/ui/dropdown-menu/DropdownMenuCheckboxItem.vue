@@ -2,8 +2,7 @@
 import type { DropdownMenuCheckboxItemEmits, DropdownMenuCheckboxItemProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { HugeiconsIcon } from '@hugeicons/vue'
-import { Tick02Icon } from '@hugeicons/core-free-icons'
+import CheckIcon from '~icons/tabler/check'
 import { reactiveOmit } from '@vueuse/core'
 import {
   DropdownMenuCheckboxItem,
@@ -35,7 +34,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     >
       <DropdownMenuItemIndicator>
         <slot name="indicator-icon">
-          <HugeiconsIcon :icon="Tick02Icon" />
+          <CheckIcon />
         </slot>
       </DropdownMenuItemIndicator>
     </span>

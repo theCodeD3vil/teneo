@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import TestTubeIcon from "~icons/hugeicons/test-tube";
+import TestTubeIcon from "~icons/tabler/test-pipe";
 
 import { Badge } from "@/components/ui/badge";
 </script>
