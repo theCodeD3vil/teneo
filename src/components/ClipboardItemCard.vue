@@ -94,8 +94,10 @@ const { data: filePreview } = useQuery({
   queryFn: (): Promise<FilePreview> =>
     tiny.api.call("filePreview", { path: previewPath }),
   enabled: Boolean(previewPath),
-  // the panel only hides, so this would redo every preview each time it opens
+  // the panel only hides, and its list is mounted anew each visit: either would
+  // redo every preview each time it opens
   refetchOnWindowFocus: false,
+  refetchOnMount: false,
 });
 
 const previewUrl = computed(() => filePreview.value?.url ?? null);
@@ -377,7 +379,7 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
         <!-- file -->
         <p
           v-if="isFiles"
-          class="font-foreground flex items-center gap-2 text-sm"
+          class="font-foreground flex items-center gap-2 text-sm whitespace-nowrap"
           :title="firstPath">
           <span
             :class="
@@ -416,7 +418,9 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
           }}
         </p>
 
-        <div class="flex items-center gap-x-2">
+        <!-- one line: the link host and the paths shrink and truncate, the rest
+             (app, size, date) keep their words together instead of wrapping -->
+        <div class="flex items-center gap-x-2 whitespace-nowrap">
           <!-- shown while the icon loads, its place kept, so the line doesn't shift -->
           <span
             v-if="sourceAppBundleId && sourceAppIconUrl !== null"
@@ -435,12 +439,12 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 text-xs">{{ fileSize }}</span>
           </template>
-          <template v-if="link">
+          <!-- <template v-if="link">
             <span class="text-foreground/50">·</span>
-            <span class="text-foreground/50 truncate text-xs">{{
+            <span class="text-foreground/50 min-w-0 truncate text-xs">{{
               link.host
             }}</span>
-          </template>
+          </template> -->
           <template v-if="itemDetails.dateCopied">
             <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 text-xs">{{ dateCopied }}</span>

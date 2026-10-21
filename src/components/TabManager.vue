@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import {
+  computed,
+  onBeforeMount,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+} from "vue";
 import ArrowLeftIcon from "~icons/tabler/chevron-left";
 import ArrowRightIcon from "~icons/tabler/chevron-right";
 
@@ -31,10 +38,22 @@ const defaultTab = tabValues[0];
 const selectedTab = ref<TabVariant>(defaultTab);
 const activeItemId = ref<string | null>(null);
 const allTabContent = ref<InstanceType<typeof AllTabContent> | null>(null);
-const debouncedSearchQuery = ref("");
+const debouncedSearchQuery = ref(normalizeSearchQuery(props.searchQuery));
 const { clipboardItems, error, loading } = useClipboard();
 const { settings } = useSettings();
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | undefined;
+
+// App.vue mounts a new TabManager for every visit to the panel, and it always
+// opens on All: the tab is never remembered between visits
+function showAllTab(): void {
+  selectedTab.value = defaultTab;
+}
+onBeforeMount(showAllTab);
+onMounted(showAllTab);
+
+function normalizeSearchQuery(searchQuery: string): string {
+  return searchQuery.trim().toLowerCase();
+}
 
 const itemsByTab = computed<Record<TabVariant, ClipboardHistoryItem[]>>(() => ({
   all: clipboardItems.value,
@@ -88,11 +107,6 @@ function searchableText(item: ClipboardHistoryItem): string | null {
       part.secretLabel ? `${part.text} ${part.secretLabel} ` : part.text,
     )
     .join("");
-}
-
-function activateFirstItem(): void {
-  selectedTab.value = defaultTab;
-  activeItemId.value = getItemsForTab(defaultTab)[0]?.id ?? null;
 }
 
 function moveActiveTab(direction: -1 | 1): boolean {
@@ -175,7 +189,7 @@ watch(
   (searchQuery) => {
     clearTimeout(searchDebounceTimeout);
     searchDebounceTimeout = setTimeout(() => {
-      debouncedSearchQuery.value = searchQuery.trim().toLowerCase();
+      debouncedSearchQuery.value = normalizeSearchQuery(searchQuery);
     }, 200);
   },
   { immediate: true },
@@ -198,8 +212,6 @@ watch(
     immediate: true,
   },
 );
-
-defineExpose({ activateFirstItem });
 
 onUnmounted(() => clearTimeout(searchDebounceTimeout));
 </script>
