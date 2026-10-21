@@ -95,21 +95,27 @@ function show(i: number) {
   }
 }
 
-// Dashed rules only between cells, never along the grid's outer edges.
-// Below lg the grid is a single column and the count is hidden.
-const cellClass = (i: number) => [
-  i < 8 && "max-lg:border-b",
-  i < 6 && "lg:border-b",
-  i % 3 < 2 && "lg:border-r",
-  i === 4 ? "max-lg:hidden" : "hover:bg-muted/70",
-];
+// Dashed rules only between cells, never along the grid's outer edges. The grid
+// is one column on mobile, two on md and three on lg; below lg the count is
+// hidden, so on md the cells after it move up one place.
+const cellClass = (i: number) => {
+  const place = i > 4 ? i - 1 : i;
+  return [
+    i < 8 && "max-md:border-b",
+    place < 6 && "md:max-lg:border-b",
+    place % 2 === 0 && "md:max-lg:border-r",
+    i < 6 && "lg:border-b",
+    i % 3 < 2 && "lg:border-r",
+    i === 4 ? "max-lg:hidden" : "hover:bg-muted/70",
+  ];
+};
 </script>
 
 <template>
   <section id="features" class="flex flex-col items-center px-4 py-24 sm:py-32">
     <h2
       class="max-w-6xl text-center text-5xl leading-[1.05] font-extrabold tracking-tight text-balance sm:text-6xl lg:text-7xl xl:text-8xl">
-      Copy once, find it fast.
+      Everything a clipboard needs.
     </h2>
     <p
       class="text-muted-foreground mt-5 max-w-xl text-center text-base text-balance sm:text-lg">
@@ -117,13 +123,13 @@ const cellClass = (i: number) => [
     </p>
 
     <div
-      class="mt-16 grid w-full max-w-7xl grid-cols-1 lg:grid-cols-3"
+      class="mt-16 grid w-full max-w-7xl grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
       @mouseleave="shown = null">
       <div
         v-for="(cell, i) in cells"
         :key="i"
         :class="cellClass(i)"
-        class="border-foreground/12 relative flex flex-col border-dashed p-8 transition-colors duration-300 lg:min-h-60 lg:p-10"
+        class="border-foreground/12 relative flex flex-col border-dashed p-6 transition-colors duration-300 sm:p-8 lg:min-h-60 lg:p-10"
         @mouseenter="show(i)">
         <template v-if="cell">
           <h3 class="text-xl font-medium tracking-tight lg:text-2xl">

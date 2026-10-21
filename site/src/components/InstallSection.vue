@@ -15,8 +15,8 @@ const steps = [
     icon: DownloadIcon,
     title: "Download the disk image",
     description:
-      "On the latest release, pick the file for your Mac.\nApple Silicon (M1 or later): teneo-<version>-macos-arm64.dmg\nIntel: teneo-<version>-macos-x86_64.dmg",
-    note: "Not sure which you have? Open the Apple menu › About This Mac. A Chip line means Apple Silicon, a Processor line means Intel.",
+      "Get the .dmg for your Mac from the latest release: arm64 for Apple Silicon (M1 or later), x86_64 for Intel.",
+    note: "Not sure? Apple menu › About This Mac shows Chip for Apple Silicon or Processor for Intel.",
   },
   {
     icon: HandIcon,
@@ -27,7 +27,7 @@ const steps = [
     icon: ShieldIcon,
     title: "Let macOS open it",
     description:
-      "Open Teneo from Applications. macOS blocks it the first time, because Apple hasn't notarized Teneo yet. Click Done, then go to System Settings › Privacy & Security, scroll to the bottom and click Open Anyway next to the message about Teneo. You only need to do this once.",
+      "Open Teneo. macOS blocks it the first time because it isn't notarized by Apple yet. Click Done, then open System Settings › Privacy & Security, scroll down and click Open Anyway. You only do this once.",
   },
   {
     icon: GearIcon,
@@ -70,20 +70,20 @@ const hovered = ref<number | null>(null);
         v-for="(step, i) in steps"
         :key="step.title"
         :class="i % 2 === 0 ? '-rotate-[1.5deg]' : 'rotate-[1.5deg]'"
-        class="bg-background flex items-start gap-5 rounded-3xl p-6 shadow-lg shadow-black/5 sm:gap-8 sm:p-8 lg:gap-10 lg:p-10"
+        class="bg-background flex items-start gap-4 rounded-3xl p-5 shadow-lg shadow-black/5 sm:gap-8 sm:p-8 lg:gap-10 lg:p-10"
         @mouseenter="hovered = i"
         @mouseleave="hovered = null">
         <div
-          class="text-primary grid h-15 w-12 shrink-0 items-center justify-items-start *:col-start-1 *:row-start-1 sm:w-14 lg:h-18 lg:w-16">
+          class="text-primary grid h-12 w-8 shrink-0 items-center justify-items-start *:col-start-1 *:row-start-1 sm:h-15 sm:w-14 lg:h-18 lg:w-16">
           <Transition name="morph">
             <component
               :is="step.icon"
               v-if="hovered === i"
               aria-hidden="true"
-              class="size-12 lg:size-14" />
+              class="size-8 sm:size-12 lg:size-14" />
             <span
               v-else
-              class="text-6xl leading-none font-extrabold lg:text-7xl">
+              class="text-5xl leading-none font-extrabold sm:text-6xl lg:text-7xl">
               {{ i + 1 }}
             </span>
           </Transition>
@@ -92,8 +92,7 @@ const hovered = ref<number | null>(null);
           <h3 class="text-xl font-medium tracking-tight lg:text-2xl">
             {{ step.title }}
           </h3>
-          <p
-            class="text-muted-foreground mt-3 leading-relaxed whitespace-pre-line">
+          <p class="text-muted-foreground mt-3 leading-relaxed">
             {{ step.description }}
           </p>
           <p

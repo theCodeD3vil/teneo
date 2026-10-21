@@ -162,7 +162,7 @@ const cord = (shapes: string[]) => ({
 <template>
   <section
     id="top"
-    class="relative flex min-h-svh flex-col items-center overflow-x-clip px-4 pt-32 pb-60 sm:pt-40">
+    class="relative flex min-h-svh flex-col items-center overflow-x-clip px-4 pt-32 pb-12 sm:pt-40 lg:pb-80 xl:pb-60">
     <div
       class="absolute inset-x-0 top-0 h-svh overflow-hidden [mask-image:linear-gradient(to_bottom,black_50%,transparent)]">
       <img
@@ -208,7 +208,7 @@ const cord = (shapes: string[]) => ({
     </div>
 
     <div
-      class="relative mt-12 w-(--fan) [--fan:min(78vw,max(20rem,58svh),40rem)] sm:mt-14">
+      class="relative mt-12 w-(--fan) [--fan:min(78vw,max(20rem,58svh),40rem)] sm:mt-14 lg:[--fan:min(78vw,max(20rem,58svh),40rem,38vw)]">
       <div
         v-for="card in fan"
         :key="card.src"
