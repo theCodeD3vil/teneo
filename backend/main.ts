@@ -130,6 +130,9 @@ export async function init(app: TinyApp) {
   app.setHideOnClose(true);
   // Open the panel on the current Space, over full-screen apps too
   app.setAllSpaces(true);
+  // Stay above other apps' windows until hidden: closing takes a few IPC round
+  // trips, and a normal-level panel drops behind the app that just took focus
+  app.window("main").setLevel("floating");
   await showMenuBarOrSetup(app);
   // `TENEO_PREVIEW_SETUP=1 tinyjs dev` opens setup even when it's done
   if (tjs.env.TENEO_PREVIEW_SETUP) await openSetupWindow(app);

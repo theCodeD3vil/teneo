@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
 
 import { openPanelHotkeyId } from "../shared/types/settings";
 import { showPanelEvent } from "../shared/types/windows";
@@ -10,7 +10,6 @@ import { useHotkeys } from "./composables/useHotkeys";
 import { PANEL_WIDTH } from "./constants/system";
 
 const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
-const tabManager = ref<InstanceType<typeof TabManager> | null>(null);
 const searchQuery = ref("");
 
 async function toggleWindow() {
@@ -20,6 +19,33 @@ async function toggleWindow() {
     return;
   }
   await showWindow();
+}
+
+// Each visit gets a new TabManager (it opens on All, see its lifecycle hooks).
+// Mounting the All list takes ~300ms, and a window shown meanwhile paints the
+// old tab first, so it's mounted and laid out while the panel is hidden.
+const panelKey = ref(0);
+let panelReset: Promise<void> | undefined;
+
+function resetPanel(): Promise<void> {
+  panelReset ??= remountPanel();
+  return panelReset;
+}
+
+async function remountPanel(): Promise<void> {
+  panelKey.value++;
+  await nextTick();
+  void document.body.offsetHeight;
+}
+
+// Done as the panel hides, so opening it doesn't wait for the render. Later, so
+// a paste that hid the panel isn't held up by it; opening again before then
+// resets in showWindow instead.
+function resetPanelWhenHidden(): void {
+  if (!document.hidden) return;
+  setTimeout(() => {
+    if (document.hidden) void resetPanel();
+  }, 500);
 }
 
 async function showWindow() {
@@ -34,7 +60,9 @@ async function showWindow() {
   const calculatedYPosition = trayPosition.y + trayPosition.height;
   tiny.win.setPosition(calulatedXPosition, calculatedYPosition);
 
-  tabManager.value?.activateFirstItem();
+  // Normally done already when the panel was hidden
+  await resetPanel();
+  panelReset = undefined;
   // Open on the list, not the search field, so letter hotkeys (P, D) work;
   // ⌘ / focuses search. Blur too: focus left in search last time comes back on show.
   searchInput.value?.blur();
@@ -75,6 +103,7 @@ let unsubscribeFromShowPanel: (() => void) | undefined;
 
 onMounted(() => {
   window.addEventListener("blur", hideWindowOnBlur);
+  document.addEventListener("visibilitychange", resetPanelWhenHidden);
   tiny.tray.onClick(async () => {
     await toggleWindow();
   });
@@ -86,6 +115,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("blur", hideWindowOnBlur);
+  document.removeEventListener("visibilitychange", resetPanelWhenHidden);
   unsubscribeFromHotkeys?.();
   unsubscribeFromShowPanel?.();
 });
@@ -102,7 +132,7 @@ useHotkeys({
   <div class="flex h-screen flex-col gap-3 overflow-hidden bg-transparent! p-4">
     <SearchInput ref="searchInput" v-model="searchQuery" />
     <TabManager
-      ref="tabManager"
+      :key="panelKey"
       :search-query="searchQuery"
       @tab-change="(e: number) => (clipboardItemsCount = e)" />
     <HomeFooter :clipboard-items-count="clipboardItemsCount" />

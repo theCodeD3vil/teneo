@@ -2062,6 +2062,7 @@ async function init(app) {
   void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);
   app.setAllSpaces(true);
+  app.window("main").setLevel("floating");
   await showMenuBarOrSetup(app);
   if (tjs.env.TENEO_PREVIEW_SETUP) await openSetupWindow(app);
   startCheckingForUpdates(app);
