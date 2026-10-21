@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import CheckIcon from "~icons/ph/check-circle-fill";
+import CheckIcon from "~icons/tabler/circle-check-filled";
 
 // What's built first, then what's planned (the README's roadmap).
 const items = [

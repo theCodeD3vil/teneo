@@ -14,8 +14,6 @@
     "fmt:check": "oxfmt --check"
   },
   "dependencies": {
-    "@hugeicons/core-free-icons": "^4.3.5",
-    "@hugeicons/vue": "^1.0.8",
     "@tailwindcss/vite": "^4.3.3",
     "@vueuse/core": "^15.0.0",
     "class-variance-authority": "^0.7.1",
@@ -28,8 +26,7 @@
     "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
-    "@iconify-json/hugeicons": "^1.2.35",
-    "@iconify-json/ph": "^1.2.2",
+    "@iconify-json/tabler": "^1.2.42",
     "@types/node": "^24.13.3",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",

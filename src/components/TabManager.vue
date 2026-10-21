@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import ArrowLeftIcon from "~icons/hugeicons/arrow-left-01";
-import ArrowRightIcon from "~icons/hugeicons/arrow-right-01";
+import ArrowLeftIcon from "~icons/tabler/chevron-left";
+import ArrowRightIcon from "~icons/tabler/chevron-right";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClipboard } from "@/composables/useClipboard";

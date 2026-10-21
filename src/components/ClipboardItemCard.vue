@@ -1,18 +1,18 @@
 <script lang="ts" setup>
 import { useQuery } from "@tanstack/vue-query";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import ClipboardIcon from "~icons/hugeicons/clipboard";
-import CommandIcon from "~icons/hugeicons/command";
-import DeleteIcon from "~icons/hugeicons/delete-02";
-import FileIcon from "~icons/hugeicons/file-01";
-import FileVerifiedIcon from "~icons/hugeicons/file-verified";
-import ImageIcon from "~icons/hugeicons/image-01";
-import ImageDoneIcon from "~icons/hugeicons/image-done-01";
-import LinkIcon from "~icons/hugeicons/link-01";
-import PinIcon from "~icons/hugeicons/pin";
-import PinOffIcon from "~icons/hugeicons/pin-off";
-import TextAlignLeftIcon from "~icons/hugeicons/text-align-left";
-import TickIcon from "~icons/hugeicons/tick-02";
+import TextAlignLeftIcon from "~icons/tabler/align-left";
+import TickIcon from "~icons/tabler/check";
+import ClipboardIcon from "~icons/tabler/clipboard";
+import CommandIcon from "~icons/tabler/command";
+import FileIcon from "~icons/tabler/file";
+import FileVerifiedIcon from "~icons/tabler/file-check";
+import LinkIcon from "~icons/tabler/link";
+import ImageIcon from "~icons/tabler/photo";
+import ImageDoneIcon from "~icons/tabler/photo-check";
+import PinIcon from "~icons/tabler/pin";
+import PinOffIcon from "~icons/tabler/pinned-off";
+import DeleteIcon from "~icons/tabler/trash";
 
 import BetaBadge from "@/components/BetaBadge.vue";
 import Button from "@/components/ui/button/Button.vue";

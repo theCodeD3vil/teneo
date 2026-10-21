@@ -1,8 +1,8 @@
 <script lang="ts" setup>
 import { computed, ref } from "vue";
-import AddIcon from "~icons/hugeicons/add-01";
-import CancelIcon from "~icons/hugeicons/cancel-01";
-import TickIcon from "~icons/hugeicons/tick-02";
+import TickIcon from "~icons/tabler/check";
+import AddIcon from "~icons/tabler/plus";
+import CancelIcon from "~icons/tabler/x";
 
 import BetaBadge from "@/components/BetaBadge.vue";
 import {

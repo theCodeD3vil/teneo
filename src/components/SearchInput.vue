@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import SearchIcon from "~icons/hugeicons/search-01";
+import SearchIcon from "~icons/tabler/search";
 
 import {
   InputGroup,

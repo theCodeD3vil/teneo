@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import LinkIcon from "~icons/hugeicons/link-square-02";
+import LinkIcon from "~icons/tabler/external-link";
 
 import { Button } from "@/components/ui/button";
 

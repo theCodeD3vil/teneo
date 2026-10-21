@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import CommandIcon from "~icons/hugeicons/command";
-import OptionIcon from "~icons/hugeicons/option";
+import CommandIcon from "~icons/tabler/command";
+import OptionIcon from "~icons/tabler/option";
 
 import type { HotkeyPreviewKey, HotkeyProgress } from "@/constants/hotkeys";
 

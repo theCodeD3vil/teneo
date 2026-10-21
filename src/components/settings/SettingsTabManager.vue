@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import HardDriveIcon from "~icons/hugeicons/hard-drive";
-import InformationCircleIcon from "~icons/hugeicons/information-circle";
-import KeyboardIcon from "~icons/hugeicons/keyboard";
-import SettingsIcon from "~icons/hugeicons/settings-02";
-import ShieldIcon from "~icons/hugeicons/shield-01";
+import HardDriveIcon from "~icons/tabler/database";
+import InformationCircleIcon from "~icons/tabler/info-circle";
+import KeyboardIcon from "~icons/tabler/keyboard";
+import SettingsIcon from "~icons/tabler/settings";
+import ShieldIcon from "~icons/tabler/shield";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 

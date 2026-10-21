@@ -1,8 +1,12 @@
 <script lang="ts" setup>
 import type { ToasterProps } from 'vue-sonner'
 
-import { HugeiconsIcon } from '@hugeicons/vue'
-import { CheckmarkCircle01Icon, InformationCircleIcon, Loading03Icon, CancelCircleIcon, Alert02Icon, Cancel01Icon } from '@hugeicons/core-free-icons'
+import CircleCheckIcon from '~icons/tabler/circle-check'
+import InfoCircleIcon from '~icons/tabler/info-circle'
+import LoaderIcon from '~icons/tabler/loader-2'
+import CircleXIcon from '~icons/tabler/circle-x'
+import AlertTriangleIcon from '~icons/tabler/alert-triangle'
+import XIcon from '~icons/tabler/x'
 import { reactiveOmit } from '@vueuse/core'
 import { Toaster as Sonner } from 'vue-sonner'
 import { cn } from '@/lib/utils'
@@ -33,24 +37,24 @@ const delegatedProps = reactiveOmit(props, 'class', 'toastOptions')
     v-bind="delegatedProps"
   >
     <template #success-icon>
-      <HugeiconsIcon :icon="CheckmarkCircle01Icon" class="size-4" />
+      <CircleCheckIcon class="size-4" />
     </template>
     <template #info-icon>
-      <HugeiconsIcon :icon="InformationCircleIcon" class="size-4" />
+      <InfoCircleIcon class="size-4" />
     </template>
     <template #warning-icon>
-      <HugeiconsIcon :icon="Alert02Icon" class="size-4" />
+      <AlertTriangleIcon class="size-4" />
     </template>
     <template #error-icon>
-      <HugeiconsIcon :icon="CancelCircleIcon" class="size-4" />
+      <CircleXIcon class="size-4" />
     </template>
     <template #loading-icon>
       <div>
-        <HugeiconsIcon :icon="Loading03Icon" class="size-4 animate-spin" />
+        <LoaderIcon class="size-4 animate-spin" />
       </div>
     </template>
     <template #close-icon>
-      <HugeiconsIcon :icon="Cancel01Icon" class="size-4" />
+      <XIcon class="size-4" />
     </template>
   </Sonner>
 </template>

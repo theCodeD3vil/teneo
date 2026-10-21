@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ExternalLinkIcon, Menu01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/vue";
+import ExternalLinkIcon from "~icons/tabler/external-link";
+import MenuIcon from "~icons/tabler/menu-2";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -91,8 +91,7 @@ const isActive = (href: string) => href === `#${activeSection.value}`;
                 <polygon
                   points="12 2.5 14.9 8.9 21.9 9.6 16.6 14.3 18.2 21.2 12 17.6 5.8 21.2 7.4 14.3 2.1 9.6 9.1 8.9" />
               </svg>
-              <HugeiconsIcon
-                :icon="ExternalLinkIcon"
+              <ExternalLinkIcon
                 class="size-4 scale-50 -rotate-45 opacity-0 transition-all duration-200 group-hover/button:scale-100 group-hover/button:rotate-0 group-hover/button:opacity-100" />
             </span>
           </template>
@@ -105,7 +104,7 @@ const isActive = (href: string) => href === `#${activeSection.value}`;
               size="icon"
               aria-label="Open menu"
               class="hover:bg-foreground/8 rounded-full md:hidden">
-              <HugeiconsIcon :icon="Menu01Icon" />
+              <MenuIcon />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent

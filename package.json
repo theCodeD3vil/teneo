@@ -14,8 +14,6 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@hugeicons/core-free-icons": "^4.3.5",
-    "@hugeicons/vue": "^1.0.8",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/vue-query": "^5.104.3",
     "@vueuse/core": "^15.0.0",
@@ -31,7 +29,7 @@
     "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
-    "@iconify-json/hugeicons": "^1.2.35",
+    "@iconify-json/tabler": "^1.2.42",
     "@iconify/vue": "^5.0.3",
     "@txikijs/types": "26.6.0",
     "@types/node": "^24.13.3",
