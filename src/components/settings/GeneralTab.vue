@@ -1,8 +1,8 @@
 <script lang="ts" setup>
-import { useEventListener } from "@vueuse/core";
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 
 import { Switch } from "@/components/ui/switch";
+import { useLaunchAtLogin } from "@/composables/useLaunchAtLogin";
 import { useSettings } from "@/composables/useSettings";
 
 import SettingsField from "./SettingsField.vue";
@@ -23,22 +23,8 @@ const pasteOnEnter = computed({
   set: (enabled) => updateSettings({ pasteOnEnter: enabled }),
 });
 
-// Launch at login is system state (a login item), not a stored setting
-const launchAtLoginStatus = ref<TinyLoginStatus | null>(null);
-const launchAtLogin = computed({
-  get: () => launchAtLoginStatus.value === "enabled",
-  set: async (enabled) => {
-    launchAtLoginStatus.value = await tiny.app.launchAtLogin.set(enabled);
-  },
-});
-
-async function refreshLaunchAtLoginStatus(): Promise<void> {
-  launchAtLoginStatus.value = await tiny.app.launchAtLogin.get();
-}
-
-onMounted(refreshLaunchAtLoginStatus);
-// Login items are approved in System Settings, so re-check when the user comes back
-useEventListener(window, "focus", refreshLaunchAtLoginStatus);
+const { status: launchAtLoginStatus, isEnabled: launchAtLogin } =
+  useLaunchAtLogin();
 </script>
 
 <template>

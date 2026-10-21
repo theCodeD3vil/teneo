@@ -16,6 +16,8 @@ export default defineConfig({
     "vendor/**",
     "test/snapshots/**",
     "src/components/ui/**",
+    "site/src/components/ui/**",
+    "site/dist/**",
     ".build/**",
   ], //will update later
 });

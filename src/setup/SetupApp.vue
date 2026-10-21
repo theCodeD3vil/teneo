@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { useIntervalFn } from "@vueuse/core";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import CheckmarkCircleIcon from "~icons/hugeicons/checkmark-circle-02";
+import ComputerIcon from "~icons/hugeicons/computer";
+import DownloadCircleIcon from "~icons/hugeicons/download-circle-01";
+import FileIcon from "~icons/hugeicons/file-01";
 import LinkIcon from "~icons/hugeicons/link-square-02";
 import TickIcon from "~icons/hugeicons/tick-02";
 
@@ -9,10 +12,16 @@ import SettingsField from "@/components/settings/SettingsField.vue";
 import SettingsSection from "@/components/settings/SettingsSection.vue";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
+import { useLaunchAtLogin } from "@/composables/useLaunchAtLogin";
+import { useSecretEncryption } from "@/composables/useSecretEncryption";
+import { useSettings } from "@/composables/useSettings";
 import { cn } from "@/lib/utils";
 
-const steps = ["welcome", "permissions", "ready"] as const;
+import type { FolderAccess } from "../../shared/types/storage";
+
+const steps = ["welcome", "permissions", "files", "keys", "ready"] as const;
 const currentStep = ref<(typeof steps)[number]>("welcome");
 
 const {
@@ -23,7 +32,7 @@ const {
 
 function continueFromWelcome(): void {
   currentStep.value =
-    accessibilityStatus.value === "granted" ? "ready" : "permissions";
+    accessibilityStatus.value === "granted" ? "files" : "permissions";
 }
 
 // System Settings doesn't tell Teneo when access is granted, so keep asking
@@ -34,8 +43,48 @@ useIntervalFn(() => {
 // Move on once access is granted, after a moment to show that it worked
 watch(accessibilityStatus, (status) => {
   if (status !== "granted" || currentStep.value !== "permissions") return;
-  setTimeout(() => (currentStep.value = "ready"), 800);
+  setTimeout(() => (currentStep.value = "files"), 800);
 });
+
+// Opening each folder is what makes macOS ask, so nothing is known until then
+const folderAccess = ref<FolderAccess[] | null>(null);
+const isRequestingFolders = ref(false);
+
+async function requestFolderAccess(): Promise<void> {
+  isRequestingFolders.value = true;
+  try {
+    folderAccess.value = await tiny.api.call("requestFolderAccess");
+  } finally {
+    isRequestingFolders.value = false;
+  }
+}
+
+// Same icons as Finder's sidebar
+const folders = [
+  { name: "Desktop", icon: ComputerIcon },
+  { name: "Documents", icon: FileIcon },
+  { name: "Downloads", icon: DownloadCircleIcon },
+] as const;
+function folderStatus(name: string): FolderAccess["status"] | null {
+  return (
+    folderAccess.value?.find((folder) => folder.name === name)?.status ?? null
+  );
+}
+
+// Off unless the user turns it on; turning it on reads the Keychain now
+const { settings } = useSettings();
+const {
+  isChanging: isChangingEncryption,
+  error: encryptionError,
+  setEncryption,
+} = useSecretEncryption();
+const encryptSecrets = computed({
+  get: () => settings.value.encryptSecrets,
+  set: (enabled) => void setEncryption(enabled),
+});
+
+const { status: launchAtLoginStatus, isEnabled: launchAtLogin } =
+  useLaunchAtLogin();
 
 const isFinishing = ref(false);
 
@@ -109,6 +158,74 @@ function finishSetup(): void {
       </section>
 
       <section
+        v-else-if="currentStep === 'files'"
+        key="files"
+        class="flex flex-1 flex-col items-center justify-center gap-y-4 text-center">
+        <h1 class="text-2xl font-medium">Preview the files you copy</h1>
+        <p class="text-foreground/60 max-w-md text-xs text-balance">
+          To show previews and sizes of files you copy from these folders, Teneo
+          needs to see them. macOS asks about each one.
+        </p>
+
+        <SettingsSection class="mt-4 w-full text-left">
+          <template #section-title>Folders</template>
+          <SettingsField v-for="{ name, icon } in folders" :key="name">
+            <template #label>
+              <span class="flex items-center gap-2">
+                <component :is="icon" class="text-primary size-4" />
+                {{ name }}
+              </span>
+            </template>
+            <span
+              v-if="folderStatus(name) === 'granted'"
+              class="text-success flex items-center gap-1 text-sm">
+              <TickIcon /> Allowed
+            </span>
+            <span
+              v-else-if="folderStatus(name) === 'denied'"
+              class="text-foreground/60 text-sm">
+              Not allowed
+            </span>
+          </SettingsField>
+        </SettingsSection>
+        <p class="text-foreground/60 text-xs text-balance">
+          Files you copy always paste, even from folders Teneo can't see. Change
+          this later in System Settings › Privacy & Security › Files and
+          Folders.
+        </p>
+      </section>
+
+      <section
+        v-else-if="currentStep === 'keys'"
+        key="keys"
+        class="flex flex-1 flex-col items-center justify-center gap-y-4 text-center">
+        <h1 class="text-2xl font-medium">Keep API keys safe</h1>
+        <p class="text-foreground/60 max-w-md text-xs text-balance">
+          Teneo hides API keys you copy in your history. It can also save them
+          encrypted, with the key that unlocks them in your Keychain.
+        </p>
+
+        <SettingsSection class="mt-4 w-full text-left">
+          <template #section-title>API Keys</template>
+          <SettingsField>
+            <template #label>Encrypt API keys</template>
+            <template #description>
+              macOS may ask for your Mac password to let Teneo use your
+              Keychain, and again after updates.
+              <span v-if="encryptionError" class="text-destructive block">
+                {{ encryptionError }}
+              </span>
+            </template>
+            <Spinner v-if="isChangingEncryption" />
+            <Switch v-else v-model="encryptSecrets" />
+          </SettingsField>
+        </SettingsSection>
+        <p class="text-foreground/60 text-xs text-balance">
+          You can change this later in Settings › Security.
+        </p>
+      </section>
+
+      <section
         v-else
         key="ready"
         class="flex flex-1 flex-col items-center justify-center gap-y-4 text-center">
@@ -124,11 +241,24 @@ function finishSetup(): void {
           Pasting into other apps stays off until you allow Accessibility in
           Settings › Security.
         </p>
+
+        <SettingsSection
+          v-if="launchAtLoginStatus && launchAtLoginStatus !== 'unsupported'"
+          class="mt-4 w-full text-left">
+          <template #section-title>Startup</template>
+          <SettingsField>
+            <template #label>Open Teneo at login</template>
+            <template #description>
+              Keep your history going after you restart your Mac
+            </template>
+            <Switch v-model="launchAtLogin" />
+          </SettingsField>
+        </SettingsSection>
       </section>
     </Transition>
 
     <footer class="flex shrink-0 flex-col items-center gap-y-5">
-      <!-- where the user is in the three steps -->
+      <!-- where the user is in the steps -->
       <div class="flex gap-x-1.5" aria-hidden="true">
         <span
           v-for="step in steps"
@@ -159,12 +289,47 @@ function finishSetup(): void {
         <template v-else>
           <Spinner /> Waiting for access
           <span aria-hidden="true">·</span>
-          <!-- skips to the last step; Settings › Security grants access later -->
-          <Button variant="ghost" size="sm" @click="currentStep = 'ready'">
+          <!-- moves on; Settings › Security grants access later -->
+          <Button variant="ghost" size="sm" @click="currentStep = 'files'">
             Set up later <LinkIcon />
           </Button>
         </template>
       </div>
+      <div
+        v-else-if="currentStep === 'files'"
+        class="flex w-full flex-col items-center gap-y-2">
+        <Button
+          v-if="!folderAccess"
+          size="lg"
+          class="w-full max-w-xs"
+          :disabled="isRequestingFolders"
+          @click="requestFolderAccess">
+          <Spinner v-if="isRequestingFolders" /> Allow access
+        </Button>
+        <Button
+          v-else
+          size="lg"
+          class="w-full max-w-xs"
+          @click="currentStep = 'keys'">
+          Continue
+        </Button>
+        <Button
+          v-if="!folderAccess"
+          variant="ghost"
+          size="sm"
+          :disabled="isRequestingFolders"
+          @click="currentStep = 'keys'">
+          Skip
+        </Button>
+      </div>
+      <Button
+        v-else-if="currentStep === 'keys'"
+        size="lg"
+        class="w-full max-w-xs"
+        :disabled="isChangingEncryption"
+        @click="currentStep = 'ready'">
+        Continue
+      </Button>
       <Button
         v-else
         size="lg"

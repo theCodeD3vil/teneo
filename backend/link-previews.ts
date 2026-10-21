@@ -48,16 +48,34 @@ export function findLink(text: string): ClipboardLink | null {
 /** This Mac, the local network, or an address only it can reach. */
 export function isLocalAddress(url: URL): boolean {
   const host = url.hostname.toLowerCase();
-  // IPv6 literals in links are nearly always local ones
-  if (host.startsWith("[")) return true;
+  if (host.startsWith("[")) return isLocalIp(host.slice(1, -1));
   // a name without a dot only means something on the local network
   if (!host.includes(".")) return true;
   if (/\.(?:localhost|local|lan|home|internal|home\.arpa)$/.test(host)) {
     return true;
   }
-  const ipv4 = host.match(/^(\d+)\.(\d+)\.\d+\.\d+$/);
-  if (!ipv4) return false;
-  const [first, second] = [Number(ipv4[1]), Number(ipv4[2])];
+  return /^[\d.]+$/.test(host) && isLocalIp(host);
+}
+
+/** An IPv4 or IPv6 address on this Mac or the local network. */
+export function isLocalIp(ip: string): boolean {
+  const address = ip.toLowerCase();
+  if (address.includes(":")) {
+    // an IPv4 address written as IPv6, e.g. ::ffff:192.168.1.1
+    const ipv4 = address.match(/^::ffff:([\d.]+)$/)?.[1];
+    if (ipv4) return isLocalIp(ipv4);
+    return (
+      address === "::" ||
+      address === "::1" ||
+      /^f[cd]/.test(address) || // unique local, fc00::/7
+      /^fe[89ab]/.test(address) // link-local, fe80::/10
+    );
+  }
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !(part >= 0 && part <= 255))) {
+    return true; // not an address a public site would have
+  }
+  const [first, second] = parts;
   return (
     first === 0 ||
     first === 10 ||
@@ -67,6 +85,18 @@ export function isLocalAddress(url: URL): boolean {
     (first === 172 && second >= 16 && second <= 31) ||
     (first === 192 && second === 168)
   );
+}
+
+/** Whether a site's name leads to this Mac or the local network, e.g. a
+ *  router's or NAS's own domain. Fetching it would make macOS ask to let
+ *  Teneo find devices on the local network. Rejects when the name can't be
+ *  looked up, so the preview is tried again later. */
+async function resolvesToLocalAddress(url: URL): Promise<boolean> {
+  if (url.hostname.startsWith("[") || /^[\d.]+$/.test(url.hostname)) {
+    return false; // an address, already checked by isLocalAddress
+  }
+  const addresses = await tjs.lookup(url.hostname, { all: true });
+  return [addresses].flat().some((address) => isLocalIp(address.ip));
 }
 
 /** Whether opening this exact page is unlikely to do anything, such as
@@ -340,7 +370,9 @@ async function fetchFollowingRedirects(
 ): Promise<Response | null> {
   let target = new URL(url);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-    if (isBlocked(target)) return null;
+    if (isBlocked(target) || (await resolvesToLocalAddress(target))) {
+      return null;
+    }
     const response = await fetch(target.href, {
       redirect: "manual",
       signal,

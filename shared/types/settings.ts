@@ -9,6 +9,10 @@ export interface AppSettings {
   /** show API keys and other secrets in history as asterisks; pasting still
    *  gives the real text */
   maskSecrets: boolean;
+  /** save text holding a secret encrypted, with the key in the Keychain.
+   *  Changed only through the setSecretEncryption api, which also encrypts
+   *  or decrypts what's already saved */
+  encryptSecrets: boolean;
   /** show a copied link's site icon, fetched from the site itself */
   showLinkPreviews: boolean;
   /** bundle ids of apps the user added to the ignore list; known password
@@ -33,6 +37,7 @@ export const defaultSettings: AppSettings = {
   pasteOnEnter: false,
   ignorePasswords: true,
   maskSecrets: true,
+  encryptSecrets: false,
   showLinkPreviews: true,
   excludedApps: [],
   openPanelShortcut: "",

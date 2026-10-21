@@ -21,6 +21,15 @@ export interface SecretSpan {
   label: string;
 }
 
+/** What the filePreview API returns for a copied file or saved image. */
+export interface FilePreview {
+  /** data: URL of its Quick Look thumbnail, or null when there's none */
+  url: string | null;
+  /** the file was moved or deleted since it was copied. False when macOS
+   *  only keeps Teneo out of its folder: it can still be pasted. */
+  isMissing: boolean;
+}
+
 /** A copied text that is a single http(s) URL. */
 export interface ClipboardLink {
   url: string;
