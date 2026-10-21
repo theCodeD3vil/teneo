@@ -57,7 +57,7 @@ const items = [
     </p>
 
     <!-- A solid line runs through what's done and a dashed one on to what's planned. -->
-    <ol class="mt-16 w-full max-w-6xl">
+    <ol class="mt-16 w-full max-w-3xl">
       <li
         v-for="(item, i) in items"
         :key="item.title"
