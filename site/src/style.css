@@ -56,11 +56,16 @@
 }
 
 @layer base {
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
   * {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply text-foreground font-sans;
+    @apply bg-background text-foreground font-sans;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
@@ -151,4 +156,41 @@
   --sidebar-accent-foreground: oklch(0.988 0.003 106.5);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.58 0.031 107.3);
+}
+
+/* Shared by the Features count and the Install step numbers, which trade places
+   with an icon on hover: whatever is leaving shrinks and spins away while the
+   next one springs in from the opposite side. */
+.morph-enter-active {
+  transition:
+    opacity 0.35s ease,
+    transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 0.35s ease;
+}
+
+.morph-leave-active {
+  transition:
+    opacity 0.25s ease-in,
+    transform 0.3s ease-in,
+    filter 0.25s ease-in;
+}
+
+.morph-enter-from {
+  opacity: 0;
+  transform: scale(0.4) rotate(-24deg);
+  filter: blur(6px);
+}
+
+.morph-leave-to {
+  opacity: 0;
+  transform: scale(0.6) rotate(24deg);
+  filter: blur(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .morph-enter-from,
+  .morph-leave-to {
+    transform: none;
+    filter: none;
+  }
 }

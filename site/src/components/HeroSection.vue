@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import {
   CheckmarkCircle02Icon,
-  Download01Icon,
   KeyboardIcon,
   SecurityLockIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/vue";
+import AppleIcon from "~icons/ph/apple-logo-fill";
 
 import appHotkeys from "@/assets/app-hotkeys.webp";
 import appPanel from "@/assets/app-panel.webp";
@@ -51,6 +51,15 @@ const fan = [
       "--card-duration": "3.6s",
       "--card-delay": "-0.9s",
     },
+    // Theme colors in hue order. The stack starts at the complement of the
+    // card's own color and skips that color.
+    shadow: [
+      "var(--warning)",
+      "var(--success)",
+      "var(--info)",
+      "var(--tertiary)",
+      "var(--destructive)",
+    ],
     cardColor: "bg-primary text-white",
     iconColor: "bg-white text-primary",
     icon: SecurityLockIcon,
@@ -90,6 +99,13 @@ const fan = [
       "--card-duration": "4.2s",
       "--card-delay": "-2.3s",
     },
+    shadow: [
+      "var(--primary)",
+      "var(--tertiary)",
+      "var(--destructive)",
+      "var(--success)",
+      "var(--info)",
+    ],
     cardColor: "bg-warning text-black",
     iconColor: "bg-black text-warning",
     icon: KeyboardIcon,
@@ -126,6 +142,15 @@ const windowHole = (side: Side) =>
   hole(side, 8, `calc(100% - ${WINDOW_HOLE_RISE}px)`);
 const cardHole = (side: Side) => hole(side, 7, `${CARD_HOLE_DROP}px`);
 
+// A stack of colored sheets under the card. Each peeks 6px further out than the
+// one above it and is 2px narrower on every side, so the stack tapers. It is a
+// separate element because the card's mask would clip a shadow of its own.
+const sheets = (colors: string[]) => ({
+  boxShadow: colors
+    .map((color, i) => `0 ${(i + 1) * 8}px 0 -${(i + 1) * 2}px ${color}`)
+    .join(", "),
+});
+
 // Each strand has two shapes that differ only in how far the middle bows to
 // one side. Both end at the holes, and the CSS morphs between them.
 const cord = (shapes: string[]) => ({
@@ -137,7 +162,7 @@ const cord = (shapes: string[]) => ({
 <template>
   <section
     id="top"
-    class="relative flex min-h-svh flex-col items-center overflow-x-clip px-4 pt-32 pb-52 sm:pt-40">
+    class="relative flex min-h-svh flex-col items-center overflow-x-clip px-4 pt-32 pb-60 sm:pt-40">
     <div
       class="absolute inset-x-0 top-0 h-svh overflow-hidden [mask-image:linear-gradient(to_bottom,black_50%,transparent)]">
       <img
@@ -158,7 +183,7 @@ const cord = (shapes: string[]) => ({
         as="a"
         :href="DOWNLOAD_URL"
         class="text-primary h-12 rounded-full bg-white px-6 text-base font-semibold hover:bg-white/90">
-        <HugeiconsIcon :icon="Download01Icon" class="size-5" />
+        <AppleIcon class="size-5" />
         Download for Mac
       </Button>
       <Button
@@ -204,6 +229,10 @@ const cord = (shapes: string[]) => ({
           :class="card.cardSide"
           :style="card.sway"
           class="sway relative mt-14 hidden w-[56%] lg:block">
+          <div
+            aria-hidden="true"
+            :style="sheets(card.shadow)"
+            class="sway-card absolute inset-0 rounded-3xl" />
           <span
             aria-hidden="true"
             :class="card.threadSide"

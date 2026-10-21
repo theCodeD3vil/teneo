@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@iconify-json/hugeicons": "^1.2.35",
+    "@iconify-json/ph": "^1.2.2",
     "@types/node": "^24.13.3",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
