@@ -8,6 +8,7 @@ import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
 import { useHotkeys } from "./composables/useHotkeys";
 import { PANEL_WIDTH } from "./constants/system";
+import { resetPanel } from "./utils/panel-reset";
 
 const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const searchQuery = ref("");
@@ -16,36 +17,10 @@ async function toggleWindow() {
   const windowState = await tiny.win.getState();
   if (windowState.visible) {
     await tiny.api.call("hidePanel");
+    resetPanel();
     return;
   }
   await showWindow();
-}
-
-// Each visit gets a new TabManager (it opens on All, see its lifecycle hooks).
-// Mounting the All list takes ~300ms, and a window shown meanwhile paints the
-// old tab first, so it's mounted and laid out while the panel is hidden.
-const panelKey = ref(0);
-let panelReset: Promise<void> | undefined;
-
-function resetPanel(): Promise<void> {
-  panelReset ??= remountPanel();
-  return panelReset;
-}
-
-async function remountPanel(): Promise<void> {
-  panelKey.value++;
-  await nextTick();
-  void document.body.offsetHeight;
-}
-
-// Done as the panel hides, so opening it doesn't wait for the render. Later, so
-// a paste that hid the panel isn't held up by it; opening again before then
-// resets in showWindow instead.
-function resetPanelWhenHidden(): void {
-  if (!document.hidden) return;
-  setTimeout(() => {
-    if (document.hidden) void resetPanel();
-  }, 500);
 }
 
 async function showWindow() {
@@ -60,12 +35,14 @@ async function showWindow() {
   const calculatedYPosition = trayPosition.y + trayPosition.height;
   tiny.win.setPosition(calulatedXPosition, calculatedYPosition);
 
-  // Normally done already when the panel was hidden
-  await resetPanel();
-  panelReset = undefined;
+  // Normally already on All from when the panel hid, so nothing re-renders here.
+  // If not, wait for it: a window shown meanwhile paints the old tab first.
+  resetPanel();
   // Open on the list, not the search field, so letter hotkeys (P, D) work;
   // ⌘ / focuses search. Blur too: focus left in search last time comes back on show.
   searchInput.value?.blur();
+  await nextTick();
+  void document.body.offsetHeight; // lay the list out now, while the window is hidden
   // Put the window on this Space before activating: activating a hidden app
   // with no window on screen makes macOS leave a full-screen Space for a desktop
   await tiny.win.show({ activate: false });
@@ -93,6 +70,7 @@ async function hideWindowOnBlur(): Promise<void> {
   // app, settings window included.
   if (windowState.visible && !(await isCursorOverTray())) {
     await tiny.win.hide({ app: false });
+    resetPanel();
   }
 }
 
@@ -103,7 +81,6 @@ let unsubscribeFromShowPanel: (() => void) | undefined;
 
 onMounted(() => {
   window.addEventListener("blur", hideWindowOnBlur);
-  document.addEventListener("visibilitychange", resetPanelWhenHidden);
   tiny.tray.onClick(async () => {
     await toggleWindow();
   });
@@ -115,7 +92,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("blur", hideWindowOnBlur);
-  document.removeEventListener("visibilitychange", resetPanelWhenHidden);
   unsubscribeFromHotkeys?.();
   unsubscribeFromShowPanel?.();
 });
@@ -132,7 +108,6 @@ useHotkeys({
   <div class="flex h-screen flex-col gap-3 overflow-hidden bg-transparent! p-4">
     <SearchInput ref="searchInput" v-model="searchQuery" />
     <TabManager
-      :key="panelKey"
       :search-query="searchQuery"
       @tab-change="(e: number) => (clipboardItemsCount = e)" />
     <HomeFooter :clipboard-items-count="clipboardItemsCount" />

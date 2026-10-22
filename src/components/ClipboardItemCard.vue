@@ -1,5 +1,4 @@
 <script lang="ts" setup>
-import { useQuery } from "@tanstack/vue-query";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
 import TickIcon from "~icons/tabler/check";
@@ -17,12 +16,14 @@ import DeleteIcon from "~icons/tabler/trash";
 import BetaBadge from "@/components/BetaBadge.vue";
 import Button from "@/components/ui/button/Button.vue";
 import { useHotkeys } from "@/composables/useHotkeys";
+import { getPreviewPath } from "@/composables/useItemPreviews";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
 import { useSettings } from "@/composables/useSettings";
 import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import { cn } from "@/lib/utils";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { formatFileSize } from "@/utils/file-size";
+import { resetPanel } from "@/utils/panel-reset";
 import { maskSecrets } from "@/utils/secrets";
 
 const props = defineProps<{
@@ -30,6 +31,10 @@ const props = defineProps<{
   isActive?: boolean;
   supportsQuickPaste?: boolean;
   quickPasteIndex?: number;
+  // From the list's queries (useItemPreviews); undefined until they load
+  sourceAppIconUrl?: string | null;
+  filePreview?: FilePreview;
+  linkPreviewUrl?: string | null;
 }>();
 
 defineExpose({
@@ -62,74 +67,35 @@ function getClipboardThemeClasses() {
   }
 }
 
-// The app icon and preview load after the card shows, so a card never waits on
-// the backend; they're cached, so a card seen before shows them at once.
-const sourceAppBundleId = props.itemDetails.sourceApp?.bundleId;
-// data: URL of the app's icon, or null when the app can't be found
-const { data: sourceAppIconUrl } = useQuery({
-  queryKey: ["app-icon", sourceAppBundleId],
-  queryFn: (): Promise<string | null> =>
-    tiny.api.call("appIcon", { bundleId: sourceAppBundleId }),
-  enabled: Boolean(sourceAppBundleId),
-  // an app's icon doesn't change while Teneo runs
-  staleTime: Infinity,
-  gcTime: Infinity,
-});
-
-// Images and files are previewed from disk: the saved image copy, or the first copied file.
-// The preview is a data: URL, or null when that file was moved or deleted since
+// The app icon and preview load after the list shows, so a card never waits on
+// the backend (see useItemPreviews). Images and files are previewed from disk:
+// the preview is a data: URL, or null when that file was moved or deleted since
 // it was copied; until it loads, the kind icon holds its place at the same size.
+const sourceAppBundleId = props.itemDetails.sourceApp?.bundleId;
 const isImage = props.itemDetails.kind === "image";
 const isFiles = props.itemDetails.kind === "files";
 const firstPath = props.itemDetails.paths[0];
+const previewPath = getPreviewPath(props.itemDetails);
 
-const previewPath = isImage
-  ? props.itemDetails.image
-  : isFiles
-    ? firstPath
-    : null;
-
-const { data: filePreview } = useQuery({
-  queryKey: ["file-preview", previewPath],
-  queryFn: (): Promise<FilePreview> =>
-    tiny.api.call("filePreview", { path: previewPath }),
-  enabled: Boolean(previewPath),
-  // the panel only hides, and its list is mounted anew each visit: either would
-  // redo every preview each time it opens
-  refetchOnWindowFocus: false,
-  refetchOnMount: false,
-});
-
-const previewUrl = computed(() => filePreview.value?.url ?? null);
+const previewUrl = computed(() => props.filePreview?.url ?? null);
 // macOS keeps Teneo out of the file's folder: no preview, but it still pastes
 const isFolderBlocked = computed(
-  () => isFiles && filePreview.value?.isMissing === false && !previewUrl.value,
+  () => isFiles && props.filePreview?.isMissing === false && !previewUrl.value,
 );
 
 // A link shows its site's icon, fetched by the backend from the site itself.
 // Until it loads, or when previews are off, the link icon holds its place.
 const link = props.itemDetails.link;
 const { settings } = useSettings();
-const { data: linkPreviewUrl } = useQuery({
-  queryKey: ["link-preview", link?.url],
-  queryFn: (): Promise<string | null> =>
-    tiny.api.call("linkPreview", { url: link?.url }),
-  enabled: computed(() => Boolean(link) && settings.value.showLinkPreviews),
-  // saved on disk by the backend; a site that couldn't be reached is asked
-  // again when the card next mounts, not retried in a loop
-  staleTime: Infinity,
-  refetchOnWindowFocus: false,
-  retry: false,
-});
 
 const mediaUrl = computed(
   () =>
     previewUrl.value ??
-    (settings.value.showLinkPreviews ? linkPreviewUrl.value : null),
+    (settings.value.showLinkPreviews ? (props.linkPreviewUrl ?? null) : null),
 );
 
 const isPreviewMissing = computed(
-  () => (isImage || isFiles) && (!previewPath || filePreview.value?.isMissing),
+  () => (isImage || isFiles) && (!previewPath || props.filePreview?.isMissing),
 );
 
 const fileName = firstPath?.split("/").pop();
@@ -255,6 +221,8 @@ async function copyToClipboard(
     if (hideWindow) await tiny.api.call("hidePanel");
     // after the hide, focus is back in the app the user was typing in
     if (paste) await pasteIntoFrontmostApp();
+    // last, so the paste isn't held up behind the list re-rendering
+    if (hideWindow) resetPanel();
   } finally {
     copyFinishedTimeout = setTimeout(() => {
       isCopying.value = false;
