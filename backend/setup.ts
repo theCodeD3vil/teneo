@@ -1,6 +1,7 @@
 // Until the user finishes the setup window, Teneo stays out of the menu bar:
 // no icon, and no shortcut to open the panel
 import { syncOpenPanelShortcut } from "./global-shortcut";
+import { appPaths } from "./paths";
 import {
   closeSetupWindow,
   openSetupWindow,
@@ -14,13 +15,14 @@ async function isSetupComplete(app: TinyApp): Promise<boolean> {
   return Boolean(await app.store.get(setupCompleteStoreKey));
 }
 
-function showInMenuBar(app: TinyApp): void {
-  app.tray.set({ icon: `${app.paths.resources}/tray.png` });
+async function showInMenuBar(app: TinyApp): Promise<void> {
+  const { resources } = await appPaths(app);
+  app.tray.set({ icon: `${resources}/tray.png` });
   syncOpenPanelShortcut(app);
 }
 
 export async function showMenuBarOrSetup(app: TinyApp): Promise<void> {
-  if (await isSetupComplete(app)) showInMenuBar(app);
+  if (await isSetupComplete(app)) await showInMenuBar(app);
   else await openSetupWindow(app);
 }
 
@@ -29,7 +31,7 @@ export async function finishSetup(app: TinyApp): Promise<void> {
   const isInMenuBar = await isSetupComplete(app);
   await app.store.set(setupCompleteStoreKey, true);
   await closeSetupWindow(app);
-  if (!isInMenuBar) showInMenuBar(app);
+  if (!isInMenuBar) await showInMenuBar(app);
   await showPanel(app);
 }
 

@@ -3,12 +3,21 @@
 The `tiny` global is injected into every page automatically (no script tag);
 TypeScript definitions ship in types/tiny.d.ts. Backend handlers receive the
 `app` object with a mirrored surface (`app.window(id).*`, `app.audio.sampler`,
-`app.clipboard.*` …). Where backend names differ from the page's:
-`tiny.menu.set` → `app.setMenu`, `menu.update/get` → `app.updateMenuItem/
-getMenuItem`, `menu.setContext` → `app.setContextMenu`, `win.setChrome` →
-`app.setChrome`, `tiny.audio.filters/filter/balance` →
-`app.setAudioFilters/setAudioFilter/setAudioBalance` (`app.audio` holds only
-`sampler`). There is no `app.menu.*` / `app.audio.filters`.
+`app.clipboard.*` …). Since 0.57.0 the backend uses the page's names:
+`app.menu.set/update/get/setContext`, `app.audio.filters/filter/balance/clear`,
+`app.win.*` (the main window, plus `app.win.open(id, opts)`),
+`app.window(id).menu.*`, `app.system.*` (all of tiny.system's
+os/isX/info/architecture/capabilities/requirements/missing too),
+`app.theme.get()`, `app.info()` / `app.paths()` (functions, as in a page), and
+`app.notify(title, body, opts)`. Main-window ops
+also stay at the top level (`app.setTitle`, `app.setChrome`, …). The old
+backend names (`app.setMenu`, `app.updateMenuItem`, `app.getMenuItem`,
+`app.setContextMenu`, `app.openWindow`, `app.getWinState`,
+`app.setAudioFilters/setAudioFilter/setAudioBalance`,
+`app.window(id).setMenu/resetMenu/updateMenuItem/getMenuItem`,
+`app.notify({ title, body })`, reading `app.info.x` / `app.paths.x` as
+objects) still work but log a deprecation warning —
+don't write new code with them.
 
 ## Bridge basics
 
@@ -120,9 +129,9 @@ tiny.win.open('settings', { page: 'settings.html', title: 'Settings',
 // with the parent. Open-time only.
 // page: an http(s) URL or a file INSIDE the frontend dir — from a page,
 // anything else (../ walks, other absolute paths, file:) is refused;
-// backend app.openWindow takes any path.
+// backend app.win.open takes any path.
 // chrome + x/y + minSize apply BEFORE first paint. win.* calls target the
-// caller's window; backend: app.openWindow(...), app.window(id).eval/push/
+// caller's window; backend: app.win.open(...), app.window(id).eval/push/
 // close/setTitle/…, app.push broadcasts; export onWindowClosed(id, app).
 tiny.win.id; tiny.win.close(); await tiny.win.windows();
 ```
@@ -154,6 +163,12 @@ tiny.menu.set([
                                              // items are DROPPED: declare
                                              // them in a menu of your own
                                              // there too. First block wins.
+  { role: 'help', items: [                   // Help menu: macOS puts it LAST,
+    { id: 'site', label: 'Visit Website' },  // adds the search field, and —
+  ]},                                        // with macos.helpBook — "<App>
+                                             // Help" ⌘? above these
+                                             // (standard: false drops it).
+                                             // win/linux: plain "Help" menu.
   { title: 'Actions', items: [
     { id: 'open', label: 'Open…', key: 'o' },        // ⌘O (Ctrl+O win/linux)
     { id: 'find', label: 'Find', key: 'alt+shift+f' },// ⌥⇧⌘F — extra modifiers
@@ -167,8 +182,8 @@ tiny.menu.set([
 tiny.menu.on((id) => ...);   // "about": "menu" in tinyjs.json routes macOS's
                              // About item here as id 'about' (own panel).
                              // To keep the standard panel but change its
-                             // credit: Credits.html in the project root
-                             // (bundled by `tinyjs build`, shown with its
+                             // credit: assets/Credits.html (or .rtf/.rtfd;
+                             // bundled by `tinyjs build`, shown with its
                              // links; needs <meta charset="utf-8"> and a
                              // font, or it's Latin-1 in Times), else
                              // "attribution": "…" in tinyjs.json
@@ -190,6 +205,7 @@ tiny.menu.setContext([{ id, label }, { separator: true }]);  // right-click
 tiny.menu.onContext((id) => ...);       // backend: export onContextMenu
 // "contextMenu": false in tinyjs.json hides WebKit's default menu entirely
 // "debug": true in tinyjs.json = F12 opens devtools in their own window
+//   (⌥⌘I also works on macOS)
 //   ("open" auto-opens them per window; default off, `tinyjs dev` forces on)
 // "browserAccelerators": true re-enables WebView2's own keys (Ctrl+F find,
 //   Ctrl+R reload, Ctrl+P print…); default suppressed so they can't fire
@@ -208,9 +224,14 @@ await tiny.dialog.pickFolder();   // path | null       saveFile() -> path|null
 // OS (Linux: only with the type filter selected; its overwrite prompt sees
 // the name as typed).
 await tiny.dialog.openFile({ types: ['md', 'markdown', 'txt'] });
-await tiny.dialog.alert(message, detail);
-await tiny.dialog.confirm(message, { detail, ok, cancel });   // true | false
+// saveFile({ name }) pre-fills the file name field (a name, not a path;
+// any folder part is dropped). The extension rule above still applies.
+await tiny.dialog.saveFile({ types: ['docx'], name: 'report' });
+await tiny.dialog.alert(message, { detail, ok });             // or (message, detail)
+await tiny.dialog.confirm(message, { detail, ok, cancel });   // true | false; or (message, detail)
 await tiny.dialog.prompt(message, { default, ok, cancel });   // string | null
+// Bare window.confirm() etc. are the browser primitives: one argument,
+// origin/app-name headline, OK/Cancel.
 ```
 
 ## Site wrappers: navigation / downloads / popups / find
@@ -233,7 +254,7 @@ caps.api; // { gated, denied: [...] } for THIS origin
 ```
 
 ```js
-// BACKEND side (src/main.js) — export these like any other hook
+// BACKEND side (src/backend/main.js) — export these like any other hook
 export function onNavigate(info, app) {
   // kind: 'policy' | 'start' | 'commit' | 'finish' | 'fail' | 'crash'
   // 'policy' fires for main-frame http(s) BEFORE the navigation runs:
@@ -263,6 +284,48 @@ export const api = { save: async (p, app, meta) => meta.origin };
 Per-engine caveats live in platforms.md; they matter if you promise a
 behaviour to a user (e.g. a denied navigation has still made its request on
 Linux).
+
+### Cookies (backend only)
+
+`app.cookies` is the webview's own jar: every window and the wrapped site
+share it, and it includes HttpOnly cookies, which `document.cookie` can't
+see. There's no page-side API, on purpose: a page that could read the jar
+could read every site's session. If a page needs a cookie, hand it over
+from your own `api` handler.
+
+```js
+// BACKEND — keep a site's login, restore it on a later launch, log out
+const [sid] = await app.cookies.get({
+  url: "https://app.example.com",
+  name: "sid",
+});
+// -> { name, value, domain, path, expires (ms | null = session),
+//      secure, httpOnly, sameSite: 'lax' | 'strict' | 'none' }
+await app.secrets.set("sid", JSON.stringify(sid)); // tokens: secrets, never store
+await app.cookies.set({
+  url: "https://app.example.com",
+  ...JSON.parse(await app.secrets.get("sid")),
+});
+await app.cookies.remove({ url: "https://app.example.com" }); // -> number removed
+```
+
+- `get({ url?, name?, domain?, path? })`: with `url`, you get what a request
+  to that URL would carry (domain, path and secure all match). Linux needs
+  WebKitGTK 2.42+ for `get()` without a `url`.
+- `set({ url | domain, name, value, path = '/', expires?, secure?,
+  httpOnly?, sameSite = 'lax' })` replaces a cookie with the same
+  name/domain/path. `url` alone makes it host-only; `domain:
+  '.example.com'` covers subdomains. `expires` is a Date or ms; leave it
+  out for a session cookie.
+- `remove(cookieFromGet)` deletes that exact cookie; `remove({ url, name? })`
+  deletes everything `get` would return for it.
+- Names or values with `;` or control characters are refused.
+- **sameSite:** `set()` defaults to `'lax'` everywhere. `get()` reports what
+  the engine enforces, so a cookie the SITE set without SameSite reads as
+  that engine's default: `'none'` on macOS, `'lax'` on Windows, and either on
+  Linux depending on the WebKitGTK version. Don't hard-code a value for
+  site cookies. Passing a `get()` result straight back to `set()` keeps it
+  behaving the same. `'none'` generally needs `secure: true`.
 
 ## Tray
 
@@ -383,8 +446,14 @@ audio.src = tiny.fileURL(path);  // file:// URL for a disk path — ALWAYS this,
 // file:// media loads only under the frontend dir by default — widen with
 // "readAccess": true | "/path" in tinyjs.json.
 await tiny.app.paths();   // { home, data, cache, logs, temp, downloads,
-                          //   desktop, documents } — per-OS correct; backend
-                          //   twin app.paths is a plain object (no await)
+                          //   desktop, documents, resources, executables } — per-OS correct; backend
+                          //   twin: await app.paths() (same shape). data/cache/logs
+                          //   are created before it resolves — write straight into them
+// resources: the project's resources/ folder in dev, its bundled copy in
+// builds, null without one. Backend: (await app.paths()).resources.
+// executables: this OS's sidecars from executables/, flat (.build/executables
+// in dev, a .app's Contents/Helpers in builds), null without any — tjs.spawn
+// (await app.paths()).executables + '/<name>'.
 await tiny.app.shell.open('https://x.com');  // URL or path; resolves true/rejects
 await tiny.app.shell.reveal(path); await tiny.app.shell.trash(path);
 await tiny.app.thumbnail(path, size?);  // png for ANY path (macOS/Windows:
@@ -397,6 +466,9 @@ await tiny.app.thumbnail(path, size?);  // png for ANY path (macOS/Windows:
 ```js
 await tiny.store.set("key", anyJsonValue);
 await tiny.store.get("key");
+// set/delete resolve false (never reject) when the disk write fails; the value
+// stays in memory and the next good save writes it. Retry = set the same
+// value again, NOT redo a read-modify-write (that applies the change twice).
 await tiny.store.delete("key");
 await tiny.store.all();
 // per-app data dir; fine for settings. Query-shaped data -> sqlite (BACKEND
@@ -469,9 +541,19 @@ await tiny.app.paste();              // = keystroke('cmd+v'); hide() first to
                                      // Linux: X11/XWayland only (XTest).
 await tiny.app.frontmostApp();  // { name, bundleId, pid } | null (mac/win)
 
-await tiny.app.screens();  // [{ id, name, x, y, width, height, scale,
-                           //    visible: {...}, primary }] — same coords as
-                           //    win.setPosition
+await tiny.app.screens();  // [{ id, uid, name, x, y, width, height, scale,
+                           //    visible: {...}, primary, internal,
+                           //    pixels: { width, height, visible } }] — same
+                           //    coords as win.setPosition. Persist uid, not id.
+tiny.win.setPosition(x, y, { screen, units: 'px' }); // screen-local; px needs screen
+tiny.win.setSize(w, h, { units: 'px' });             // pixels of the window's screen
+tiny.win.setFullscreen(true, { screen });            // works on Wayland too
+await tiny.app.screenAt(x, y); await tiny.app.screenFor(rect);
+await tiny.app.foregroundScreen();  // focused window of ANY app; null on Wayland
+await tiny.app.matchScreen(saved);  // saved screen -> connected one, or null
+tiny.app.onScreensChanged(fn);      // backend: onSystem('screens')
+// "rememberWindows": true in tinyjs.json restores every window's place per
+// screen layout (main shown once restored) — don't hand-roll it.
 await tiny.app.mousePosition();  // { x, y, window: { x, y, inside }, screen }
 // Linux: X11 only — pure Wayland hides the global pointer (capabilities()
 // says so; "windowPlacement": true forces XWayland, or use mouseTracking):
@@ -558,8 +640,8 @@ tiny.app.onOpenFiles((paths) => ...);  // "fileExtensions": ["md"]; also argv
 // tinyjs.json: "update": { "url": "https://…/manifest.json", "auto": "launch"|"daily" }
 tiny.api.on('update-available', ({ current, latest, notes }) => ...);
 // backend: export onUpdateAvailable(info, app)
-const { available, latest } = await tiny.api.call('update.check');
-await tiny.api.call('update.install');   // verify sha256 + swap + relaunch
+const { available, latest } = await tiny.app.update.check();
+await tiny.app.update.install();   // verify sha256 + swap + relaunch
 ```
 
 Full packaging/manifests: references/release.md.

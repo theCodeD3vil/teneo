@@ -3,6 +3,7 @@ import { Database } from "tjs:sqlite";
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";
 import { findLink } from "./link-previews";
+import { appPaths } from "./paths";
 import { findSecrets } from "./secret-detection";
 import {
   decryptText,
@@ -32,9 +33,8 @@ export function initializeDatabase(app: TinyApp): Promise<Database> {
 }
 
 async function openDatabase(app: TinyApp): Promise<Database> {
-  await tjs.makeDir(app.paths.data, { recursive: true });
-
-  const database = new Database(`${app.paths.data}/teneo.sqlite`);
+  const { data } = await appPaths(app); // already created by the time it resolves
+  const database = new Database(`${data}/teneo.sqlite`);
   run(
     database,
     `
@@ -95,6 +95,7 @@ export async function saveClipboardItem(
     value !== null &&
     savedItem.secrets.length > 0;
   const storedValue = isEncrypted ? await encryptText(value, app) : value;
+  const { data: dataDirectory } = await appPaths(app);
 
   run(
     await initializeDatabase(app),
@@ -107,7 +108,7 @@ export async function saveClipboardItem(
     savedItem.id,
     savedItem.kind,
     serializeImageSize(savedItem),
-    serializePath(savedItem, app),
+    serializePath(savedItem, dataDirectory),
     storedValue,
     savedItem.dateCopied,
     savedItem.sourceApp?.name ?? null,
@@ -174,9 +175,10 @@ export async function deleteClipboardItems(
   notifyClipboardHistoryChanged(app);
 
   // Images go after their rows, so history never points at a missing file
+  const { data: dataDirectory } = await appPaths(app);
   for (const row of deletedRows) {
     const imagePath =
-      row.kind === "image" ? restoreImagePath(row.path, app) : null;
+      row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
     if (imagePath) {
       await tjs
         .remove(imagePath)
@@ -238,10 +240,11 @@ export async function listClipboardItemSizes(
       ORDER BY dateCopied DESC
     `,
   );
+  const { data: dataDirectory } = await appPaths(app);
   return Promise.all(
     rows.map(async (row) => {
       const imagePath =
-        row.kind === "image" ? restoreImagePath(row.path, app) : null;
+        row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
       // a missing image file takes no space
       const imageBytes = imagePath
         ? await tjs.stat(imagePath).then(
@@ -298,8 +301,9 @@ export async function listClipboardItems(
   const decryptedRows = await Promise.all(
     rows.map((row) => decryptRow(row, app)),
   );
+  const { data: dataDirectory } = await appPaths(app);
   const items = decryptedRows.flatMap((row) => {
-    const item = row && rowToClipboardItem(row, app);
+    const item = row && rowToClipboardItem(row, dataDirectory);
     return item ? [item] : [];
   });
   // Only for a single copied file: next to "+N" the first file's size would
@@ -428,16 +432,19 @@ function serializeImageSize(item: TinyClipboardData): string | null {
     : null;
 }
 
-function serializePath(item: TinyClipboardData, app: TinyApp): string | null {
+function serializePath(
+  item: TinyClipboardData,
+  dataDirectory: string,
+): string | null {
   if (item.kind === "image") {
     if (!item.image) return null;
-    const dataDirectory = `${app.paths.data}/`;
-    if (!item.image.startsWith(dataDirectory)) {
+    const prefix = `${dataDirectory}/`;
+    if (!item.image.startsWith(prefix)) {
       throw new Error(
         "Clipboard image was not saved to the app data directory",
       );
     }
-    return item.image.slice(dataDirectory.length);
+    return item.image.slice(prefix.length);
   }
 
   return item.kind === "files" ? JSON.stringify(item.paths) : null;
@@ -475,7 +482,7 @@ function addMissingColumns(database: Database): void {
 
 function rowToClipboardItem(
   row: ClipboardItemRow,
-  app: TinyApp,
+  dataDirectory: string,
 ): ClipboardHistoryItem | null {
   if (!isClipboardItemKind(row.kind) || !isValidDate(row.dateCopied)) {
     return null;
@@ -489,7 +496,8 @@ function rowToClipboardItem(
     text: row.kind === "text" ? row.value : null,
     html: null,
     paths: row.kind === "files" ? parsePaths(row.path) : [],
-    image: row.kind === "image" ? restoreImagePath(row.path, app) : null,
+    image:
+      row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null,
     imageSize: row.kind === "image" ? parseImageSize(row.imageSize) : null,
     color: row.kind === "color" ? row.value : null,
     concealed: false,
@@ -526,9 +534,12 @@ function isValidDate(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
-function restoreImagePath(path: string | null, app: TinyApp): string | null {
+function restoreImagePath(
+  path: string | null,
+  dataDirectory: string,
+): string | null {
   if (!path || path.startsWith("/") || path.includes("..")) return null;
-  return `${app.paths.data}/${path}`;
+  return `${dataDirectory}/${path}`;
 }
 
 function parsePaths(path: string | null): string[] {

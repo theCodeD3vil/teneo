@@ -8,6 +8,7 @@
 // site's home page. Links to this Mac or its local network are never fetched.
 import type { ClipboardLink } from "../shared/types/clipboard";
 import { logError, pngDataUrl } from "./files";
+import { appPaths } from "./paths";
 import { findSecrets } from "./secret-detection";
 import { getSettings } from "./settings";
 import { generateUUID } from "./utils/uuid-generator";
@@ -144,7 +145,7 @@ export async function getLinkPreview(
 /** Delete every saved preview, e.g. when history is cleared. */
 export async function clearLinkPreviews(app: TinyApp): Promise<void> {
   await tjs
-    .remove(cacheFolder(app))
+    .remove(await cacheFolder(app))
     .catch((error: unknown) =>
       logError("clearing link previews failed:", error),
     );
@@ -153,7 +154,7 @@ export async function clearLinkPreviews(app: TinyApp): Promise<void> {
 /** Delete previews older than CACHE_LIFETIME. They'd be fetched again anyway,
  *  and this keeps icons of links long gone from history off the disk. */
 export async function removeStaleLinkPreviews(app: TinyApp): Promise<void> {
-  const folder = cacheFolder(app);
+  const folder = await cacheFolder(app);
   const entries = await tjs.readDir(folder).catch(() => null);
   if (!entries) return;
   for await (const entry of entries) {
@@ -162,8 +163,9 @@ export async function removeStaleLinkPreviews(app: TinyApp): Promise<void> {
   }
 }
 
-function cacheFolder(app: TinyApp): string {
-  return `${app.paths.cache.replace(/\/$/, "")}/link-previews`;
+async function cacheFolder(app: TinyApp): Promise<string> {
+  const { cache } = await appPaths(app);
+  return `${cache.replace(/\/$/, "")}/link-previews`;
 }
 
 async function hash(text: string): Promise<string> {
@@ -193,7 +195,7 @@ function cached(
   if (inProgress) return inProgress;
 
   const preview = (async () => {
-    const folder = cacheFolder(app);
+    const folder = await cacheFolder(app);
     const pngPath = `${folder}/${key}.png`;
     const nonePath = `${folder}/${key}.none`;
     if (await isFresh(pngPath)) return pngDataUrl(pngPath);
@@ -478,8 +480,9 @@ async function downloadThumbnail(
   const image = await readAtMost(response, MAX_IMAGE_BYTES, false);
   if (!image?.length) return null;
 
-  const imagePath = `${cacheFolder(app)}/download-${generateUUID()}.${extension}`;
-  await tjs.makeDir(cacheFolder(app), { recursive: true });
+  const folder = await cacheFolder(app);
+  const imagePath = `${folder}/download-${generateUUID()}.${extension}`;
+  await tjs.makeDir(folder, { recursive: true });
   await tjs.writeFile(imagePath, image);
   try {
     const thumbnail = await app.thumbnail(imagePath, PREVIEW_SIZE);

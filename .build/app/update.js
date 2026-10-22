@@ -21,6 +21,10 @@
 // identity, the update's Team ID must match (ad-hoc builds have no identity
 // to pin, so the https+sha256 manifest is their only anchor — use a real
 // Developer ID for anything security-sensitive).
+// With update.publicKey (a non-empty string or list), an Ed25519 envelope authenticates the complete
+// manifest before platform selection; TLS, sha256 and code checks still apply.
+
+import { pinnedKeys, verifyManifest } from './update-signing.js';
 
 const dec = new TextDecoder();
 const IS_WIN = tjs.env.OS === 'Windows_NT';
@@ -38,6 +42,31 @@ let macArchP = null;
 function macArch() {
   return (macArchP ??= runCapture(['sysctl', '-n', 'hw.optional.arm64'])
     .then((r) => (r.ok && r.out.trim() === '1' ? 'arm64' : 'x86_64'), () => 'x86_64'));
+}
+
+// Windows: this build's CPU from its own exe's PE header, and whether the
+// machine is ARM64 — so an x64 build emulated there updates to the native
+// arm64 build when the manifest has one (the twin of the Rosetta move
+// above). No spawn: a GUI-subsystem app shelling out flashes a console. An
+// emulated x64 process sees PROCESSOR_ARCHITECTURE=AMD64; the machine shows
+// through PROCESSOR_ARCHITEW6432 / PROCESSOR_IDENTIFIER. Missing both just
+// leaves an x64 build on x64 updates.
+let winArchP = null;
+function winArch() {
+  return (winArchP ??= (async () => {
+    let own = /arm64/i.test(tjs.env.PROCESSOR_ARCHITECTURE ?? '') ? 'arm64' : 'x86_64';
+    try {
+      const fh = await tjs.open(tjs.exePath, 'r');
+      const b = new Uint8Array(4096);
+      try { await fh.read(b, 0); } finally { await fh.close(); }
+      const pe = (b[0x3c] | (b[0x3d] << 8) | (b[0x3e] << 16) | (b[0x3f] << 24)) >>> 0;
+      const m = pe + 6 <= b.length ? b[pe + 4] | (b[pe + 5] << 8) : 0;
+      if (m === 0xaa64) own = 'arm64'; else if (m === 0x8664) own = 'x86_64';
+    } catch {}
+    const armMachine = own === 'arm64' || /arm64/i.test(tjs.env.PROCESSOR_ARCHITEW6432 ?? '')
+      || /^arm/i.test(tjs.env.PROCESSOR_IDENTIFIER ?? '');
+    return { own, machine: armMachine ? 'arm64' : 'x86_64' };
+  })());
 }
 
 function assertSafeUrl(u, what) {
@@ -138,26 +167,46 @@ async function portableBundleInit() {
   }
 }
 
-export async function checkForUpdate({ url, version }) {
+export async function checkForUpdate({ url, version, publicKey }) {
+  // Copy the pinned key list before any await, so it can't change mid-check.
+  const pin = pinnedKeys(publicKey);
   if (!url) throw new Error('no update url configured (tinyjs.json "update": { "url": … })');
   assertSafeUrl(url, 'update url');
   const res = await fetch(url, { headers: { 'cache-control': 'no-cache' } });
   if (!res.ok) throw new Error('update check failed: HTTP ' + res.status);
   // A redirect must not downgrade the transport.
   if (res.url) assertSafeUrl(res.url, 'update url (after redirect)');
-  const manifest = await res.json();
+  const response = await res.json();
+  const manifest = pin ? await verifyManifest(response, pin) : response;
+  // Optional signed expiry (`tinyjs publish --expires`): past it, a host
+  // replaying this manifest gets refused. Unsigned apps ignore it — anyone
+  // who can edit their manifest can edit the date.
+  if (pin && manifest.expires != null) {
+    const until = typeof manifest.expires === 'string' ? Date.parse(manifest.expires) : NaN;
+    if (!Number.isFinite(until)) throw new Error('update manifest has an invalid expires date');
+    if (Date.now() > until) throw new Error('update manifest expired ' + manifest.expires + ' — the publisher needs to re-sign it');
+  }
   let latest = manifest?.version ?? null;
   // Per-platform downloads: `url`/`sha256` are the macOS zip (the original,
   // pre-Windows fields); a `win: { url, sha256, version? }` block carries
   // the Windows zip. On Windows, overlay it — its own version wins when the
   // two platforms ship different builds — and if a release has no Windows
   // build, report "no update" rather than ever pulling a mac zip.
+  // Per-arch Windows builds: "win": { "arm64": { url, sha256 }, "x86_64": … },
+  // with the x86_64 one also in win.url/sha256 for apps that predate the
+  // split (all x64). An arm64 build takes win.arm64 or nothing — never the
+  // x64 build, which would quietly move it onto emulation.
   if (IS_WIN) {
-    if (manifest?.win?.url && manifest.win.sha256) {
-      manifest.url = manifest.win.url;
-      manifest.sha256 = manifest.win.sha256;
-      if (manifest.win.version) latest = manifest.win.version;
-      if (manifest.win.notes) manifest.notes = manifest.win.notes;
+    const w = manifest?.win;
+    const ok = (e) => (e?.url && e.sha256 ? e : null);
+    const { own, machine } = await winArch();
+    const entry = (machine === 'arm64' ? ok(w?.arm64) : null)
+      ?? (own === 'x86_64' ? ok(w?.x86_64) ?? ok(w) : null);
+    if (entry) {
+      manifest.url = entry.url;
+      manifest.sha256 = entry.sha256;
+      if (entry.version ?? w.version) latest = entry.version ?? w.version;
+      if (entry.notes ?? w.notes) manifest.notes = entry.notes ?? w.notes;
     } else {
       return { available: false, current: version, latest,
                notes: manifest?.notes ?? null, manifest };
@@ -206,7 +255,16 @@ export async function checkForUpdate({ url, version }) {
 // Downloads, verifies, swaps the bundle. Returns the bundle path on success;
 // the caller is expected to relaunch() + quit. Throws with a human-readable
 // reason on any failure (the running app is untouched or rolled back).
-export async function installUpdate({ url, version, manifest }) {
+export async function installUpdate({ url, version, manifest, publicKey }) {
+  // A check result is mutable/untrusted. Fetch and authenticate again for
+  // signed installs, even when the caller supplies a manifest. Parameters
+  // (especially the baked key) are captured by value before any await.
+  const pin = pinnedKeys(publicKey);
+  if (pin) {
+    const checked = await checkForUpdate({ url, version, publicKey: pin });
+    if (!checked.available) throw new Error('no newer signed update available for this platform');
+    manifest = checked.manifest;
+  }
   const bundle = await bundlePath();
   if (!bundle) {
     throw new Error('auto-update only works from the packaged .app build');
@@ -378,11 +436,18 @@ async function retryLocked(fn) {
 // file waits (null when the new file is a pure addition); placed once the
 // new file has landed at d.
 async function winSwapWalk(src, dst, journal) {
-  await tjs.makeDir(dst, { recursive: true }).catch(() => {});
-  // Sweep leftovers from the previous update first (unlocked by now).
+  // A folder this version adds is journaled too ({ dir }), so a rollback
+  // doesn't leave it behind empty.
+  if (!(await exists(dst))) {
+    await tjs.makeDir(dst, { recursive: true }).catch(() => {});
+    journal.push({ dir: dst });
+  }
+  // Sweep leftovers from the previous update first (unlocked by now) — but
+  // not the asides this swap's prune just made, which rollback needs.
+  const ours = new Set(journal.map((j) => j.aside));
   const sweep = await tjs.readDir(dst);
   for await (const e of sweep) {
-    if (e.name.endsWith('.update-old'))
+    if (e.name.endsWith('.update-old') && !ours.has(dst + '/' + e.name))
       await retryLocked(() => tjs.remove(dst + '/' + e.name)).catch(() => {});
   }
   const iter = await tjs.readDir(src);
@@ -423,15 +488,68 @@ async function winSwapWalk(src, dst, journal) {
 async function winSwapRollback(journal) {
   let ok = true;
   for (const e of [...journal].reverse()) {
+    if (e.dir) await tjs.remove(e.dir).catch(() => { ok = false; }); // emptied above: its files came later
     if (e.placed) await tjs.remove(e.d).catch(() => { ok = false; });
     if (e.aside) await tjs.rename(e.aside, e.d).catch(() => { ok = false; });
   }
   return ok;
 }
 
+// The walk only adds and replaces, so a file the new version dropped would
+// linger (macOS and Linux swap the whole bundle and never see this). Inside
+// the folders the build owns, anything the new version lacks is renamed
+// aside like a replaced file — journaled, so a failed swap puts it back.
+// The rest of the install folder is left alone: the Shelf keeps its marker
+// there. Runs BEFORE the walk, which moves src's files away.
+const WIN_OWNED_DIRS = ['executables', 'resources'];
+
+async function isDir(p) {
+  try { return (await tjs.stat(p)).isDirectory; } catch { return false; }
+}
+
+// srcDir is null when the new version has no such folder at all.
+async function winPruneWalk(srcDir, dst, journal, staleDirs) {
+  // Listed up front: the renames below add entries to this very folder.
+  const entries = [];
+  try {
+    for await (const e of await tjs.readDir(dst)) entries.push({ name: e.name, isDirectory: e.isDirectory });
+  } catch { return; }
+  for (const e of entries) {
+    const d = dst + '/' + e.name;
+    if (e.name.endsWith('.update-old')) {
+      // The walk's sweep never visits a folder the new version dropped.
+      await retryLocked(() => tjs.remove(d)).catch(() => {});
+      continue;
+    }
+    const s = srcDir === null ? null : srcDir + '/' + e.name;
+    if (e.isDirectory) {
+      const keep = s !== null && (await isDir(s));
+      await winPruneWalk(keep ? s : null, d, journal, staleDirs);
+      if (!keep) staleDirs.push(d);
+      continue;
+    }
+    if (s !== null && (await exists(s)) && !(await isDir(s))) continue;
+    const entry = { d, aside: d + '.update-old', placed: false };
+    try {
+      await retryLocked(() => tjs.rename(d, entry.aside));
+    } catch (err) {
+      throw new Error('cannot remove ' + d + ' (file locked?): ' + (err?.message ?? err));
+    }
+    journal.push(entry);
+  }
+}
+
 async function winSwapDir(src, dst) {
   const journal = [];
+  const staleDirs = [];
   try {
+    for (const name of WIN_OWNED_DIRS) {
+      if (await isDir(dst + '/' + name)) {
+        const s = src + '/' + name;
+        await winPruneWalk((await isDir(s)) ? s : null, dst + '/' + name, journal, staleDirs);
+        if (!(await isDir(s))) staleDirs.push(dst + '/' + name);
+      }
+    }
     await winSwapWalk(src, dst, journal);
   } catch (e) {
     const cause = e?.message ?? String(e);
@@ -445,6 +563,10 @@ async function winSwapDir(src, dst) {
   for (const e of journal) {
     if (e.aside) await tjs.remove(e.aside).catch(() => {});
   }
+  // Then the folders the new version dropped, deepest first (pushed
+  // children-first); one still holding a locked aside stays until the next
+  // update's prune sweeps it.
+  for (const d of staleDirs) await tjs.remove(d).catch(() => {});
 }
 
 // Captured at import: on Linux, once the running binary has been replaced by

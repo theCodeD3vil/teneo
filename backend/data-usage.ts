@@ -1,11 +1,12 @@
 import type { DataFolderUsage } from "../shared/types/storage";
 import { countClipboardMedia, listClipboardItemSizes } from "./database";
+import { appPaths } from "./paths";
 
 export async function getDataFolderUsage(
   app: TinyApp,
 ): Promise<DataFolderUsage> {
   const [size, itemSizes, counts] = await Promise.all([
-    getFolderSize(app.paths.data),
+    appPaths(app).then(({ data }) => getFolderSize(data)),
     listClipboardItemSizes(app),
     countClipboardMedia(app),
   ]);

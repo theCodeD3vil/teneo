@@ -1,6 +1,6 @@
 ---
 name: tinyjs
-description: Build and modify tinyjs desktop apps — tiny macOS (and beta Windows/Linux) apps with a txiki.js JavaScript backend and a native webview window. Use when working in a project with a tinyjs.json, when the user mentions tinyjs, tiny.api, or tinyjs dev/build, or when porting an Electron app to tinyjs.
+description: Build and modify tinyjs desktop apps — tiny macOS, Windows and Linux apps with a txiki.js JavaScript backend and a native webview window. Use when working in a project with a tinyjs.json, when the user mentions tinyjs, tiny.api, or tinyjs dev/build, or when porting an Electron app to tinyjs.
 ---
 
 # Building tinyjs apps
@@ -9,7 +9,7 @@ tinyjs (https://tinyjs.app, repo tarwin/tinyjsapp) makes ~6 MB desktop apps:
 a **txiki.js backend** (full system access: files, sockets, processes, FFI)
 
 - a **native webview window** — WKWebView on macOS, WebView2 on Windows,
-  WebKitGTK 4.1 on Linux (both beta). They talk over a private socket — no
+  WebKitGTK 4.1 on Linux. They talk over a private socket — no
   HTTP server, no ports. The page has no direct system access: everything
   privileged crosses `tiny.api` (which the tinyjs.json `"api"` gate can
   narrow), which is why anything interpolated into `innerHTML` must be
@@ -20,7 +20,7 @@ a **txiki.js backend** (full system access: files, sockets, processes, FFI)
 
 Current release: 0.50.1. App floors: macOS 15+ — a default build opens only
 on the build Mac's CPU (`build --arch arm64|x86_64` or `--universal` for the
-other); Windows 10/11 (WebView2); Linux glibc 2.35+ (Ubuntu 22.04 / Debian 12
+other); Windows 10/11 (WebView2), x64 or arm64 per the tinyjs install; Linux glibc 2.35+ (Ubuntu 22.04 / Debian 12
 / Mint 21 and up).
 
 ## Read the reference for the job at hand
@@ -58,7 +58,12 @@ tinyjs build        # dist/<name> binary + dist/<Name>.app (codesigned)
 tinyjs publish      # build + dist/publish/<name>-<ver>.zip|tarball + manifest
 tinyjs notarize     # macOS: notarytool submit + staple (--dmg re-makes dmg)
                     # publish/notarize take --arch too — repeat the build's
+tinyjs doctor       # find why tinyjs or the project won't run (read-only;
+                    #   exit 1 on any FAIL) — run it first when things break
 tinyjs update       # update tinyjs itself (--check); also: uninstall, version
+tinyjs update-project  # then, in the project: refresh THIS skill and the
+                    #   types from the installed tinyjs (names every file
+                    #   it changes; overwrites edits to them)
 TINYJS_DEBUG=1 tinyjs dev   # trace every bridge message
 ```
 
@@ -79,7 +84,10 @@ tinyjs.json          { name, title, size, id, version, icon?,
                        contextMenu?: false, audioTap?: "app" | "system",
                        audioTapReason?: "why", about?: "menu",
                        attribution?: "…",  // About panel credit line (macOS);
-                                           // a project-root Credits.html wins
+                                           // assets/Credits.html|rtf wins
+                       resources?: ["a.json", "dir/"],  // narrow resources/ (default: all)
+                       executables?: ["my-cli.exe", "linux/"],  // narrow executables/ (default: all for this OS)
+                       // macos.executableEntitlements: { "my-cli": ["com.apple.security.cs.allow-jit"] }
                        debug?: true | "open", browserAccelerators?: true,
                        permissions?: { microphone?: "why", camera?: "why",
                                        speechRecognition?: "why" },
@@ -88,9 +96,11 @@ tinyjs.json          { name, title, size, id, version, icon?,
                                   acceptsFirstMouse, menu },
                        signIdentity?, notarize?: { profile },
                        backend?: "backend/main.ts",   // .ts → esbuild bundle;
-                                      // default src/main.{js,ts} or backend/main.{js,ts}
-                       frontend?: { dir?, build, dist, dev, devUrl },
+                                      // default src/backend/main.{js,ts}, then
+                                      // src/main.{js,ts} (pre-0.52), backend/main.{js,ts}
+                       frontend?: { dir?, build, dist, dev, devUrl, reload? },
                                       // dir: plain page folder (default src/frontend);
+                                      // reload: false = dev leaves reloads to your tool;
                                       // build/dev need the packages installed first
                        // wrapping a hosted site (recipes.md) — "url" replaces
                        // the local frontend, "api" gates what that origin may
@@ -100,14 +110,31 @@ tinyjs.json          { name, title, size, id, version, icon?,
                        downloads?: "auto" | "ask" | "deny",
                        popups?: "external" | "window" | "deny",
                        api?: "wrapper" | { disable?, enable?, origins? },
-                       macos?/windows?/linux?: { …merged on top per OS } }
-icon.png             1024×1024 app icon
-src/main.js          backend
+                       macos?/windows?/linux?: { …merged on top per OS }
+                                      // macos.helpBook: "My Help" = folder in assets/ }
+assets/              files the OS reads, by name: icon.png (1024×1024 app
+                     icon), Credits.html|rtf|rtfd (macOS About), help book
+                     folder (macOS Help menu). Older projects: icon.png and
+                     Credits.html at the root still work
+resources/           data the backend reads at runtime → (await app.paths()).resources
+                     (the folder in dev, bundled copy in builds; null if none)
+executables/         sidecar binaries → (await app.paths()).executables (flat). Ships
+                     this OS's binaries from the top, overridden by name from
+                     <os>/ then <os>-arm64|-x86_64/; signed into
+                     Contents/Helpers on macOS
+extras/              README, licence… for the person downloading: shipped
+                     BESIDE the app (macOS dmg root, Windows/Linux app
+                     folder), never inside it. Top level + <os>/ overrides
+src/backend/main.js  backend
 src/frontend/        index.html + assets — served as real files (file://),
                      so relative paths just work
+src/shared/          code both sides import as '../shared/x.js' (same path
+                     from backend and page, dev and build). Ships with the
+                     page: no secrets, no tjs:* imports. Not available in
+                     the pre-0.52 src/main.js layout
 ```
 
-## Backend (src/main.js)
+## Backend (src/backend/main.js)
 
 ```js
 export const api = {
@@ -117,10 +144,10 @@ export const api = {
 };
 export function init(app) {
   app.push('event-name', data);            // page: tiny.api.on('event-name')
-  // app mostly mirrors the page: app.window(id).*, app.openWindow,
+  // app mirrors the page: app.window(id).*, app.win.open, app.menu.*,
   // app.tray.*, app.audio.sampler.*, app.clipboard.*, app.store.*,
-  // app.paths (plain object), notify, quit, … — but some names differ
-  // (app.setMenu, app.setChrome, …): name map in references/api.md
+  // app.paths(), app.system.*, notify, quit, … — main-window ops also sit at
+  // the top level (app.setTitle, app.setChrome, …); see references/api.md
 }
 // other exports the scaffold wires, each (info, app): onMenu, onTray (id
 // null = bare icon click), onContextMenu, onHotkey, onWindowState,
@@ -158,7 +185,7 @@ tiny.win.open("settings", {
 
 Everything else — windows/chrome/state events, menus (in every window),
 dialogs, tray, notifications, clipboard, hotkeys, audio (sampler / filters /
-audioTap / proxyURL), store/secrets, permissions, deep links, auto-update,
+audioTap / proxyURL), store/secrets, cookies, permissions, deep links, auto-update,
 `tiny.macos.*` — is in references/api.md with signatures and gotchas.
 
 ## Cross-platform rules
