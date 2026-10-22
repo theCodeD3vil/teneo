@@ -38,6 +38,7 @@ architecture, not the code.
 | `dialog.showOpenDialog` etc.                                              | `tiny.dialog.openFile/openFiles/pickFolder/saveFile/alert/confirm/prompt`                                                                                                                                                                           |
 | `shell.openExternal/showItemInFolder/trashItem`                           | `tiny.app.shell.open/reveal/trash`                                                                                                                                                                                                                  |
 | `app.getPath(name)`                                                       | `tiny.app.paths()` / backend `app.paths` (plain object)                                                                                                                                                                                             |
+| `session.cookies.get/set/remove`                                          | backend `app.cookies.get/set/remove` — same idea, backend only; `expires` is ms (not `expirationDate` seconds), `sameSite` defaults to `'lax'`                                                                                                      |
 | `safeStorage` / keytar                                                    | `tiny.app.secrets.get/set/delete` (Keychain / Credential Manager / Secret Service)                                                                                                                                                                  |
 | `autoUpdater` (+ electron-updater)                                        | `"update": { url, auto }` in tinyjs.json + `tinyjs publish`; `update.check()` / `update.install()`                                                                                                                                                  |
 | `nativeTheme`                                                             | `tiny.theme.get()/on()`                                                                                                                                                                                                                             |
@@ -80,7 +81,7 @@ architecture, not the code.
 
 1. Move `main.js` IPC handlers to `export const api = {}` methods 1:1;
    replace `fs`/`path` calls with `tjs.*` (join with '/', it works
-   everywhere; use `app.paths` instead of `app.getPath`).
+   everywhere; use `app.paths()` instead of `app.getPath`).
 2. Point tinyjs at your existing renderer build — `"frontend": { build,
    dist, dev, devUrl }` runs your Vite/webpack dev server inside the native
    window with HMR.

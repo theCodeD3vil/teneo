@@ -147,7 +147,7 @@ async function previewUpdateWindow(app: TinyApp): Promise<void> {
   if (!notesPath) return;
   const notes = new TextDecoder().decode(await tjs.readFile(notesPath));
   await openUpdateWindow(
-    { current: app.info.version, latest: "9.9.9", notes },
+    { current: (await app.info()).version, latest: "9.9.9", notes },
     app,
   );
 }

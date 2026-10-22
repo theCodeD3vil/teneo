@@ -21,6 +21,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useItemPreviews } from "@/composables/useItemPreviews";
 import { currentTime } from "@/composables/useRelativeTimeAgo";
 import type { ClipboardHistoryItem, TabVariant } from "@/types/clipboard";
 
@@ -53,6 +54,11 @@ interface ClipboardItemGroup {
   label: string;
   items: Array<{ item: ClipboardHistoryItem; index: number }>;
 }
+
+// One set of queries for the whole list, not three per card
+const { sourceAppIconUrl, filePreview, linkPreviewUrl } = useItemPreviews(
+  () => props.items,
+);
 
 const cardReferences = new Map<string, ClipboardItemCardReference>();
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
@@ -246,6 +252,9 @@ defineExpose({
             :ref="(card) => setCardReference(row.item.id, card)"
             :class="!row.isFirst && 'mt-2'"
             :item-details="row.item"
+            :source-app-icon-url="sourceAppIconUrl(row.item)"
+            :file-preview="filePreview(row.item)"
+            :link-preview-url="linkPreviewUrl(row.item)"
             :is-active="row.item.id === props.activeItemId"
             :quick-paste-index="row.index + 1"
             :supports-quick-paste="row.index + 1 < 10" />

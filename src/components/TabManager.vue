@@ -15,6 +15,7 @@ import { useClipboard } from "@/composables/useClipboard";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useSettings } from "@/composables/useSettings";
 import { omit } from "@/utils/helpers";
+import { resetPanelEvent } from "@/utils/panel-reset";
 import { maskSecrets } from "@/utils/secrets";
 
 import {
@@ -43,13 +44,18 @@ const { clipboardItems, error, loading } = useClipboard();
 const { settings } = useSettings();
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | undefined;
 
-// App.vue mounts a new TabManager for every visit to the panel, and it always
-// opens on All: the tab is never remembered between visits
+// The panel always opens on All, on its first item: neither the tab nor the
+// item is remembered between visits. It's reset as the panel hides, and again
+// before it shows (see utils/panel-reset).
 function showAllTab(): void {
   selectedTab.value = defaultTab;
+  activeItemId.value = getItemsForTab(defaultTab)[0]?.id ?? null;
 }
 onBeforeMount(showAllTab);
-onMounted(showAllTab);
+onMounted(() => {
+  showAllTab();
+  window.addEventListener(resetPanelEvent, showAllTab);
+});
 
 function normalizeSearchQuery(searchQuery: string): string {
   return searchQuery.trim().toLowerCase();
@@ -213,7 +219,10 @@ watch(
   },
 );
 
-onUnmounted(() => clearTimeout(searchDebounceTimeout));
+onUnmounted(() => {
+  clearTimeout(searchDebounceTimeout);
+  window.removeEventListener(resetPanelEvent, showAllTab);
+});
 </script>
 
 <template>

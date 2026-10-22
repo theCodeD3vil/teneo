@@ -1,3 +1,5 @@
+import { appPaths } from "./paths";
+
 export async function fileExists(path: string): Promise<boolean> {
   try {
     await tjs.stat(path);
@@ -9,7 +11,7 @@ export async function fileExists(path: string): Promise<boolean> {
 
 /** A subfolder of the app's data dir, created on first use. */
 export async function dataFolder(app: TinyApp, name: string): Promise<string> {
-  const folder = `${app.paths.data}/${name}`;
+  const folder = `${(await appPaths(app)).data}/${name}`;
   await tjs.makeDir(folder, { recursive: true });
   return folder;
 }

@@ -103,7 +103,7 @@ export async function openSettingsWindow(app: TinyApp): Promise<void> {
     return;
   }
 
-  app.openWindow(settingsWindowId, {
+  app.win.open(settingsWindowId, {
     page: "settings.html",
     title: "Settings",
     size: "820x640",
@@ -115,7 +115,7 @@ export async function openSettingsWindow(app: TinyApp): Promise<void> {
 export async function openSetupWindow(app: TinyApp): Promise<void> {
   showInDock(app);
   if (!(await isWindowOpen(app, setupWindowId))) {
-    app.openWindow(setupWindowId, {
+    app.win.open(setupWindowId, {
       page: "setup.html",
       title: "Welcome to Teneo",
       size: "560x560",
@@ -140,7 +140,7 @@ export async function openUpdateWindow(
 ): Promise<void> {
   availableUpdate = update;
   if (!(await isWindowOpen(app, updateWindowId))) {
-    app.openWindow(updateWindowId, {
+    app.win.open(updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
       size: "480x720",

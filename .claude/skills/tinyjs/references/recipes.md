@@ -161,7 +161,10 @@ Other notes:
   (`"windows": { "userAgent": … }`), or branch on `(await
   tiny.system.info()).os`. Some SaaS apps feature-detect embedded
   webviews and refuse regardless; nothing to do about that.
-- Cookies/logins persist in the webview's default store per app id.
+- Cookies/logins live in the webview's default store per app id. The
+  backend can read them (HttpOnly included), set them and remove them with
+  `app.cookies` — e.g. keep a site's session in `app.secrets` and restore
+  it on a later launch. See api.md → Cookies.
 - Per-engine caveats worth knowing before you promise a behaviour (a denied
   navigation has already made its request on Linux; an asked POST re-issues
   as a GET on Windows): platforms.md.
@@ -176,7 +179,7 @@ Two options:
   `tiny.win.show()` only when there's something to show. A hidden window
   isn't composited, but WebKit still runs, at ~50 MiB on macOS.
 - `{ "mainWindow": false, "activation": "accessory" }`: there's no main
-  window or WebView at all; WebKit starts only when `app.openWindow` opens a
+  window or WebView at all; WebKit starts only when `app.win.open` opens a
   named window. Idle cost on macOS is ~17 MiB instead of ~65 MiB (Linux:
   ~110 MiB instead of ~330 MiB).
   `app.windows()` starts as `[]`, and no `index.html` is needed. Anything

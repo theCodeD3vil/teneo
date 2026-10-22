@@ -4,6 +4,7 @@ import { saveAppIcon } from "./app-icons";
 import { normalizeClipboardColor } from "./color";
 import { isExcludedApp } from "./excluded-apps";
 import { dataFolder, logError } from "./files";
+import { appPaths } from "./paths";
 import { getSettings } from "./settings";
 import type { ClipboardItemToSave } from "./types/clipboard";
 import { generateUUID } from "./utils/uuid-generator";
@@ -32,8 +33,9 @@ export async function readClipboardItem(
       logError(`saving icon for ${bundleId} failed:`, error),
     );
   }
+  const { temp } = await appPaths(app);
   return saveClipboardImage(
-    tempImageFileAsImage(normalizeClipboardColor(item), app),
+    tempImageFileAsImage(normalizeClipboardColor(item), temp),
     app,
   );
 }
@@ -44,7 +46,7 @@ export async function readClipboardItem(
  *  sourceApp stays the app in front, usually the one in the screenshot. */
 function tempImageFileAsImage(
   item: TinyClipboardData,
-  app: TinyApp,
+  tempFolder: string,
 ): ClipboardItemToSave {
   const [path] = item.paths;
   const isTempImageFile =
@@ -52,20 +54,17 @@ function tempImageFileAsImage(
     item.paths.length === 1 &&
     item.image !== null && // the picture is on the clipboard too
     imageFilePattern.test(path) &&
-    isInTempFolder(path, app);
+    isInTempFolder(path, tempFolder);
   if (!isTempImageFile) return item;
 
   // image points at the tool's file, so the real file is what gets saved
   return { ...item, kind: "image", image: path, paths: [], pasteAsFile: true };
 }
 
-function isInTempFolder(path: string, app: TinyApp): boolean {
-  const tempFolder = app.paths.temp.replace(/\/$/, "");
+function isInTempFolder(path: string, tempFolder: string): boolean {
+  const folder = tempFolder.replace(/\/$/, "");
   // /var is a symlink to /private/var, so a path can use either form
-  return (
-    path.startsWith(`${tempFolder}/`) ||
-    path.startsWith(`/private${tempFolder}/`)
-  );
+  return path.startsWith(`${folder}/`) || path.startsWith(`/private${folder}/`);
 }
 
 /** Copy a clipboard image out of its temp file, which is replaced on the next

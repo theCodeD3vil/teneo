@@ -26,6 +26,13 @@ function pickSettings(value) {
   return settings;
 }
 
+// ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/paths.ts
+var pathsPromise = null;
+function appPaths(app) {
+  pathsPromise ??= app.paths();
+  return pathsPromise;
+}
+
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/files.ts
 async function fileExists(path) {
   try {
@@ -36,7 +43,7 @@ async function fileExists(path) {
   }
 }
 async function dataFolder(app, name) {
-  const folder = `${app.paths.data}/${name}`;
+  const folder = `${(await appPaths(app)).data}/${name}`;
   await tjs.makeDir(folder, { recursive: true });
   return folder;
 }
@@ -663,21 +670,22 @@ async function readClipboardItem(app) {
       (error) => logError(`saving icon for ${bundleId} failed:`, error)
     );
   }
+  const { temp } = await appPaths(app);
   return saveClipboardImage(
-    tempImageFileAsImage(normalizeClipboardColor(item), app),
+    tempImageFileAsImage(normalizeClipboardColor(item), temp),
     app
   );
 }
-function tempImageFileAsImage(item, app) {
+function tempImageFileAsImage(item, tempFolder) {
   const [path] = item.paths;
   const isTempImageFile = item.kind === "files" && item.paths.length === 1 && item.image !== null && // the picture is on the clipboard too
-  imageFilePattern.test(path) && isInTempFolder(path, app);
+  imageFilePattern.test(path) && isInTempFolder(path, tempFolder);
   if (!isTempImageFile) return item;
   return { ...item, kind: "image", image: path, paths: [], pasteAsFile: true };
 }
-function isInTempFolder(path, app) {
-  const tempFolder = app.paths.temp.replace(/\/$/, "");
-  return path.startsWith(`${tempFolder}/`) || path.startsWith(`/private${tempFolder}/`);
+function isInTempFolder(path, tempFolder) {
+  const folder = tempFolder.replace(/\/$/, "");
+  return path.startsWith(`${folder}/`) || path.startsWith(`/private${folder}/`);
 }
 async function saveClipboardImage(item, app) {
   if (item.kind !== "image" || !item.image) return item;
@@ -916,12 +924,12 @@ async function getLinkPreview(url, app) {
   );
 }
 async function clearLinkPreviews(app) {
-  await tjs.remove(cacheFolder(app)).catch(
+  await tjs.remove(await cacheFolder(app)).catch(
     (error) => logError("clearing link previews failed:", error)
   );
 }
 async function removeStaleLinkPreviews(app) {
-  const folder = cacheFolder(app);
+  const folder = await cacheFolder(app);
   const entries = await tjs.readDir(folder).catch(() => null);
   if (!entries) return;
   for await (const entry of entries) {
@@ -929,8 +937,9 @@ async function removeStaleLinkPreviews(app) {
     if (!await isFresh(path)) await tjs.remove(path).catch(() => void 0);
   }
 }
-function cacheFolder(app) {
-  return `${app.paths.cache.replace(/\/$/, "")}/link-previews`;
+async function cacheFolder(app) {
+  const { cache } = await appPaths(app);
+  return `${cache.replace(/\/$/, "")}/link-previews`;
 }
 async function hash(text) {
   const digest = await crypto.subtle.digest(
@@ -948,7 +957,7 @@ function cached(key, app, makePng) {
   const inProgress = fetchesInProgress.get(key);
   if (inProgress) return inProgress;
   const preview = (async () => {
-    const folder = cacheFolder(app);
+    const folder = await cacheFolder(app);
     const pngPath = `${folder}/${key}.png`;
     const nonePath = `${folder}/${key}.none`;
     if (await isFresh(pngPath)) return pngDataUrl(pngPath);
@@ -1149,8 +1158,9 @@ async function downloadThumbnail(url, app) {
   if (!response || !extension) return null;
   const image = await readAtMost(response, MAX_IMAGE_BYTES, false);
   if (!image?.length) return null;
-  const imagePath = `${cacheFolder(app)}/download-${generateUUID()}.${extension}`;
-  await tjs.makeDir(cacheFolder(app), { recursive: true });
+  const folder = await cacheFolder(app);
+  const imagePath = `${folder}/download-${generateUUID()}.${extension}`;
+  await tjs.makeDir(folder, { recursive: true });
   await tjs.writeFile(imagePath, image);
   try {
     const thumbnail = await app.thumbnail(imagePath, PREVIEW_SIZE2);
@@ -1235,8 +1245,8 @@ function initializeDatabase(app) {
   return databasePromise;
 }
 async function openDatabase(app) {
-  await tjs.makeDir(app.paths.data, { recursive: true });
-  const database = new Database(`${app.paths.data}/teneo.sqlite`);
+  const { data } = await appPaths(app);
+  const database = new Database(`${data}/teneo.sqlite`);
   run(
     database,
     `
@@ -1287,6 +1297,7 @@ async function saveClipboardItem(item, app) {
   const value = serializeValue(savedItem);
   const isEncrypted = getSettings().encryptSecrets && value !== null && savedItem.secrets.length > 0;
   const storedValue = isEncrypted ? await encryptText(value, app) : value;
+  const { data: dataDirectory } = await appPaths(app);
   run(
     await initializeDatabase(app),
     `
@@ -1298,7 +1309,7 @@ async function saveClipboardItem(item, app) {
     savedItem.id,
     savedItem.kind,
     serializeImageSize(savedItem),
-    serializePath(savedItem, app),
+    serializePath(savedItem, dataDirectory),
     storedValue,
     savedItem.dateCopied,
     savedItem.sourceApp?.name ?? null,
@@ -1343,8 +1354,9 @@ async function deleteClipboardItems(app, copiedBefore, keepNewest) {
     keepNewest
   );
   notifyClipboardHistoryChanged(app);
+  const { data: dataDirectory } = await appPaths(app);
   for (const row of deletedRows) {
-    const imagePath = row.kind === "image" ? restoreImagePath(row.path, app) : null;
+    const imagePath = row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
     if (imagePath) {
       await tjs.remove(imagePath).catch(
         (error) => logError(`deleting ${imagePath} failed:`, error)
@@ -1384,9 +1396,10 @@ async function listClipboardItemSizes(app) {
       ORDER BY dateCopied DESC
     `
   );
+  const { data: dataDirectory } = await appPaths(app);
   return Promise.all(
     rows.map(async (row) => {
-      const imagePath = row.kind === "image" ? restoreImagePath(row.path, app) : null;
+      const imagePath = row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
       const imageBytes = imagePath ? await tjs.stat(imagePath).then(
         (stat) => stat.size,
         () => 0
@@ -1430,8 +1443,9 @@ async function listClipboardItems(app) {
   const decryptedRows = await Promise.all(
     rows.map((row) => decryptRow(row, app))
   );
+  const { data: dataDirectory } = await appPaths(app);
   const items = decryptedRows.flatMap((row) => {
-    const item = row && rowToClipboardItem(row, app);
+    const item = row && rowToClipboardItem(row, dataDirectory);
     return item ? [item] : [];
   });
   await Promise.all(
@@ -1525,16 +1539,16 @@ async function keepEncryptionFromEarlierVersion(app) {
 function serializeImageSize(item) {
   return item.kind === "image" && item.imageSize ? JSON.stringify(item.imageSize) : null;
 }
-function serializePath(item, app) {
+function serializePath(item, dataDirectory) {
   if (item.kind === "image") {
     if (!item.image) return null;
-    const dataDirectory = `${app.paths.data}/`;
-    if (!item.image.startsWith(dataDirectory)) {
+    const prefix = `${dataDirectory}/`;
+    if (!item.image.startsWith(prefix)) {
       throw new Error(
         "Clipboard image was not saved to the app data directory"
       );
     }
-    return item.image.slice(dataDirectory.length);
+    return item.image.slice(prefix.length);
   }
   return item.kind === "files" ? JSON.stringify(item.paths) : null;
 }
@@ -1564,7 +1578,7 @@ function addMissingColumns(database) {
     }
   }
 }
-function rowToClipboardItem(row, app) {
+function rowToClipboardItem(row, dataDirectory) {
   if (!isClipboardItemKind(row.kind) || !isValidDate(row.dateCopied)) {
     return null;
   }
@@ -1576,7 +1590,7 @@ function rowToClipboardItem(row, app) {
     text: row.kind === "text" ? row.value : null,
     html: null,
     paths: row.kind === "files" ? parsePaths(row.path) : [],
-    image: row.kind === "image" ? restoreImagePath(row.path, app) : null,
+    image: row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null,
     imageSize: row.kind === "image" ? parseImageSize(row.imageSize) : null,
     color: row.kind === "color" ? row.value : null,
     concealed: false,
@@ -1603,9 +1617,9 @@ function isClipboardItemKind(value) {
 function isValidDate(value) {
   return Number.isFinite(value) && value > 0;
 }
-function restoreImagePath(path, app) {
+function restoreImagePath(path, dataDirectory) {
   if (!path || path.startsWith("/") || path.includes("..")) return null;
-  return `${app.paths.data}/${path}`;
+  return `${dataDirectory}/${path}`;
 }
 function parsePaths(path) {
   if (!path) return [];
@@ -1647,7 +1661,7 @@ function all(database, query, ...values) {
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/data-usage.ts
 async function getDataFolderUsage(app) {
   const [size, itemSizes, counts] = await Promise.all([
-    getFolderSize(app.paths.data),
+    appPaths(app).then(({ data }) => getFolderSize(data)),
     listClipboardItemSizes(app),
     countClipboardMedia(app)
   ]);
@@ -1840,7 +1854,7 @@ async function openSettingsWindow(app) {
     app.window(settingsWindowId).show();
     return;
   }
-  app.openWindow(settingsWindowId, {
+  app.win.open(settingsWindowId, {
     page: "settings.html",
     title: "Settings",
     size: "820x640",
@@ -1850,7 +1864,7 @@ async function openSettingsWindow(app) {
 async function openSetupWindow(app) {
   showInDock(app);
   if (!await isWindowOpen(app, setupWindowId)) {
-    app.openWindow(setupWindowId, {
+    app.win.open(setupWindowId, {
       page: "setup.html",
       title: "Welcome to Teneo",
       size: "560x560",
@@ -1866,7 +1880,7 @@ function getAvailableUpdate() {
 async function openUpdateWindow(update, app) {
   availableUpdate = update;
   if (!await isWindowOpen(app, updateWindowId)) {
-    app.openWindow(updateWindowId, {
+    app.win.open(updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
       size: "480x720",
@@ -1920,19 +1934,20 @@ var setupCompleteStoreKey = "setupComplete";
 async function isSetupComplete(app) {
   return Boolean(await app.store.get(setupCompleteStoreKey));
 }
-function showInMenuBar(app) {
-  app.tray.set({ icon: `${app.paths.resources}/tray.png` });
+async function showInMenuBar(app) {
+  const { resources } = await appPaths(app);
+  app.tray.set({ icon: `${resources}/tray.png` });
   syncOpenPanelShortcut(app);
 }
 async function showMenuBarOrSetup(app) {
-  if (await isSetupComplete(app)) showInMenuBar(app);
+  if (await isSetupComplete(app)) await showInMenuBar(app);
   else await openSetupWindow(app);
 }
 async function finishSetup(app) {
   const isInMenuBar = await isSetupComplete(app);
   await app.store.set(setupCompleteStoreKey, true);
   await closeSetupWindow(app);
-  if (!isInMenuBar) showInMenuBar(app);
+  if (!isInMenuBar) await showInMenuBar(app);
   await showPanel(app);
 }
 async function quitIfSetupClosedEarly(windowId, app) {
@@ -2073,7 +2088,7 @@ async function previewUpdateWindow(app) {
   if (!notesPath) return;
   const notes = new TextDecoder().decode(await tjs.readFile(notesPath));
   await openUpdateWindow(
-    { current: app.info.version, latest: "9.9.9", notes },
+    { current: (await app.info()).version, latest: "9.9.9", notes },
     app
   );
 }
