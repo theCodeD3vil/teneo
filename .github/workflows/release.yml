@@ -60,7 +60,7 @@ jobs:
 
       - name: Install tinyjs
         env:
-          TINYJS_VERSION: v0.53.1
+          TINYJS_VERSION: v0.62.1
         run: |
           curl -fsSL https://tinyjs.app/install | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH" # the installer's fallback link folder
