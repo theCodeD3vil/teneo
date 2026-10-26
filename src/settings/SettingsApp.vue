@@ -26,7 +26,8 @@ function openSetup(): void {
 </script>
 
 <template>
-  <div class="flex h-screen flex-col overflow-hidden bg-transparent! px-4 pb-4">
+  <div
+    class="flex h-screen flex-col overflow-hidden bg-transparent! px-4 pb-4 dark:bg-black/55!">
     <!-- the window is frameless: the top strip and logo row drag the window -->
     <header data-tiny-drag class="h-3 shrink-0" />
     <div
@@ -38,7 +39,7 @@ function openSetup(): void {
     <SettingsTabManager>
       <Alert
         v-if="isSetupUnfinished"
-        class="border-warning/30 bg-warning/10 mx-auto mt-4 max-w-xl shrink-0 has-data-[slot=alert-action]:pr-36">
+        class="border-warning/30 bg-warning/10 dark:bg-warning/15 mx-auto mt-4 max-w-xl shrink-0 has-data-[slot=alert-action]:pr-36">
         <AlertCircleIcon class="text-warning!" />
         <AlertTitle>Finish setting up Teneo</AlertTitle>
         <AlertDescription class="text-foreground/60 text-xs">

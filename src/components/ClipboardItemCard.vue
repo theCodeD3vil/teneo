@@ -267,8 +267,8 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
     @click="copyItem()"
     :class="
       cn([
-        'group/card hover:bg-foreground/5 cursor-pointer rounded-md p-3 transition-[bg]',
-        props.isActive && 'bg-foreground/5',
+        'group/card hover:bg-foreground/5 dark:hover:bg-foreground/6 cursor-pointer rounded-md p-3 transition-[bg]',
+        props.isActive && 'bg-foreground/5 dark:bg-foreground/6',
       ])
     ">
     <div class="flex items-start gap-4">
@@ -445,7 +445,7 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             variant="ghost"
             size="icon-sm"
             :title="itemDetails.pinned ? 'Unpin' : 'Pin'"
-            class="text-foreground/60 hover:text-foreground hover:bg-foreground/10!"
+            class="text-foreground/60 hover:text-foreground hover:bg-foreground/10! dark:hover:bg-foreground/15!"
             @click.stop="pinItem">
             <PinOffIcon v-if="itemDetails.pinned" />
             <PinIcon v-else />
@@ -454,7 +454,7 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             variant="ghost"
             size="icon-sm"
             title="Delete"
-            class="text-foreground/60 hover:text-destructive hover:bg-destructive/10!"
+            class="text-foreground/60 hover:text-destructive hover:bg-destructive/10! dark:hover:bg-destructive/20!"
             @click.stop="deleteItem">
             <DeleteIcon />
           </Button>

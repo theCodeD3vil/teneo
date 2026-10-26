@@ -104,7 +104,9 @@ useHotkeys({
 </script>
 
 <template>
-  <div class="flex h-screen flex-col gap-3 overflow-hidden bg-transparent! p-4">
+  <!-- dark mode tints the vibrancy panel darker; settings and other windows keep the plain panel -->
+  <div
+    class="flex h-screen flex-col gap-3 overflow-hidden bg-transparent! p-4 dark:bg-black/55!">
     <SearchInput ref="searchInput" v-model="searchQuery" />
     <TabManager
       :search-query="searchQuery"

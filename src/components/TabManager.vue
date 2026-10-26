@@ -230,14 +230,18 @@ onUnmounted(() => {
     <TabsList class="sticky top-0 w-full justify-start gap-x-3 bg-transparent!">
       <div v-for="tabItem in tabValues" :key="tabItem">
         <TabsTrigger
-          class="data-active:bg-primary/10! bg-foreground/5 data-active:text-primary! data-active:border-primary/80! text-xs font-light capitalize"
+          class="data-active:bg-primary/10! dark:data-active:bg-primary/20! bg-foreground/5 dark:bg-foreground/10 data-active:text-primary! data-active:border-primary/80! text-xs font-light capitalize"
           :value="tabItem">
           {{ tabItem }}
         </TabsTrigger>
       </div>
       <div class="text-foreground/60 ml-auto flex items-center gap-1 text-xs">
-        <Kbd class="bg-foreground/10"> <ArrowLeftIcon /> </Kbd>
-        <Kbd class="bg-foreground/10"> <ArrowRightIcon /> </Kbd>
+        <Kbd class="bg-foreground/10 dark:bg-foreground/15">
+          <ArrowLeftIcon />
+        </Kbd>
+        <Kbd class="bg-foreground/10 dark:bg-foreground/15">
+          <ArrowRightIcon />
+        </Kbd>
         tabs
       </div>
     </TabsList>
