@@ -41,15 +41,19 @@ function quitApp(): void {
       <HotkeyPreview v-if="hotkeyProgress" :progress="hotkeyProgress" />
       <div v-else class="text-foreground/70 flex items-center gap-x-3 text-xs">
         <!-- <div class="flex items-center gap-1">
-          <Kbd class="bg-foreground/10"> <SpaceIcon /> Space </Kbd>
+          <Kbd class="bg-foreground/10 dark:bg-foreground/15"> <SpaceIcon /> Space </Kbd>
           to preview
         </div> -->
         <div class="flex items-center gap-1">
-          <Kbd class="bg-foreground/10"> <CommandIcon /> V </Kbd>
+          <Kbd class="bg-foreground/10 dark:bg-foreground/15">
+            <CommandIcon /> V
+          </Kbd>
           to paste
         </div>
         <div class="flex items-center gap-1">
-          <Kbd class="bg-foreground/10"> <CommandIcon /> / </Kbd>
+          <Kbd class="bg-foreground/10 dark:bg-foreground/15">
+            <CommandIcon /> /
+          </Kbd>
           to search
         </div>
       </div>
@@ -61,7 +65,7 @@ function quitApp(): void {
         variant="ghost"
         size="icon"
         title="Settings"
-        class="hover:bg-foreground/5! text-foreground/70 hover:text-foreground"
+        class="hover:bg-foreground/5! dark:hover:bg-foreground/10! text-foreground/70 hover:text-foreground"
         @click="openSettings">
         <Settings />
       </Button>
@@ -69,7 +73,7 @@ function quitApp(): void {
         variant="ghost"
         size="icon"
         title="Quit Teneo"
-        class="hover:bg-foreground/5! text-foreground/70 hover:text-foreground"
+        class="hover:bg-foreground/5! dark:hover:bg-foreground/10! text-foreground/70 hover:text-foreground"
         @click="quitApp">
         <ShutDownIcon />
       </Button>

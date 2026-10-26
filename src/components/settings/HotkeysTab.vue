@@ -26,7 +26,9 @@
             {{ hotkey.description }}
           </span>
         </template>
-        <Kbd class="bg-foreground/10">{{ hotkey.shortcut }}</Kbd>
+        <Kbd class="bg-foreground/10 dark:bg-foreground/15">{{
+          hotkey.shortcut
+        }}</Kbd>
       </SettingsField>
     </SettingsSection>
   </div>

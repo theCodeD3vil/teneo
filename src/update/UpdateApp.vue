@@ -69,7 +69,8 @@ onKeyStroke("Escape", (event) => {
 </script>
 
 <template>
-  <div class="flex h-screen flex-col overflow-hidden bg-transparent! px-6 pb-6">
+  <div
+    class="flex h-screen flex-col overflow-hidden bg-transparent! px-6 pb-6 dark:bg-black/55!">
     <!-- the window is frameless: the header drags the window -->
     <header data-tiny-drag class="flex shrink-0 items-center gap-x-4 pt-7 pb-5">
       <img data-tiny-drag class="size-14 shrink-0" src="/icon.png" alt="" />
@@ -85,7 +86,7 @@ onKeyStroke("Escape", (event) => {
 
     <ScrollArea
       v-if="update?.notes"
-      class="border-foreground/8 bg-foreground/4 min-h-0 flex-1 rounded-xl border">
+      class="border-foreground/8 bg-foreground/4 dark:bg-foreground/6 min-h-0 flex-1 rounded-xl border">
       <ReleaseNotes :markdown="update.notes" class="px-5 py-4" />
     </ScrollArea>
 
@@ -109,7 +110,7 @@ onKeyStroke("Escape", (event) => {
           aria-valuemin="0"
           aria-valuemax="100"
           :aria-valuenow="downloadPercent ?? undefined"
-          class="bg-foreground/10 h-1.5 overflow-hidden rounded-full">
+          class="bg-foreground/10 dark:bg-foreground/15 h-1.5 overflow-hidden rounded-full">
           <div
             v-if="downloadPercent !== null"
             class="bg-primary h-full rounded-full transition-[width] duration-200 ease-out"

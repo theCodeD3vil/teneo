@@ -34,7 +34,7 @@ const selectedTab = ref<SettingsTab>("general");
         v-for="tab in settingsTabs"
         :key="tab.value"
         :value="tab.value"
-        class="data-active:bg-primary/10! bg-foreground/5 data-active:text-primary! data-active:border-primary/80! text-xs font-light capitalize">
+        class="data-active:bg-primary/10! dark:data-active:bg-primary/20! bg-foreground/5 dark:bg-foreground/10 data-active:text-primary! data-active:border-primary/80! text-xs font-light capitalize">
         <component :is="tab.icon" />
         {{ tab.value }}
       </TabsTrigger>

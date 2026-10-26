@@ -302,7 +302,7 @@ const clearHistoryMutation = useMutation({
             <div
               role="img"
               :aria-label="storageLimitSummary"
-              class="bg-foreground/10 flex h-1.5 gap-px overflow-hidden rounded-full">
+              class="bg-foreground/10 dark:bg-foreground/15 flex h-1.5 gap-px overflow-hidden rounded-full">
               <div
                 v-for="segment in storageSegments"
                 :key="segment.kind"

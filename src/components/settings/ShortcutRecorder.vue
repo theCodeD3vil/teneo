@@ -59,7 +59,7 @@ onUnmounted(() => setRecording(false));
         <Kbd
           v-for="label in shortcutLabels"
           :key="label"
-          class="bg-foreground/10">
+          class="bg-foreground/10 dark:bg-foreground/15">
           {{ label }}
         </Kbd>
       </span>
