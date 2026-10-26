@@ -1,4 +1,4 @@
-# The tiny.* / app API — full tour (current as of tinyjs 0.44.0)
+# The tiny.* / app API — full tour (current as of tinyjs 0.66.2)
 
 The `tiny` global is injected into every page automatically (no script tag);
 TypeScript definitions ship in types/tiny.d.ts. Backend handlers receive the
@@ -83,6 +83,11 @@ tiny.win.setChrome({ frame: false, windowControls: false, transparent: false,
 // squareCorners: macOS borderless (square, no titlebar; keep data-tiny-drag).
 // acceptsFirstMouse: the click that focuses an unfocused window also reaches
 //   the page (palettes/toolbars).
+// panel (mac, OPEN-TIME only: tinyjs.json "chrome" / win.open chrome, never
+//   setChrome): non-activating NSPanel — show() gives it the keyboard WITHOUT
+//   activating the app, so with setAllSpaces(true) a palette opens over a
+//   full-screen app instead of switching Spaces. hide() just orders it out.
+//   No app menu bar while it's key; not in Window menu / cmd-` cycling.
 // Startup chrome belongs in tinyjs.json "chrome" / win.open options — applied
 // BEFORE first paint; a late setChrome flashes the default window.
 // Windows: transparent MAIN window must be declared in tinyjs.json, and
@@ -249,8 +254,9 @@ await tiny.win.stopFind();
 tiny.api.on("navigate", (e) => {}); // { window, kind, url, error? }
 tiny.api.on("download", (d) => {}); // { id, url, filename, path, state, bytes?, total? }
 tiny.api.on("popup", (p) => {}); // { window, url, action }
-const caps = await tiny.system.capabilities();
-caps.api; // { gated, denied: [...] } for THIS origin
+await tiny.capabilities.ready; // then sync, for THIS origin:
+tiny.capabilities.can("clipboard.read"); // false under "wrapper"
+tiny.capabilities.get("clipboard.read"); // { ok:false, why:'gate', needs:['clip.read'] }
 ```
 
 ```js
@@ -455,6 +461,7 @@ await tiny.app.paths();   // { home, data, cache, logs, temp, downloads,
 // in dev, a .app's Contents/Helpers in builds), null without any — tjs.spawn
 // (await app.paths()).executables + '/<name>'.
 await tiny.app.shell.open('https://x.com');  // URL or path; resolves true/rejects
+   // from a page the app didn't ship (a wrapped site): http(s)/mailto only
 await tiny.app.shell.reveal(path); await tiny.app.shell.trash(path);
 await tiny.app.thumbnail(path, size?);  // png for ANY path (macOS/Windows:
    // preview or document/folder icon — never fails on type; Linux:
@@ -505,6 +512,16 @@ const caps = await tiny.system.capabilities();
 // 'page' — informational, don't branch); caps.ai reflects the BUILD (needs
 // a launcher compiled against FoundationModels) plus macOS 26 at runtime.
 
+// Per CALL instead (page only): OS + Linux session + the "api" gate at once.
+await tiny.capabilities.ready;              // once; can/get/list are sync
+tiny.capabilities.can('app.badge');         // 'tray.*' = any tray call works
+tiny.capabilities.get('win.setPosition');   // { ok:false, why:'session', feature:'windowPosition' }
+tiny.capabilities.list();                   // every working path, sorted
+tiny.capabilities.onChange(({ added, removed }) => {});  // fires on first answer too
+// why: 'gate' (needs: names to enable) | 'platform' | 'session' | 'unknown' | 'pending'
+// ready resolves within 3s even with no answer (never hangs); a late one fires onChange.
+// Informational — the backend gate still decides. Doesn't cover the app's own api methods.
+
 // requirements — turn "missing system pieces" into an actionable prompt
 await tiny.system.requirements(ids?, { refresh: true });
 // -> [{ id, ok, feature, detail, install: { manager, packages, command } }]
@@ -521,7 +538,8 @@ await tiny.system.locale();  // { language, languages, system, region, timeZone 
 // txiki has no Intl and LANG is wrong/absent. languages = filtered to bundle
 // localizations, system = raw user preference (differ for an English-only
 // app on a French Mac). macOS only; 'locale' page event on change.
-await tiny.system.battery(); await tiny.system.wifi();  // mac (wifi: ssid→Location perm)
+await tiny.system.battery(); await tiny.system.wifi();  // mac (wifi: ssid→'location' perm,
+                                // declared in permissions + request('location'))
 await tiny.system.idleTime();   // seconds since last input (linux: GNOME)
 
 await tiny.theme.get();         // { dark } | null
@@ -531,9 +549,17 @@ tiny.api.on('sleep', fn); tiny.api.on('wake', fn);  // backend: export onSystem
 await tiny.app.power.preventSleep('reason', { display: false });
 await tiny.app.power.allowSleep();   // auto-released on exit/crash
 
-tiny.hotkey.register('boss', 'cmd+shift+k'); tiny.hotkey.on((id) => ...);
+await tiny.hotkey.register('boss', 'cmd+shift+k'); // true once the OS has it;
+// false = invalid combo or another app holds it (reason logged) — check it.
+tiny.hotkey.on((id) => ...);
 tiny.hotkey.unregister('boss');   // system-wide; cmd = Ctrl on win/linux;
-// linux: XGrabKey on X11, GlobalShortcuts portal on Wayland (one approval)
+// linux: XGrabKey on X11, GlobalShortcuts portal on Wayland (one approval;
+// capabilities().globalHotkeys is false without the portal).
+// Combos (hotkeys AND keystroke): modifiers in any order + exactly ONE key,
+// else refused. Same key names on every OS: letters, digits, f1–f24, enter,
+// esc, tab, space, home/end/pageup/pagedown, minus/slash/quote…, or the
+// punctuation itself ('cmd+,'). `delete` = Backspace everywhere;
+// `forwarddelete` = the Delete key. win/super = ⌘ on macOS.
 
 await tiny.app.keystroke('cmd+v');   // native CGEvent -> { ok, trusted };
 await tiny.app.paste();              // = keystroke('cmd+v'); hide() first to
@@ -600,7 +626,7 @@ await tiny.app.permissions.check("accessibility"); // 'granted'|'denied'|
 // 'undetermined'|'unsupported'
 await tiny.app.permissions.request("accessibility"); // prompts / opens Settings
 // names: accessibility | screen | notifications | microphone | camera |
-//        automation[:<bundle-id>]
+//        location | automation[:<bundle-id>]
 ```
 
 - Off macOS, `granted` usually means "not gated here", not "consent given".
@@ -619,6 +645,10 @@ await tiny.app.permissions.request("accessibility"); // prompts / opens Settings
 - speech-to-text: the page's `webkitSpeechRecognition` (WebKit AND WebView2
   have it) needs BOTH `microphone` and `speechRecognition` usage strings in
   a built app — missing the second = `service-not-allowed` with no prompt.
+- location (macOS; `system.wifi()` ssid/bssid on 14+): declare
+  `"permissions": { "location": "why" }`, then `request('location')` in a
+  BUILT app. Without the string — and always in dev — request resolves
+  `'undetermined'` with no prompt. Windows/Linux: `'unsupported'`.
 - dev-mode: TCC grants attach to the SHARED dev launcher binary — all dev
   apps share them; packaged apps get their own.
 
@@ -641,7 +671,8 @@ tiny.app.onOpenFiles((paths) => ...);  // "fileExtensions": ["md"]; also argv
 tiny.api.on('update-available', ({ current, latest, notes }) => ...);
 // backend: export onUpdateAvailable(info, app)
 const { available, latest } = await tiny.app.update.check();
-await tiny.app.update.install();   // verify sha256 + swap + relaunch
+await tiny.app.update.install();   // verify sha256 + swap + relaunch; rejects
+   // unless check() found a newer build for THIS OS + CPU
 ```
 
 Full packaging/manifests: references/release.md.

@@ -107,6 +107,13 @@ declare interface TinyChromeOptions {
    *  to apply before first paint — no bar flashing in and out, and `size`
    *  still means the page's box either way. */
   menu?: boolean;
+  /** macOS: a non-activating panel (Spotlight-style). show() gives it the
+   *  keyboard WITHOUT activating the app, so with setAllSpaces(true) it
+   *  opens over a full-screen app instead of switching Spaces; hide() just
+   *  puts it away. Open-time only: tinyjs.json "chrome" (main) or win.open's
+   *  chrome — setChrome can't turn it on or off. Panels aren't in the
+   *  Window menu or ⌘` cycling. Ignored on Windows and Linux. */
+  panel?: boolean;
 }
 
 /** 'floating' = always-on-top; 'overlay' floats above almost everything
@@ -179,15 +186,18 @@ declare interface TinyLocale {
 }
 
 declare interface TinyBattery {
-  percent: number;
+  /** 0–100; null when the OS doesn't report it (possible on Windows/Linux) */
+  percent: number | null;
   charging: boolean;
   plugged: boolean;
-  /** minutes to full (charging) or empty; null while calculating */
+  /** minutes to full (charging) or empty; null while calculating, and
+   *  always null on Linux */
   minutesRemaining: number | null;
 }
 
 declare interface TinyWifi {
-  /** null without the Location permission on macOS 14+ */
+  /** null without the Location permission on macOS 14+ — declare
+   *  permissions.location in tinyjs.json, then permissions.request('location') */
   ssid: string | null;
   bssid: string | null;
   /** signal strength, dBm */
@@ -306,8 +316,12 @@ declare interface TinyAppInfo {
 }
 
 declare interface TinyTraySpec {
+  /** text beside the icon; Windows doesn't show it (it's the tooltip there
+   *  when no tooltip is given) */
   title?: string;
-  /** png path (absolute or project-relative); template image by default.
+  /** png path — absolute: a relative one is resolved against the working
+   *  directory, which is the project in tinyjs dev but not in a built app
+   *  (use (await paths()).resources + '/tray.png'). Template image by default.
    *  'sf:<name>' is an SF Symbol (macOS), 'emoji:<glyph>' a glyph drawn as a
    *  tray silhouette (Windows) — branch per OS for asset-free icons. */
   icon?: string;
@@ -399,7 +413,9 @@ declare interface TinySayOptions {
 }
 
 declare interface TinyOpenWindowOptions {
-  /** html file in your frontend dir (e.g. 'settings.html') or absolute path */
+  /** html file in your frontend dir (e.g. 'settings.html') or an http(s)
+   *  URL. From a page, only files inside the frontend dir open; the backend
+   *  may also pass an absolute path. */
   page?: string;
   title?: string;
   /** 'WxH', e.g. '420x300' — the PAGE's box, decorations excluded */
@@ -477,6 +493,7 @@ declare type TinyPermissionName =
   | "notifications"
   | "microphone"
   | "camera"
+  | "location"
   | "automation"
   | `automation:${string}`;
 
@@ -866,20 +883,25 @@ declare interface Tiny {
    *    audio.crossOrigin = 'anonymous';
    *    audio.src = tiny.proxyURL('https://example.com/stream.mp3');
    *  Only the app's own pages may use it; any other origin needs
-   *  "media.proxy" in its tinyjs.json "api".origins key. */
+   *  "media.proxy" in its tinyjs.json "api".origins key.
+   *  Not on Windows: there's no tiny-media:// handler in WebView2, so the URL
+   *  loads nothing — check tiny.system.capabilities().proxyURL !== false. */
   proxyURL(url: string): string;
 
-  /** A correct file:// URL for a disk path on BOTH platforms — use for
+  /** A correct file:// URL for a disk path on every platform — use for
    *  <audio>/<img>/<video> src of backend-provided paths. Hand-rolled
    *  'file://' + path breaks on Windows (the drive letter becomes the URL
    *  host). */
   fileURL(path: string): string;
 
-  log(msg: string): Promise<void>;
+  /** print to the backend's console (the tinyjs dev terminal); any JSON value */
+  log(msg: unknown): Promise<true>;
   quit(): Promise<void>;
-  /** Desktop notification. Packaged + signed apps get native Notification
-   *  Center banners; dev builds fall back to osascript. Never rejects —
-   *  resolves false if delivery failed, so fire-and-forget is safe. */
+  /** Desktop notification. Signed macOS apps get Notification Center
+   *  banners; tinyjs dev and ad-hoc builds fall back to osascript. Never
+   *  rejects. Resolves true once handed to the OS — even if the user has
+   *  turned notifications off — and false only when the macOS dev fallback
+   *  couldn't show it. */
   notify(
     title: string,
     body?: string,
@@ -984,8 +1006,9 @@ declare interface Tiny {
     /** files dragged onto the window — real filesystem paths */
     onDrop(fn: (paths: string[]) => void): () => void;
 
-    /** native share sheet — anchor at the click's clientX/clientY */
-    share(opts?: TinyShareOptions): Promise<void>;
+    /** native share sheet — anchor at the click's clientX/clientY. macOS
+     *  only: elsewhere it does nothing (capabilities().share is false). */
+    share(opts?: TinyShareOptions): Promise<boolean>;
 
     /** This window's OWN menu bar, overriding the app menu for it alone.
      *  Same spec and same click event as tiny.menu; windows that don't
@@ -1043,7 +1066,10 @@ declare interface Tiny {
 
   hotkey: {
     /** combo like 'cmd+shift+k'; fires system-wide */
-    register(id: string, combo: string): Promise<void>;
+    /** true once the system has the hotkey; false if the combo isn't valid or
+     *  another app holds it (the reason is logged). On Linux/Wayland, true
+     *  means it was handed to the desktop, which asks the user. */
+    register(id: string, combo: string): Promise<boolean>;
     unregister(id: string): Promise<void>;
     on(fn: (id: string) => void): () => void;
   };
@@ -1059,7 +1085,8 @@ declare interface Tiny {
    */
   audio: {
     /** Replace the whole chain. Idempotent; [] restores unprocessed output.
-     *  At most 28 filters (15 with gainR) — the list is truncated past that. */
+     *  At most 28 filters on Linux (15 with gainR), 32 on macOS — the list is
+     *  truncated past that. */
     filters(list: TinyAudioFilter[]): Promise<void>;
     /** Retune ONE filter in place — no rebuild, no gap; what a slider drag
      *  should call */
@@ -1122,14 +1149,15 @@ declare interface Tiny {
    * for VU meters / visualizers, including audio that bypasses Web Audio
    * (native HLS, CORS-tainted streams). Read-only: it observes the mix, it
    * can't process it (EQ still needs the signal in the graph — see proxyURL).
-   * Requires an `"audioTap"` key in tinyjs.json. macOS 14.4+.
+   * Requires an `"audioTap"` key in tinyjs.json. macOS 14.2+.
    */
   audioTap: {
     /**
      * Start tapping. Resolves `true`, or throws an Error whose `.code` is one
-     * of `'unsupported'` (pre-14.4), `'not-declared'` (manifest missing the
-     * scope), `'denied'` (TCC refused — surfaces as silent chunks) or
-     * `'failed'` (Core Audio error). Idempotent for identical options.
+     * of `'unsupported'` (before macOS 14.2), `'not-declared'` (manifest
+     * missing the scope) or `'failed'` (Core Audio error). A refused
+     * permission is not an error: the chunks arrive silent. Idempotent for
+     * identical options (macOS; elsewhere start() restarts the tap).
      *
      * Authorization is deferred to this call (declaring the manifest key does
      * nothing until you call it) — so you can lazy-arm the tap. The *first*
@@ -1234,8 +1262,8 @@ declare interface Tiny {
     architecture(): Promise<string>;
     /** What this machine can actually do — anything ABSENT is supported.
      *  Mostly booleans (`sampler` is 'page' | 'native'), plus `api`: what
-     *  the tinyjs.json "api" gate denies THIS origin, so a wrapped page can
-     *  hide UI for calls it would only watch fail. */
+     *  the tinyjs.json "api" gate denies THIS origin. A page usually wants
+     *  tiny.capabilities.can() instead, which answers both at once. */
     capabilities(): Promise<
       Record<string, boolean | string> & {
         api?: { gated: boolean; denied: string[] };
@@ -1357,8 +1385,10 @@ declare interface Tiny {
     launchAtLogin: TinyLaunchAtLogin;
     /** '' clears the badge */
     badge(text: string): Promise<void>;
-    /** bounce / flash / urgency-hint until activated; critical: until the
-     * user acts */
+    /** ask for the user's attention: macOS bounces the Dock icon once
+     *  (critical: until the app is activated), Windows flashes the taskbar
+     *  button (critical: longer), Linux sets the urgency hint (X11 only;
+     *  critical makes no difference) */
     attention(opts?: { critical?: boolean }): Promise<void>;
     power: TinyPower;
     /** the active app right now (who focus returns to after win.hide()) */
@@ -1367,7 +1397,9 @@ declare interface Tiny {
     icon(path: string): Promise<void>;
     /** progress bar on the app icon / taskbar button: 0..1, null clears */
     progress(value: number | null): Promise<void>;
-    /** find files by name/content (Spotlight) — up to 100 paths */
+    /** find files — up to 100 paths. macOS: Spotlight, by name and content,
+     *  under the home folder. Linux: by name (locate, or find as a fallback).
+     *  Windows: rejects. */
     spotlight(query: string): Promise<string[]>;
     /** the system alert beep — the one portable sound */
     beep(): Promise<boolean>;
@@ -1376,7 +1408,9 @@ declare interface Tiny {
      *  Windows, 'complete' Linux — these do NOT port), or an audio file path.
      *  Resolves false if the name/file didn't load. */
     playSound(target?: TinySoundName | (string & {})): Promise<boolean>;
-    /** screenshot a display (id from screens(); default primary) — png in
+    /** screenshot a display (id from screens(); default: the first display
+     *  the OS lists, usually the main one — Linux always captures the whole
+     *  desktop and ignores the id) — png in
      *  the temp dir, caller owns the file; needs the 'screen' permission
      *  and macOS 14+, rejects with the reason otherwise */
     captureScreen(screenId?: number): Promise<TinyCapture>;
@@ -1414,7 +1448,8 @@ declare interface Tiny {
   tray: {
     set(spec: TinyTraySpec): Promise<void>;
     remove(): Promise<void>;
-    /** the tray icon's rect { x, y, width, height } (top-left) | null */
+    /** the tray icon's rect { x, y, width, height } (top-left) | null.
+     *  Always null on Linux, whose tray protocol doesn't say where it is. */
     position(): Promise<{
       x: number;
       y: number;
@@ -1424,7 +1459,41 @@ declare interface Tiny {
     on(fn: (id: string) => void): () => void;
     onClick(fn: () => void): () => void;
   };
+
+  /** What THIS page can actually do, keyed by the tiny.* path you'd call
+   *  ('clipboard.write', 'app.badge'; a leading 'tiny.' is fine). One answer
+   *  for the OS, the Linux session and tinyjs.json's "api" gate for this
+   *  page's origin. Await `ready` once; everything else is synchronous.
+   *  Informational: the backend gate still decides every call. */
+  capabilities: {
+    /** resolves once the answer has arrived, or after 3s without one — it
+     *  never hangs; a late answer fires onChange. Until then can() is false. */
+    readonly ready: Promise<void>;
+    /** true when the call works here. 'ns.*' is true when ANY path under
+     *  ns works. */
+    can(path: string): boolean;
+    /** why not, when it doesn't */
+    get(path: string): TinyCapability;
+    /** every path that works here, sorted */
+    list(): string[];
+    /** fires when the answer changes, including when the first one lands */
+    onChange(
+      fn: (change: { added: string[]; removed: string[] }) => void,
+    ): () => void;
+    /** ask the backend again; fires onChange if anything differs */
+    refresh(): Promise<void>;
+  };
 }
+
+declare type TinyCapability =
+  | { ok: true }
+  /** 'gate': tinyjs.json "api" denies it — `needs` are the names to enable */
+  | { ok: false; why: "gate"; needs: string[] }
+  /** 'platform': this OS can't; 'session': this Linux session can't (Wayland).
+   *  `feature` is the system.capabilities() key that says so. */
+  | { ok: false; why: "platform" | "session"; feature: string }
+  /** 'unknown': no such path; 'pending': no answer yet */
+  | { ok: false; why: "unknown" | "pending" };
 
 declare const tiny: Tiny;
 
@@ -1540,8 +1609,8 @@ declare interface TinyApp {
   eval(js: string): void;
   reload(newHtml?: string): Promise<void>;
   quit(): void;
-  /** Same shape as tiny.notify. Never rejects — resolves false if delivery
-   *  failed, so fire-and-forget is safe. */
+  /** Same shape as tiny.notify, and the same result: true once handed to
+   *  the OS, false only when the macOS dev fallback couldn't show it. */
   notify(
     title: string,
     body?: string,
@@ -1664,7 +1733,8 @@ declare interface TinyApp {
     all(): Promise<Record<string, any>>;
   };
   hotkey: {
-    register(id: string, combo: string): void;
+    /** see tiny.hotkey.register */
+    register(id: string, combo: string): Promise<boolean>;
     unregister(id: string): void;
   };
   /** Native clipboard (NSPasteboard in the launcher). */
@@ -1714,8 +1784,7 @@ declare interface TinyApp {
   launchAtLogin: TinyLaunchAtLogin;
   /** '' clears the badge */
   badge(text: string): boolean;
-  /** bounce / flash / urgency-hint until activated; critical: until the user
-   * acts */
+  /** ask for the user's attention — see tiny.app.attention */
   attention(opts?: { critical?: boolean }): boolean;
   power: TinyPower;
   /** the active app right now (who focus returns to after hide()) */
@@ -1772,7 +1841,7 @@ declare interface TinyApp {
   };
   /** progress bar on the app icon / taskbar button: 0..1, null clears */
   progress(value: number | null): boolean;
-  /** find files by name/content (Spotlight) — up to 100 paths */
+  /** find files — up to 100 paths; see tiny.app.spotlight */
   spotlight(query: string): Promise<string[]>;
   /** the system alert beep — the one portable sound */
   beep(): Promise<boolean>;
@@ -1781,15 +1850,15 @@ declare interface TinyApp {
    *  Windows, 'complete' Linux — these do NOT port), or an audio file path.
    *  Resolves false if the name/file didn't load. */
   playSound(target?: TinySoundName | (string & {})): Promise<boolean>;
-  /** screenshot a display (id from screens(); default primary) — png in
+  /** screenshot a display (id from screens(); see tiny.app.captureScreen for
+   *  the default) — png in
    *  the temp dir, caller owns the file; needs the 'screen' permission
    *  and macOS 14+, rejects with the reason otherwise */
   captureScreen(screenId?: number): Promise<TinyCapture>;
   /** system eyedropper — NO screen-recording permission needed;
    *  '#rrggbb', or null if the user cancels */
   pickColor(): Promise<string | null>;
-  /** thumbnail png for ANY file type Quick Look understands; size is the
-   *  bounding box — @2x on macOS/Linux, exact pixels on Windows */
+  /** thumbnail png — see tiny.app.thumbnail (Linux: images only) */
   thumbnail(path: string, size?: number): Promise<TinyThumbnail>;
   secrets: TinySecrets;
   /** the webview's cookie jar, HttpOnly included (backend only) */
@@ -1828,9 +1897,8 @@ declare interface TinyApiMeta {
   window: string;
   /** origin of the CALLING FRAME, stamped by the launcher from WebKit's own
    *  frame info (not page-claimed) — e.g. "https://airtable.com",
-   *  "file://". undefined where the launcher doesn't stamp it yet
-   *  (Windows/Linux). The tinyjs.json "api".origins gate keys off the same
-   *  value. */
+   *  "file://". All three launchers stamp it; undefined only with an older
+   *  launcher. The tinyjs.json "api".origins gate keys off the same value. */
   origin?: string;
 }
 

@@ -1821,15 +1821,15 @@ async function waitForFocusToLeave(app, teneoProcessId) {
 }
 async function hidePanel(app) {
   const panel = app.window("main");
+  panel.hide({ app: false });
+  if ((await app.frontmostApp())?.pid !== tjs.pid) return;
   const isOnScreen = await Promise.all(
     dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId))
   );
   const windowIdsToKeep = dockWindowIds.filter((_, index) => isOnScreen[index]);
-  const teneoProcessId = windowIdsToKeep.length ? (await app.frontmostApp())?.pid : void 0;
-  panel.hide({ app: false });
   panel.hide();
   if (!windowIdsToKeep.length) return;
-  await waitForFocusToLeave(app, teneoProcessId);
+  await waitForFocusToLeave(app, tjs.pid);
   for (const windowId of windowIdsToKeep) {
     app.window(windowId).show({ activate: false });
   }
