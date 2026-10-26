@@ -44,28 +44,26 @@ async function waitForFocusToLeave(
 }
 
 /**
- * Put the panel away and hand focus back to the app the user came from,
- * leaving the settings and setup windows on screen.
+ * Put the panel away, leaving the settings and setup windows on screen.
  */
 export async function hidePanel(app: TinyApp): Promise<void> {
   const panel = app.window("main");
+  panel.hide({ app: false });
+  // The panel never activates Teneo, so the app the user came from keeps focus.
+  // Only when Teneo was already active (settings or setup in front) does focus
+  // need handing back.
+  if ((await app.frontmostApp())?.pid !== tjs.pid) return;
+
   const isOnScreen = await Promise.all(
     dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId)),
   );
   const windowIdsToKeep = dockWindowIds.filter((_, index) => isOnScreen[index]);
-  // The panel has focus, so the frontmost app is Teneo
-  const teneoProcessId = windowIdsToKeep.length
-    ? (await app.frontmostApp())?.pid
-    : undefined;
-
-  // Panel first, so unhiding the app below can't bring it back
-  panel.hide({ app: false });
   // A bare hide() on main hides the whole app: macOS refocuses the previous app
   panel.hide();
   if (!windowIdsToKeep.length) return;
 
   // Showing them before that hand-off finishes keeps focus in Teneo
-  await waitForFocusToLeave(app, teneoProcessId);
+  await waitForFocusToLeave(app, tjs.pid);
   for (const windowId of windowIdsToKeep) {
     app.window(windowId).show({ activate: false });
   }

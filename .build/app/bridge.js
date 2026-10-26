@@ -467,6 +467,16 @@ const REQUIREMENTS = {
     packages: { apt: ['xdg-desktop-portal'], dnf: ['xdg-desktop-portal'],
                 pacman: ['xdg-desktop-portal'], zypper: ['xdg-desktop-portal'] },
   },
+  'globalHotkeys': {
+    feature: 'tiny.hotkey (Wayland)',
+    detail: 'On Wayland, global hotkeys go through the desktop\'s GlobalShortcuts '
+      + 'portal, which asks the user to approve them. Without a portal backend '
+      + 'that has it (KDE Plasma and GNOME 48 and later do), hotkeys never fire. X11 '
+      + 'sessions grab keys directly and need none of this.',
+    probe: () => hasGlobalShortcuts(),
+    packages: { apt: ['xdg-desktop-portal'], dnf: ['xdg-desktop-portal'],
+                pacman: ['xdg-desktop-portal'], zypper: ['xdg-desktop-portal'] },
+  },
   'tray': {
     feature: 'tiny.tray',
     detail: 'The tray needs an AppIndicator/StatusNotifier host. GNOME needs the '
@@ -577,8 +587,26 @@ const UNITY_LAUNCHER_GUESS = IS_LINUX &&
 let macFilters = null;
 async function hasMacAudioFilters(query) {
   if (OS !== 'macos' || !query) return false;
-  if (macFilters === null) macFilters = (await query('audiofilters'))?.available === true;
+  macFilters ??= query('audiofilters').then((r) => r?.available === true, () => false);
   return macFilters;
+}
+
+// Global hotkeys on Linux: X11 grabs keys itself; Wayland needs the
+// GlobalShortcuts portal. A property read (like the ScreenCast probe), so it
+// both activates the portal and proves the interface is really there.
+// Probed once. capabilities().globalHotkeys used to say true regardless.
+// The PROMISE is what's cached, here and in the two probes below: every page
+// asks as it boots (tiny.capabilities), so two windows opening together used
+// to start two probes, each seeing the cache still empty.
+let globalShortcuts = null;
+async function hasGlobalShortcuts() {
+  if (!IS_LINUX) return false;
+  if (ON_X11 && !tjs.env.WAYLAND_DISPLAY) return true;
+  globalShortcuts ??= ON_X11 ? Promise.resolve(true) : probeOk(['gdbus', 'call', '--session',
+    '-d', 'org.freedesktop.portal.Desktop', '-o', '/org/freedesktop/portal/desktop',
+    '-m', 'org.freedesktop.DBus.Properties.Get',
+    'org.freedesktop.portal.GlobalShortcuts', 'version']);
+  return globalShortcuts;
 }
 
 let unityLauncher = null;
@@ -586,10 +614,8 @@ async function hasUnityLauncher() {
   // The table below is built on every OS, so answer without spawning anything
   // off Linux. Probed once — a dock does not come and go mid-run.
   if (!IS_LINUX) return false;
-  if (unityLauncher === null) {
-    unityLauncher = (await busNameOwned('com.canonical.Unity'))
-      || (!(await probeOk(['sh', '-c', 'command -v gdbus'])) && UNITY_LAUNCHER_GUESS);
-  }
+  unityLauncher ??= (async () => (await busNameOwned('com.canonical.Unity'))
+    || (!(await probeOk(['sh', '-c', 'command -v gdbus'])) && UNITY_LAUNCHER_GUESS))();
   return unityLauncher;
 }
 
@@ -648,12 +674,20 @@ async function systemCapabilities(query, aiStatus) {
     icon: ON_X11,
     attention: ON_X11,
     presence: ON_X11,
+    // setAlwaysOnTop / setLevel and setAllSpaces go out as keep-above/below
+    // and stick, and GTK3's Wayland backend implements all four as empty
+    // stubs (xdg-shell has no stacking or sticky state) — so they are X11
+    // only, like icon above. (setClickThrough is NOT: the input region is a
+    // real wl_surface request.) From the GTK source, and confirmed with
+    // WAYLAND_DEBUG (TODO-verify.md): the three send nothing.
+    windowLevel: ON_X11, setAllSpaces: ON_X11,
     // chrome.windowControls: GTK can only hide the CLOSE button portably
     // (gtk_window_set_deletable); minimize/maximize go out as _MOTIF_WM_HINTS,
     // which the WM is free to ignore. So: partial, not false.
     windowControls: ON_X11,
     // present, with the caveats in the README
-    globalHotkeys: true, tray: true, notifications: true,
+    globalHotkeys: await hasGlobalShortcuts(),
+    tray: true, notifications: true,
     notificationActions: true, notificationReply: false,
     secrets: true, mediaKeys: true, nowPlaying: true, audioTap: true,
     speech: true, pickColor: true, spotlight: true, launchAtLogin: true,
@@ -963,7 +997,7 @@ const DIALOG_OPS = {
 // The client's own bootstrap. NOT debug.get: it's a raw launcher read-back
 // (clipboard, wifi, frontmost, other windows, selected text...), so under a
 // gate it passes only when a manifest names it (#11).
-const API_ALWAYS = ['client.hello'];
+const API_ALWAYS = ['client.hello', 'client.capabilities'];
 const API_PRESETS = {
   // A site wrapper's posture: OS chrome, windows, dialogs, the app's own
   // store in; filesystem, clipboard READ, secrets, capture and automation out.
@@ -991,6 +1025,10 @@ function compileNameGate(spec) {
       spec = { disable: ['*'] };
     } else spec = API_PRESETS[spec];
   } else if (Array.isArray(spec)) spec = { disable: ['*'], enable: spec };
+  else if (typeof spec !== 'object') {
+    console.log(`tinyjs: "api" can't be ${JSON.stringify(spec)} — denying everything (fail closed)`);
+    spec = { disable: ['*'] };
+  }
   let disable = [], enable = [];
   const add = (s) => {
     if (!s) return;
@@ -1004,6 +1042,9 @@ function compileNameGate(spec) {
     } else add(API_PRESETS[spec.preset]);
   }
   add(spec);
+  // An enable list on its own reads as "only these" — and used to mean
+  // "everything", since nothing was disabled. Make it mean what it says.
+  if (!disable.length && enable.length) disable = ['*'];
   if (!disable.length) return null; // nothing denied = no gate
   const match = (pats, m) => pats.some((p) =>
     p === '*' || p === m || (p.endsWith('.*') && m.startsWith(p.slice(0, -1))));
@@ -1036,6 +1077,23 @@ function compileNameGate(spec) {
 // origins all count for nothing here: an app that never wrote an "api"
 // block must not be callable from someone else's iframe.
 const SUBFRAME_MARK = 'tiny:subframe';
+// One native filter row: "label,freq,q,gain[,gainR]". gain is dB for the EQ
+// shapes (0 = flat) but a LINEAR multiplier for type 'gain' (1 = unchanged),
+// so a missing gain defaults by type — it used to be 0 for every type, which
+// made { type: 'gain' } silence the output natively while pageChain (1)
+// passed it through.
+export function filterGain(f) {
+  return Number(f.gain ?? (f.type === 'gain' ? 1 : 0));
+}
+export function audioFilterRow(f) {
+  const row = [FILTER_LABELS[f.type] ?? 'bq_peaking',
+    Number(f.freq ?? 1000), Number(f.q ?? 1), filterGain(f)];
+  // gainR only rides along when the channels actually differ, so the
+  // common symmetric case stays a 4-field row
+  if (f.gainR != null && Number(f.gainR) !== filterGain(f)) row.push(Number(f.gainR));
+  return row.join(',');
+}
+
 export function compileSubframeGate(spec) {
   const origins = spec && typeof spec === 'object' && !Array.isArray(spec) &&
     spec.origins && typeof spec.origins === 'object'
@@ -1052,10 +1110,14 @@ export function compileSubframeGate(spec) {
   };
 }
 
-function compileApiGate(spec) {
-  if (!spec) return null;
-  const base = compileNameGate(typeof spec === 'string' || Array.isArray(spec)
-    ? spec : { ...spec, origins: undefined });
+export function compileApiGate(spec) {
+  // Only an ABSENT "api" means no gate. false / "" used to slip through this
+  // as "falsy = allow all" while meaning "none" everywhere else.
+  if (spec == null) return null;
+  // Only a plain object carries "origins" to strip; anything else (a preset
+  // name, a list, false, a stray number) goes to compileNameGate as itself.
+  const base = compileNameGate(spec && typeof spec === 'object' && !Array.isArray(spec)
+    ? { ...spec, origins: undefined } : spec);
   const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const origins = spec.origins && typeof spec.origins === 'object'
     ? Object.entries(spec.origins).map(([pat, sub]) => ({
@@ -1079,6 +1141,183 @@ function compileApiGate(spec) {
   };
   fn.gateFor = gateFor; // capabilities() reports per-origin denials
   return fn;
+}
+
+// Linux: the type the system already gives "*.<ext>", read from
+// shared-mime-info's globs2 files ("weight:type:glob[:flags]") in each data
+// dir — the user's first, then XDG_DATA_DIRS — highest weight wins. `skip` is
+// the prefix of types an app invented for itself (older tinyjs registered
+// application/x-<id>-<ext> for every extension), so those don't count —
+// nor do ANY app's (application/x-<reverse.dns.id>-<ext>): another app's
+// leftover ties text/markdown's weight from the user's dir, which is read
+// first, so every later app would join it instead of the real type.
+// null when nothing claims the extension.
+export async function systemMimeForExt(ext, dataDirs, skip = '') {
+  const e = String(ext).replace(/^\./, '');
+  const appType = (t) => /^application\/x-[a-z0-9-]+(\.[a-z0-9-]+)+-/.test(t)
+    && t.endsWith('-' + e.toLowerCase());
+  let best = null, bestWeight = -1;
+  for (const dir of dataDirs) {
+    let text;
+    try { text = new TextDecoder().decode(await tjs.readFile(dir + '/mime/globs2')); } catch { continue; }
+    for (const line of text.split('\n')) {
+      if (!line || line[0] === '#') continue;
+      const [w, type, glob, flags = ''] = line.split(':');
+      if (!type || !glob || (skip && type.startsWith(skip)) || appType(type)) continue;
+      const hit = flags.split(',').includes('cs') ? glob === '*.' + e
+                                                  : glob.toLowerCase() === '*.' + e.toLowerCase();
+      if (hit && Number(w) > bestWeight) { bestWeight = Number(w); best = type; }
+    }
+  }
+  return best;
+}
+
+// Events to pages go through the "api" gate too. A page the app shipped
+// (file://, the dev server) gets every event; any other origin — a wrapped
+// site, or wherever one navigated — only those its rules allow, by the name
+// below. tinyjs's own events count as the calls they belong to, so the
+// "wrapper" preset keeps menu, tray, window, theme, locale, Now Playing and
+// notification events. The ones that carry local data (opened URLs and files,
+// dropped paths, downloads, navigation, popups, the audio tap) and every
+// event an app pushes itself are "event.<name>", which a site has to be
+// granted by name. Without an "api" block nothing changes.
+const EVENT_GATE = {
+  menu: 'menu.event', contextmenu: 'menu.event',
+  tray: 'tray.event', trayclick: 'tray.event',
+  hotkey: 'hotkey.event',
+  theme: 'theme.get',
+  locale: 'system.locale',
+  'window-state': 'win.event', 'window-closed': 'win.event', 'screens-changed': 'win.event',
+  'media-key': 'nowplaying.event',
+  'notification-click': 'notify', 'notification-action': 'notify',
+  'clipboard-change': 'clip.read',
+};
+export function eventGateName(event) {
+  return EVENT_GATE[event] ?? 'event.' + event;
+}
+// The script that delivers one event to one window. With an origin, it
+// first checks the page is still that origin — the window may have
+// navigated since its last call — and only then builds the data, so a page
+// that isn't the one the bridge decided for never sees it (redefining
+// window.__emit can't help it: the data doesn't exist yet). location is
+// unforgeable, and === can't be hooked. file:// pages are matched by
+// protocol, which reads the same in every engine.
+export function eventScript(event, data, origin) {
+  const emit = 'window.__emit&&window.__emit(' + JSON.stringify({ event, data }) + ')';
+  if (origin === undefined) return emit;
+  const test = String(origin).startsWith('file://')
+    ? 'location.protocol==="file:"'
+    : 'location.origin===' + JSON.stringify(String(origin));
+  return '(function(){if(!(' + test + '))return;' + emit + '})()';
+}
+
+// tiny.capabilities (the page's sync can()/list()/get()). tiny.js reads the
+// wire names out of its own functions at boot and asks about exactly those,
+// so this answers per wire name and never lists anything the page didn't
+// name — the app's own api methods stay unnamed to a site that can't call
+// them (capabilities().api.denied used to list them).
+// The gate is checked FIRST: a denied name says only 'gate', so an origin
+// the manifest doesn't trust learns nothing about the machine either.
+// Which capabilities() key each wire name / event rides on. A key that is
+// false makes the name unavailable; one that is absent or truthy doesn't.
+export const CAPABILITY_FEATURES = {
+  'win.setPosition': 'windowPosition', 'app.mouse': 'mousePosition',
+  'app.captureScreen': 'captureScreen',
+  'app.keystroke': 'keystroke', 'app.paste': 'keystroke',
+  'macos.otherWindows': 'otherWindows', 'macos.moveWindow': 'moveOtherWindows',
+  'macos.selectedText': 'selectedText', 'macos.ocr': 'ocr',
+  'macos.recorder.start': 'recorder', 'macos.recorder.stop': 'recorder',
+  'macos.quickLook': 'quickLook', 'macos.applescript': 'applescript',
+  'macos.ai.generate': 'ai', 'win.share': 'share',
+  'system.wifi': 'wifi', 'system.locale': 'locale',
+  'app.authenticate': 'authenticate',
+  'app.badge': 'badge', 'app.progress': 'progress', 'app.icon': 'icon',
+  'app.attention': 'attention', 'app.presence': 'presence',
+  'hotkey.register': 'globalHotkeys', 'hotkey.unregister': 'globalHotkeys',
+  'tray.set': 'tray', 'tray.remove': 'tray', 'tray.position': 'tray',
+  'notify': 'notifications',
+  'nowplaying.set': 'nowPlaying', 'nowplaying.clear': 'nowPlaying',
+  'audioTap.start': 'audioTap', 'audioTap.stop': 'audioTap',
+  'app.say': 'speech', 'app.stopSpeaking': 'speech', 'app.voices': 'speech',
+  'app.pickColor': 'pickColor', 'app.spotlight': 'spotlight',
+  'login.get': 'launchAtLogin', 'login.set': 'launchAtLogin',
+  'win.printToPDF': 'printToPDF',
+  'audio.filters': 'audioFilters', 'audio.filterSet': 'audioFilters',
+  'audio.balance': 'audioFilters',
+  'win.find': 'findInPage', 'win.stopFind': 'findInPage',
+  'win.setAllSpaces': 'setAllSpaces',
+  'win.setAlwaysOnTop': 'windowLevel', 'win.setLevel': 'windowLevel',
+  'secrets.get': 'secrets', 'secrets.set': 'secrets', 'secrets.delete': 'secrets',
+  'media.proxy': 'proxyURL',
+};
+export const EVENT_FEATURES = {
+  tray: 'tray', trayclick: 'tray', hotkey: 'globalHotkeys',
+  'notification-click': 'notifications', 'notification-action': 'notificationActions',
+  'media-key': 'mediaKeys', 'audio-tap': 'audioTap', locale: 'locale',
+};
+// Linux keys that are false because of the session (Wayland, or XWayland's
+// frozen pointer), not the OS — the ON_X11 rows of systemCapabilities' linux
+// table, plus the GlobalShortcuts portal.
+export const SESSION_FEATURES = ['windowPosition', 'mousePosition', 'captureScreen',
+  'keystroke', 'icon', 'attention', 'presence', 'windowControls', 'globalHotkeys',
+  'windowLevel', 'setAllSpaces'];
+// uses: { calls: [wire names], events: [event names] }, from the page.
+// callAllowed(name) / eventAllowed(event): the gate, for the calling origin.
+// platform: systemCapabilities()'s table. linux: on Linux a SESSION_FEATURES
+// key is false because of the session, so it reads 'session' there.
+// -> { calls: { name: true | { why, feature?, needs? } }, events: same }
+//    why: 'gate' (needs = the name to enable in tinyjs.json "api"),
+//         'platform' (this OS can't), 'session' (this Linux session can't)
+export function capabilityVerdicts(uses, { callAllowed, eventAllowed, platform, linux = false }) {
+  const names = (a) => (Array.isArray(a) ? a : [])
+    .filter((n) => typeof n === 'string' && n.length <= 128).slice(0, 1024);
+  const verdict = (allowed, needs, feature) => {
+    if (!allowed) return { why: 'gate', needs };
+    if (feature && platform[feature] === false)
+      return { why: linux && SESSION_FEATURES.includes(feature) ? 'session' : 'platform', feature };
+    return true;
+  };
+  const calls = {}, events = {};
+  for (const n of names(uses?.calls))
+    calls[n] = verdict(callAllowed(n), n, CAPABILITY_FEATURES[n]);
+  for (const e of names(uses?.events))
+    events[e] = verdict(eventAllowed(e), eventGateName(e), EVENT_FEATURES[e]);
+  return { calls, events };
+}
+// Does a TINYJS_MEDIA_ORIGINS line set (mediaTrustLines) trust this origin
+// for `kind`? Same '*' globbing as the launchers, whole origin anchored.
+export function mediaTrusted(lines, kind, origin) {
+  if (typeof origin !== 'string') return false;
+  return String(lines).split('\n').some((l) => {
+    const sp = l.indexOf(' ');
+    if (sp < 0 || l.slice(0, sp) !== kind) return false;
+    const re = '^' + l.slice(sp + 1).split('*')
+      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
+    return new RegExp(re).test(origin);
+  });
+}
+
+// Linux, Wayland session: these permissions guard features that don't exist
+// there (keystroke, captureScreen — capabilities() says so too).
+function linuxUnusablePermission(name) {
+  return IS_LINUX && !ON_X11 && (name === 'accessibility' || name === 'screen');
+}
+
+// shell.open from a page the app didn't ship — a wrapped site, or anywhere
+// one navigated — may only hand web and mail links to the OS. Unrestricted
+// it is ShellExecuteW / NSWorkspace / xdg-open on ANY target: a program the
+// site just downloaded with "downloads": "auto", or a hostile URL scheme the
+// other-scheme policy (#30) never sees. The "wrapper" preset grants
+// shell.open, and `tinyjs wrap` gives that preset to the wrapped origin, so
+// this is the check that stands between them. The app's own pages (file://,
+// the dev server) keep the full call; no stamp means an older launcher, which
+// the gate also treats as the app's own.
+// ownOrigins: a Set — createApp's ownPageOrigins (file:// + the dev server).
+export function shellOpenAllowed(target, origin, ownOrigins) {
+  if (origin === undefined) return true;
+  const o = String(origin);
+  if (o.startsWith('file://') || ownOrigins.has(o)) return true;
+  return /^(https?|mailto):/i.test(String(target ?? '').trim());
 }
 
 // getUserMedia consent (#24), and the tiny-media proxy (#30, kind "proxy",
@@ -1381,6 +1620,10 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
       }
     }
     if (activation === 'accessory') spawnEnv.TINYJS_ACTIVATION = 'accessory';
+    // chrome.panel (macOS, #89): the main window is created as a
+    // non-activating panel — it can't become one later, so this rides the
+    // spawn env (the TinyjsPanel plist key in a packaged app), not CHROME.
+    if (chrome?.panel) spawnEnv.TINYJS_PANEL = '1';
     spawnEnv.TINYJS_NO_MAIN_WINDOW = mainWindow ? '0' : '1';
     // rememberWindows: main is built hidden and shown once it's been put
     // back where it was (launcher shows it anyway after 3s). Accessory apps
@@ -1805,7 +2048,28 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
   function push(event, data) {
     // Broadcast so secondary windows receive backend events too.
     // esc() so any backslash in the JSON survives wire_unescape on the launcher.
-    send('EVAL@* ' + esc('window.__emit && window.__emit(' + JSON.stringify({ event, data }) + ')'));
+    // With an "api" gate, each window gets it only if its page may (see
+    // EVENT_GATE) — one targeted line per window instead of the broadcast.
+    if (!apiGate) { send('EVAL@* ' + esc(eventScript(event, data))); return; }
+    for (const win of winOrigins.keys()) pushToWindow(win, event, data);
+  }
+  // Each window's current origin, from its own calls (every page says
+  // client.hello as tiny.js boots), as the launcher stamped them.
+  const winOrigins = new Map();
+  function eventAllowed(origin, event) {
+    if (!apiGate || origin === undefined) return true;   // no gate / older launcher
+    if (String(origin).startsWith('file://') || ownPageOrigins.has(origin)) return true;
+    return apiGate(eventGateName(event), origin);
+  }
+  function pushToWindow(win, event, data) {
+    let origin;
+    if (apiGate) {
+      if (!winOrigins.has(win)) return;                  // no page has spoken yet
+      origin = winOrigins.get(win);
+      if (!eventAllowed(origin, event)) return;
+    }
+    const js = esc(eventScript(event, data, origin));
+    send(win === 'main' ? 'EVAL ' + js : 'EVAL@' + win + ' ' + js);
   }
 
   // ── off-screen rescue policy ──────────────────────────────────────────────
@@ -2207,16 +2471,32 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
     // one Accessibility grant that names your app, no osascript spawn.
     // -> { ok, trusted }; trusted:false means Accessibility isn't granted
     // (see app.permissions).
-    keystroke: (combo) => ask('KEYSTROKE', one(combo)),
+    // Linux under Wayland: there's no way to post keys to other apps. The
+    // launcher's XTest path lands in XWayland only (when it runs at all), so
+    // it answered ok:true for keys native Wayland apps never saw — say so
+    // instead, as capabilities().keystroke already does.
+    keystroke: (combo) => (IS_LINUX && !ON_X11
+      ? Promise.resolve({ ok: false, trusted: false })
+      : ask('KEYSTROKE', one(combo))),
     // Paste into the frontmost app (hide your window first).
-    paste: () => ask('KEYSTROKE', 'cmd+v'),
+    paste: () => app.keystroke('cmd+v'),  // same Wayland answer as keystroke
     // TCC permissions: 'accessibility' | 'screen' | 'notifications' |
-    // 'automation[:<bundle-id>]'. check -> 'granted'|'denied'|'undetermined'|
-    // 'unsupported'; request also prompts (accessibility opens System
-    // Settings pointing at your app).
+    // 'microphone' | 'camera' | 'location' | 'automation[:<bundle-id>]'.
+    // check -> 'granted'|'denied'|'undetermined'|'unsupported'; request also
+    // prompts (accessibility opens System Settings pointing at your app).
+    // Linux answers 'granted' for anything it has no permission store for.
+    // Under Wayland that included 'accessibility' (keystroke) and 'screen'
+    // (captureScreen), which can't work there at all — 'unsupported' then,
+    // matching capabilities().
     permissions: {
-      async check(name) { return (await ask('PERMCHK', one(name)))?.status ?? 'unsupported'; },
-      async request(name) { return (await ask('PERMREQ', one(name)))?.status ?? 'unsupported'; },
+      async check(name) {
+        if (linuxUnusablePermission(name)) return 'unsupported';
+        return (await ask('PERMCHK', one(name)))?.status ?? 'unsupported';
+      },
+      async request(name) {
+        if (linuxUnusablePermission(name)) return 'unsupported';
+        return (await ask('PERMREQ', one(name)))?.status ?? 'unsupported';
+      },
     },
     // Global cursor position, same top-left coordinates as setPosition /
     // getState: { x, y, window: { x, y, inside }, screen: { x, y, width,
@@ -2523,7 +2803,8 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
       // without a battery).
       battery: () => query('battery'),
       // { ssid, bssid, rssi, noise, txRate } | null. ssid/bssid are null
-      // without the Location permission on macOS 14+.
+      // without the Location permission on macOS 14+ (permissions.request(
+      // 'location'), with "permissions": { "location" } in tinyjs.json).
       wifi: () => query('wifi'),
       // Seconds since the user's last input, session-wide — pause polling /
       // dim UI when they walk away.
@@ -2681,8 +2962,13 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
       if (!clean) return 'failed';
       // 'folder' is the one non-extension case worth spelling, since it's the
       // mime a folder-opening app actually needs.
+      // the same type registration used: the system's own for the extension
+      // when it has one, else the app's
+      const dataHome = tjs.env.XDG_DATA_HOME || tjs.homeDir + '/.local/share';
+      const dataDirs = [dataHome, ...(tjs.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':')];
       const mime = clean === 'folder' ? 'inode/directory'
-                                      : 'application/x-' + safeId + '-' + clean;
+        : (await systemMimeForExt(clean, dataDirs, 'application/x-' + safeId + '-'))
+          ?? 'application/x-' + safeId + '-' + clean;
       try {
         const p = tjs.spawn(['xdg-mime', 'default', appIdStr + '.desktop', mime],
                             { stdout: 'ignore', stderr: 'ignore' });
@@ -2741,7 +3027,18 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
     // System-wide hotkeys; combos like 'cmd+shift+k'. Presses arrive as a
     // 'hotkey' page event and via the onHotkey option.
     hotkey: {
-      register(hid, combo) { send('HKREG ' + one(hid) + '\t' + one(combo)); },
+      // -> true once the OS took it; false when the combo isn't valid or
+      // the OS refused it (taken by another app). The launcher logs why.
+      // On Linux/Wayland true means "handed to the desktop", which still
+      // asks the user. A launcher that never answers (older build) counts
+      // as true after 3s rather than hanging.
+      async register(hid, combo) {
+        const r = await Promise.race([
+          ask('HKREG', one(hid) + '\t' + one(combo)),
+          new Promise((res) => setTimeout(() => res(null), 3000)),
+        ]);
+        return r == null || r.ok === true;
+      },
       unregister(hid) { send('HKUNREG ' + one(hid)); },
     },
     // rememberWindows saves 500ms after the last change; a move made just
@@ -2829,7 +3126,8 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
                          hasPos ? (x | 0) : '', hasPos ? (y | 0) : '',
                          bit(c.menu),
                          wcp ? `${wcp.x | 0},${wcp.y | 0}` : '',
-                         one(parent === true ? 'main' : parent || '')].join('\t'));
+                         one(parent === true ? 'main' : parent || ''),
+                         c.panel ? '1' : ''].join('\t'));
       // minSize: "WxH" — a floor under user resizes, so a layout with a
       // natural size can't be shrunk until content falls off the bottom.
       if (minSize) send('WINOP@' + one(id) + ' minsize ' + one(minSize));
@@ -2848,8 +3146,7 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
       return {
         id,
         eval: (js) => t('EVAL', esc(js)),
-        push: (event, data) =>
-          t('EVAL', esc('window.__emit && window.__emit(' + JSON.stringify({ event, data }) + ')')),
+        push: (event, data) => pushToWindow(String(id), event, data),
         // Closing main quits, the way tiny.win.close() does from main's page.
         // (Until 0.57.0 this was a silent no-op for 'main'.)
         close: () => { if (id === 'main') app.quit(); else send('WINCLOSE ' + one(id)); },
@@ -3269,14 +3566,6 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
   // resends the whole chain instead — a rebuild, which can click, but it
   // used to be silently dropped.
   let audioChain = [];
-  const audioFilterRow = (f) => {
-    const row = [FILTER_LABELS[f.type] ?? 'bq_peaking',
-      Number(f.freq ?? 1000), Number(f.q ?? 1), Number(f.gain ?? 0)];
-    // gainR only rides along when the channels actually differ, so the
-    // common symmetric case stays a 4-field row
-    if (f.gainR != null && Number(f.gainR) !== Number(f.gain ?? 0)) row.push(Number(f.gainR));
-    return row.join(',');
-  };
   // Backend-side surface (same mixer, same state as the pages' calls).
   app.audio = {
     filters(list) {
@@ -3296,7 +3585,7 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
       }
       if (old) audioChain[idx] = f;
       send('AUDIOFILTERSET ' + [idx, Number(f.freq ?? 1000),
-        Number(f.q ?? 1), Number(f.gain ?? 0)].join('\t'));
+        Number(f.q ?? 1), filterGain(f)].join('\t'));
     },
     balance(v) {
       const b = Math.max(-1, Math.min(1, Number(v) || 0));
@@ -3425,7 +3714,7 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
     'store.set': async ({ key, value }) => app.store.set(key, value),
     'store.delete': async ({ key }) => app.store.delete(key),
     'store.all': async () => app.store.all(),
-    'hotkey.register': async ({ id: hid, combo }) => (app.hotkey.register(hid, combo), true),
+    'hotkey.register': async ({ id: hid, combo }) => app.hotkey.register(hid, combo),
     'hotkey.unregister': async ({ id: hid }) => (app.hotkey.unregister(hid), true),
     // Read the app's (or system's) rendered audio output as PCM chunks
     // ('audio-tap' events). Gated by the "audioTap" manifest key; the requested
@@ -3516,6 +3805,21 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
     'system.locale': async () => app.system.locale(),
     'app.info': async () => app.info(),
     'system.info': async () => app.system.info(),
+    // tiny.capabilities' snapshot: a verdict for each name the page's tiny.js
+    // uses (capabilityVerdicts). Always allowed, like client.hello — it can't
+    // tell a page more than calling would, and a gated page needs it most.
+    'client.capabilities': async (uses, _a, m) => {
+      const origin = m?.origin;
+      const own = origin === undefined || String(origin).startsWith('file://') || ownPageOrigins.has(origin);
+      const allows = (name) => !apiGate || apiGate(name, origin);
+      return capabilityVerdicts(uses, {
+        callAllowed: (n) => n === 'media.proxy'
+          ? own || mediaTrusted(mediaLines, 'proxy', origin) : allows(n),
+        eventAllowed: (e) => eventAllowed(origin, e),
+        platform: await systemCapabilities(query, () => app.macos.ai.availability()),
+        linux: IS_LINUX,
+      });
+    },
     'system.capabilities': async (_p, _a, m) => ({
       ...(await systemCapabilities(query, () => app.macos.ai.availability())),
       // what the "api" gate denies the CALLING origin (empty when ungated)
@@ -3529,7 +3833,11 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
     'app.matchScreen': async ({ saved }) => app.matchScreen(saved),
     'app.paths': async () => app.paths(),
     'app.setAsDefaultHandler': async ({ ext }) => app.setAsDefaultHandler(ext),
-    'shell.open': async ({ target }) => app.shell.open(target),
+    'shell.open': async ({ target }, _app, meta) => {
+      if (!shellOpenAllowed(target, meta?.origin, ownPageOrigins))
+        throw new Error(`shell.open: a page from ${meta.origin} may only open http(s) and mailto links`);
+      return app.shell.open(target);
+    },
     'shell.reveal': async ({ path }) => app.shell.reveal(path),
     'shell.trash': async ({ path }) => app.shell.trash(path),
     'login.get': async () => app.launchAtLogin.get(),
@@ -3567,6 +3875,12 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
   const methods = { ...api, ...builtins };
   const apiGate = compileApiGate(apiAccess);
   const subframeGate = compileSubframeGate(apiAccess);
+  const mediaLines = mediaTrustLines(apiAccess, [...ownPageOrigins]);
+  // Every page asks tiny.capabilities as it boots, and on Linux the answer
+  // spawns D-Bus probes (portal, dock) that can be slow — start them now, so
+  // the first page finds them done or in flight. (macOS's one probe asks the
+  // launcher, which isn't connected yet; it's a fast round trip anyway.)
+  if (IS_LINUX) systemCapabilities(null, null).catch(() => {});
   // capabilities() reports what the gate denies THE CALLING ORIGIN, so a
   // page can hide UI for features it would only watch fail.
   const gateInfo = (origin) => {
@@ -3616,6 +3930,9 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
       const subframe = callArgs.length > 2 &&
         callArgs.slice(1, -1).includes(SUBFRAME_MARK);
       const { method, params } = JSON.parse(payload);
+      // What this window's page is now, for events (pushToWindow). Only the
+      // top frame: a subframe's origin isn't the page's.
+      if (!subframe) winOrigins.set(callerWin, origin);
 
       // Capability gate FIRST — the dialog and find paths below short-circuit
       // to the launcher before `methods` is consulted, and they must not slip
@@ -3794,6 +4111,7 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
           // …and the audio tap, if this was the window that started it.
           if (audioTapOwner === id) stopAudioTap();
           clipWatch('win:' + id, 0);
+          winOrigins.delete(id);
           push('window-closed', { id });
           fire('onWindowClosed', onWindowClosed, id, app);
         } else if (line.startsWith('WINGEOM ')) {
@@ -4113,19 +4431,36 @@ export async function createApp({ html, htmlPath, url = null, title = 'tinyjs', 
         // A folder isn't a file type with an extension — it's one fixed mime,
         // so it needs no shared-mime-info XML of its own.
         if (openFolders) mimes.push('inode/directory');
-        if (fileExtensions?.length) {
-          const safeId = appIdStr.toLowerCase().replace(/[^a-z0-9.-]/g, '-');
-          let xml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-            '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n';
-          for (const ext of fileExtensions) {
-            const e = String(ext).replace(/^\./, '');
-            const mt = 'application/x-' + safeId + '-' + e.toLowerCase();
-            mimes.push(mt);
-            xml += `  <mime-type type="${mt}"><comment>${title} document</comment><glob pattern="*.${e}"/></mime-type>\n`;
-          }
-          xml += '</mime-info>\n';
+        // File types: join the type the system already has for the extension
+        // (text/markdown for .md…), so the app is one more "Open with" choice.
+        // Only an extension nothing claims gets a type of the app's own. This
+        // used to define application/x-<id>-<ext> for EVERY extension, with the
+        // same *.ext glob as the real type — which can change how file
+        // managers and other apps classify those files. A package file left by
+        // that is rewritten, or removed when nothing needs it.
+        const safeId = appIdStr.toLowerCase().replace(/[^a-z0-9.-]/g, '-');
+        const pkgFile = dataHome + '/mime/packages/' + safeId + '.xml';
+        const ownPrefix = 'application/x-' + safeId + '-';
+        const dataDirs = [dataHome, ...(tjs.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':')];
+        let xml = '';
+        for (const ext of fileExtensions ?? []) {
+          const e = String(ext).replace(/^\./, '');
+          const known = await systemMimeForExt(e, dataDirs, ownPrefix);
+          if (known) { mimes.push(known); continue; }
+          const mt = ownPrefix + e.toLowerCase();
+          mimes.push(mt);
+          xml += `  <mime-type type="${mt}"><comment>${title} document</comment><glob pattern="*.${e}"/></mime-type>\n`;
+        }
+        const hadPkg = await exists(pkgFile);
+        if (xml) {
           await tjs.makeDir(dataHome + '/mime/packages', { recursive: true });
-          await tjs.writeFile(dataHome + '/mime/packages/' + safeId + '.xml', enc.encode(xml));
+          await tjs.writeFile(pkgFile, enc.encode('<?xml version="1.0" encoding="UTF-8"?>\n' +
+            '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n' +
+            xml + '</mime-info>\n'));
+        } else if (hadPkg) {
+          await tjs.remove(pkgFile).catch(() => {});
+        }
+        if (xml || hadPkg) {
           tjs.spawn(['update-mime-database', dataHome + '/mime'],
                     { stdout: 'ignore', stderr: 'ignore' }).wait().catch(() => {});
         }

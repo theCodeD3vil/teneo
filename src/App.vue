@@ -43,9 +43,8 @@ async function showWindow() {
   searchInput.value?.blur();
   await nextTick();
   void document.body.offsetHeight; // lay the list out now, while the window is hidden
-  // Put the window on this Space before activating: activating a hidden app
-  // with no window on screen makes macOS leave a full-screen Space for a desktop
-  await tiny.win.show({ activate: false });
+  // The main window is a panel (tinyjs.json): show() gives it the keyboard
+  // without activating Teneo, so macOS stays on a full-screen Space
   await tiny.win.show();
 }
 

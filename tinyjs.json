@@ -16,7 +16,8 @@
     "windowControls": false,
     "frame": false,
     "vibrancy": "sheet",
-    "transparent": true
+    "transparent": true,
+    "panel": true
   },
   "activation": "accessory",
   "update": {
