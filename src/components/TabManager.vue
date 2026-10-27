@@ -28,10 +28,12 @@ import Kbd from "./ui/kbd/Kbd.vue";
 
 const props = defineProps<{
   searchQuery: string;
+  previewOpen: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "tab-change", count: number): void;
+  (e: "preview", item: ClipboardHistoryItem): void;
 }>();
 
 const tabValues: TabVariant[] = omit(clipboardItemVariants, "empty");
@@ -152,7 +154,17 @@ function pasteActiveItem(): boolean {
 }
 
 function previewActiveItem(): boolean {
-  return allTabContent.value?.previewActiveItem(activeItemId.value) ?? false;
+  const item = selectedItems.value.find(({ id }) => id === activeItemId.value);
+  if (!item) return false;
+
+  previewItem(item);
+  return true;
+}
+
+// A double-clicked card becomes the selection, so back lands on it
+function previewItem(item: ClipboardHistoryItem): void {
+  activeItemId.value = item.id;
+  emit("preview", item);
 }
 
 // D and P take the selected card away from where the user is, so selection
@@ -180,15 +192,19 @@ function getActiveItemNeighbourId(): string | null {
   return (items[index + 1] ?? items[index - 1])?.id ?? null;
 }
 
-useHotkeys({
-  moveActiveTab,
-  moveActiveItem,
-  copyActiveItem,
-  pasteSelectedItem: pasteActiveItem,
-  previewSelectedItem: previewActiveItem,
-  deleteSelectedItem: deleteActiveItem,
-  pinSelectedItem: pinActiveItem,
-});
+// The list stays mounted under the preview, so its keys must not act on it
+useHotkeys(
+  {
+    moveActiveTab,
+    moveActiveItem,
+    copyActiveItem,
+    pasteSelectedItem: pasteActiveItem,
+    previewSelectedItem: previewActiveItem,
+    deleteSelectedItem: deleteActiveItem,
+    pinSelectedItem: pinActiveItem,
+  },
+  () => !props.previewOpen,
+);
 
 watch(
   () => props.searchQuery,
@@ -256,7 +272,8 @@ onUnmounted(() => {
         :active-item-id="activeItemId"
         :loading="loading"
         :error="error"
-        :empty-message="emptyMessages[selectedTab]" />
+        :empty-message="emptyMessages[selectedTab]"
+        @preview="previewItem" />
     </TabsContent>
   </Tabs>
 </template>

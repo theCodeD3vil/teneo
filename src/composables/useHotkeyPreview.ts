@@ -6,7 +6,13 @@ import { blocksHotkeys } from "@/utils/keyboard";
 const PARTIAL_HOTKEY_TIMEOUT = 5_000;
 const COMPLETED_HOTKEY_TIMEOUT = 1500;
 
-export function useHotkeyPreview() {
+/** The keys just pressed, as `getProgress` reads them: the list's hotkeys by
+ *  default, or another view's own, such as the item preview's. */
+export function useHotkeyPreview(
+  getProgress: (
+    event: KeyboardEvent,
+  ) => HotkeyProgress | null = getHotkeyProgress,
+) {
   const hotkeyProgress = ref<HotkeyProgress | null>(null);
   let resetTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -23,7 +29,7 @@ export function useHotkeyPreview() {
   function handleKeydown(event: KeyboardEvent): void {
     if (blocksHotkeys(event.target)) return;
 
-    const progress = getHotkeyProgress(event);
+    const progress = getProgress(event);
     if (!progress) return;
 
     hotkeyProgress.value = progress;

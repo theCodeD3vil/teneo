@@ -3,6 +3,7 @@ export type {
   ClipboardHistoryItem,
   ClipboardItemKind,
   FilePreview,
+  LinkPreviewImage,
   SecretSpan,
 } from "../../shared/types/clipboard";
 

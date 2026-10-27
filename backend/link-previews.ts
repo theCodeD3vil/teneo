@@ -6,7 +6,10 @@
 // links work once. So the copied page is opened only for the image fallback
 // and only when the link doesn't look like one of those; icons come from the
 // site's home page. Links to this Mac or its local network are never fetched.
-import type { ClipboardLink } from "../shared/types/clipboard";
+import type {
+  ClipboardLink,
+  LinkPreviewImage,
+} from "../shared/types/clipboard";
 import { logError, pngDataUrl } from "./files";
 import { appPaths } from "./paths";
 import { findSecrets } from "./secret-detection";
@@ -14,6 +17,8 @@ import { getSettings } from "./settings";
 import { generateUUID } from "./utils/uuid-generator";
 
 const PREVIEW_SIZE = 64;
+/** the item preview's 288 px picture; app.thumbnail renders @2x for Retina */
+const LARGE_PREVIEW_SIZE = 300;
 /** a preview, or the note that a site has none, is fetched again after this */
 const CACHE_LIFETIME = 7 * 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT = 8000;
@@ -142,6 +147,40 @@ export async function getLinkPreview(
   );
 }
 
+/** The picture for a link's item preview, the most specific first: the
+ *  copied page's own image when it's safe to open, the home page's image,
+ *  then the site's icon. Null when previews are off or there's none. */
+export async function getLinkPreviewImage(
+  url: unknown,
+  app: TinyApp,
+): Promise<LinkPreviewImage | null> {
+  if (!getSettings().showLinkPreviews || typeof url !== "string") return null;
+  const link = findLink(url);
+  if (!link) return null;
+  const page = new URL(link.url);
+  if (isLocalAddress(page)) return null;
+
+  const isHomePage = page.href === new URL(page.origin).href;
+  if (!isHomePage && canOpenPage(page)) {
+    const image = await cached(`page-large-${await hash(page.href)}`, app, () =>
+      findPageImage(page.href, app, LARGE_PREVIEW_SIZE),
+    );
+    if (image) return { image, source: "page" };
+  }
+  const homeImage = await cached(
+    `home-large-${await hash(page.origin)}`,
+    app,
+    () => findPageImage(page.origin, app, LARGE_PREVIEW_SIZE),
+  );
+  if (homeImage) return { image: homeImage, source: "home" };
+
+  // the card's icon, so it's usually saved already
+  const icon = await cached(`site-${await hash(page.origin)}`, app, () =>
+    findSiteIcon(page.origin, app),
+  );
+  return icon ? { image: icon, source: "icon" } : null;
+}
+
 /** Delete every saved preview, e.g. when history is cleared. */
 export async function clearLinkPreviews(app: TinyApp): Promise<void> {
   await tjs
@@ -255,6 +294,7 @@ async function findSiteIcon(
 async function findPageImage(
   pageUrl: string,
   app: TinyApp,
+  size = PREVIEW_SIZE,
 ): Promise<Uint8Array | null> {
   // a redirect can lead to a link that's no safer to open than the copied one
   const page = await fetchHtml(
@@ -262,7 +302,7 @@ async function findPageImage(
     (url) => isLocalAddress(url) || !canOpenPage(url),
   );
   const imageUrl = page && findPageImageUrl(page.html, page.url);
-  return imageUrl ? downloadThumbnail(imageUrl, app) : null;
+  return imageUrl ? downloadThumbnail(imageUrl, app, size) : null;
 }
 
 interface HtmlTag {
@@ -457,11 +497,12 @@ const imageExtensions: Record<string, string> = {
   "image/bmp": "bmp",
 };
 
-/** Download an image and shrink it to a PREVIEW_SIZE png. Null when it isn't
+/** Download an image and shrink it to a `size` png. Null when it isn't
  *  an image: Quick Look would turn anything else into a document icon. */
 async function downloadThumbnail(
   url: string,
   app: TinyApp,
+  size = PREVIEW_SIZE,
 ): Promise<Uint8Array | null> {
   const signal = AbortSignal.timeout(FETCH_TIMEOUT);
   const response = await fetchFollowingRedirects(
@@ -485,7 +526,7 @@ async function downloadThumbnail(
   await tjs.makeDir(folder, { recursive: true });
   await tjs.writeFile(imagePath, image);
   try {
-    const thumbnail = await app.thumbnail(imagePath, PREVIEW_SIZE);
+    const thumbnail = await app.thumbnail(imagePath, size);
     const png = await tjs.readFile(thumbnail.path);
     await tjs.remove(thumbnail.path).catch(() => undefined);
     return png;

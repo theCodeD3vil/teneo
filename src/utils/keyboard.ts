@@ -22,3 +22,8 @@ export function hasTypedText(target: EventTarget | null): boolean {
     target.value !== ""
   );
 }
+
+// An open menu uses Enter, Space and Escape itself; the preview must not act too
+export function isInMenu(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[role="menu"]') !== null;
+}

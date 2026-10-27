@@ -1,4 +1,8 @@
-import { hasTypedText, isEditableKeyboardTarget } from "@/utils/keyboard";
+import {
+  hasTypedText,
+  isEditableKeyboardTarget,
+  isInMenu,
+} from "@/utils/keyboard";
 
 const quickCopyItemNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
@@ -34,12 +38,12 @@ export const hotkeyDefinitions = {
   },
   moveActiveTab: {
     id: "move-active-tab",
-    shortcut: "← / →",
+    shortcut: "← | →",
     description: "Move between tabs",
   },
   moveActiveItem: {
     id: "move-active-item",
-    shortcut: "↑ / ↓",
+    shortcut: "↑ | ↓",
     description: "Move between items",
   },
   copyActiveItem: {
@@ -48,6 +52,20 @@ export const hotkeyDefinitions = {
     description: "Copy the active item",
   },
 } as const;
+
+// Listed only: ItemPreview and usePreviewCopy handle these themselves
+export const previewHotkeyDefinitions = [
+  {
+    id: "leave-preview",
+    shortcut: "Esc | Space | ←",
+    description: "Go back to the list",
+  },
+  {
+    id: "copy-previewed-item",
+    shortcut: "Enter",
+    description: "Copy the item and close Teneo",
+  },
+] as const;
 
 // D and P are left out of hotkeyDefinitions so Settings doesn't list them; the README does
 export type HotkeyMatch =
@@ -125,6 +143,32 @@ export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
   }
 
   return null;
+}
+
+const previewBackKeys: Record<string, string> = {
+  Escape: "Esc",
+  " ": "Space",
+  ArrowLeft: "←",
+};
+
+/** In an item preview, only the keys that go back to the list (ItemPreview). */
+export function getPreviewHotkeyProgress(
+  event: KeyboardEvent,
+): HotkeyProgress | null {
+  const label = previewBackKeys[event.key];
+  if (
+    !label ||
+    event.repeat ||
+    !hasNoModifiers(event) ||
+    isInMenu(event.target)
+  ) {
+    return null;
+  }
+  return {
+    hotkeyName: null,
+    keys: [{ type: "key", value: label }],
+    state: "complete",
+  };
 }
 
 export function getHotkeyProgress(event: KeyboardEvent): HotkeyProgress | null {

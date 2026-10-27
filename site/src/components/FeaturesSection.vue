@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { type Component, ref } from "vue";
 import ClipboardIcon from "~icons/tabler/clipboard-filled";
 import PasteIcon from "~icons/tabler/clipboard-text-filled";
 import DatabaseIcon from "~icons/tabler/database-filled";
+import PreviewIcon from "~icons/tabler/eye-filled";
 import KeyIcon from "~icons/tabler/key-filled";
 import KeyboardIcon from "~icons/tabler/keyboard-filled";
-import LinkIcon from "~icons/tabler/link-filled";
 import PasswordIcon from "~icons/tabler/lock-filled";
 import SearchIcon from "~icons/tabler/search-filled";
+import BetaIcon from "~icons/tabler/test-pipe";
 
-const features = [
+import { Badge } from "@/components/ui/badge";
+
+const features: Array<{
+  title: string;
+  description: string;
+  icon: Component;
+  /** out to try in the app, but still changing */
+  beta?: boolean;
+}> = [
   {
     title: "Remembers everything you copy",
     description:
@@ -35,10 +44,11 @@ const features = [
     icon: PasteIcon,
   },
   {
-    title: "Shows where links go",
+    title: "Previews any item",
     description:
-      "A link you copy shows its site's icon and name, so you can tell links apart at a glance.",
-    icon: LinkIcon,
+      "Press Space to see an item in full: highlighted code, a link's page, file thumbnails and a color in every format.",
+    icon: PreviewIcon,
+    beta: true,
   },
   {
     title: "Leaves passwords alone",
@@ -132,8 +142,16 @@ const cellClass = (i: number) => {
         class="border-foreground/12 relative flex flex-col border-dashed p-6 transition-colors duration-300 sm:p-8 lg:min-h-60 lg:p-10"
         @mouseenter="show(i)">
         <template v-if="cell">
-          <h3 class="text-xl font-medium tracking-tight lg:text-2xl">
+          <h3
+            class="flex flex-wrap items-center gap-2 text-xl font-medium tracking-tight lg:text-2xl">
             {{ cell.title }}
+            <Badge
+              v-if="cell.beta"
+              variant="outline"
+              class="text-foreground/70 gap-1 text-xs font-normal tracking-normal">
+              <BetaIcon />
+              Beta
+            </Badge>
           </h3>
           <p class="text-muted-foreground mt-3 leading-relaxed">
             {{ cell.description }}

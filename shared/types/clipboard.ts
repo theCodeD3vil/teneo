@@ -37,6 +37,14 @@ export interface ClipboardLink {
   host: string;
 }
 
+/** A link item preview's picture, and where it came from: a page's share
+ *  image ("page", "home") fills the frame, a site icon sits small in it. */
+export interface LinkPreviewImage {
+  /** data: URL of a png */
+  image: string;
+  source: "page" | "home" | "icon";
+}
+
 /** Data returned from the backend to every frontend window through tiny.api. */
 export interface ClipboardHistoryItem {
   id: string;

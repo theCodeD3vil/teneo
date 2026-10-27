@@ -58,23 +58,44 @@ Teneo keeps itself up to date: when it starts and once a day after that, it look
 - **Finds it fast.** Search your whole history, or narrow it down with the **Files**, **Image**, **Color** and **Text** tabs.
 - **Works from the keyboard.** Set your own shortcut to open Teneo from any app, then:
 
-  | Action                                   | Keys      |
-  | ---------------------------------------- | --------- |
-  | Move between items                       | `↑` / `↓` |
-  | Move between tabs                        | `←` / `→` |
-  | Copy the selected item                   | `Enter`   |
-  | Copy one of the first nine               | `⌘ 1–9`   |
-  | Paste the selected item into focused app | `⌘ V`     |
-  | Pin or unpin the selected item           | `P`       |
-  | Delete the selected item                 | `D`       |
-  | Jump to the search field                 | `⌘ /`     |
-  | Leave the search field                   | `Esc`     |
+  | Action                                   | Keys       |
+  | ---------------------------------------- | ---------- |
+  | Move between items                       | `↑` \| `↓` |
+  | Move between tabs                        | `←` \| `→` |
+  | Copy the selected item                   | `Enter`    |
+  | Copy one of the first nine               | `⌘ 1–9`    |
+  | Paste the selected item into focused app | `⌘ V`      |
+  | Pin or unpin the selected item           | `P`        |
+  | Delete the selected item                 | `D`        |
+  | Jump to the search field                 | `⌘ /`      |
+  | Leave the search field                   | `Esc`      |
+  | Preview the selected item                | `Space`    |
+
+  Clicking an item copies it, and double-clicking opens its preview. While a preview is open:
+
+  | Action                        | Keys                    |
+  | ----------------------------- | ----------------------- |
+  | Go back to the list           | `Esc` \| `Space` \| `←` |
+  | Copy the item and close Teneo | `Enter`                 |
 
 - **Pastes for you.** Paste straight into the app you were using, or turn on **Paste on Enter** to paste every time you pick an item. This also happens automatically with the `⌘ + 1-9` hotkeys and `⌘ + V` keys
 - **Shows where links go.** A link you copy shows its site's icon and name, so you can tell links apart at a glance. Teneo gets the icon from the site itself, never from a third-party service, and never opens sign-in, password-reset or local network links. Turn it off in **Settings › Security**.
+- **Previews any item (beta).** Press `Space` or double-click an item to see it in full. Each preview has **Pin** and **Delete** at the top.
+  - **Text** shows in full. Code is highlighted when Teneo recognizes the language, and buttons turn the text into UPPERCASE, lowercase, Capitalized, camelCase, snake_case or kebab-case before you copy it. Text with an API key stays hidden until you click **Reveal**, and has no case buttons.
+  - **Links** show the page's own image, or the site's home page image, or its icon, with the full link and an **Open in browser** button.
+  - **Images and files** show a large preview, with their name, size or dimensions, and buttons to **Open**, **Show in Finder** and **Copy**. Several files show as a grid.
+  - **Colors** show as hex with their CSS name when they have one, in OKLCH, HSL and RGBA with a copy button each, and in five lighter and five darker shades. Click a shade to copy it in any format.
 - **Leaves passwords alone.** Anything copied from a password manager is skipped, and you can add any other app you want Teneo to ignore.
 - **Hides API keys (beta).** Keys from GitHub, OpenAI, Anthropic, Stripe, AWS and other services, private keys, and passwords in URLs show as asterisks (`***`) in history, but paste in full. Teneo finds them on your Mac and never sends them anywhere. Turn it off in **Settings › Security**, where you can also have them saved encrypted (see [Keychain](#keychain-only-if-you-encrypt-api-keys)).
 - **Keeps only what you want.** Choose how long to keep history (1 day to forever), how many items to keep, and how much space it may use. Pinned items always stay, and don't count toward these limits.
+
+### Good to know about previews
+
+- **Previews come from macOS.** Images, PDFs, video and code show their content, as Finder's Quick Look does. Any file type macOS can't draw shows its icon instead.
+- **Protected folders need permission.** A file copied from your Desktop, Documents, Downloads, iCloud Drive or another drive shows only an icon until you let Teneo see that folder (see [Desktop, Documents and Downloads](#desktop-documents-and-downloads)). Open, Show in Finder and Copy still work.
+- **Link images are fetched from the site itself.** Teneo opens the copied page only when it's safe to: never for sign-in, password-reset, unsubscribe or one-time links, nor for addresses on your Mac or local network. **Settings › Security › Show link previews** turns all of this off.
+- **Show in Finder selects the first file** when you copied several. **Open** opens them all.
+- **A click copies after a short pause,** so a double-click can open the preview without copying the item first. Keyboard shortcuts copy right away.
 
 ## Screenshots
 
@@ -106,7 +127,7 @@ Teneo keeps itself up to date: when it starts and once a day after that, it look
 
 Here's what's planned next. More will be added over time.
 
-- **Previews.** Open any item in your history to see it in full, and do more with it than copy and paste.
-- **Landing page.** A proper home for Teneo, where you can explore what it does and download it.
+- **Previews (in progress, beta).** Open any item in your history to see it in full, and do more with it than copy and paste. A first version is out to try; see [Features](#features).
+- **Landing page (done).** A proper home for Teneo, where you can explore what it does and download it.
 - **Sync engine.** Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).
 - **Android app.** Sync your clipboard history between your Android phone and your Mac.

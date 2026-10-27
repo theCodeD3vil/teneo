@@ -31,6 +31,23 @@
         }}</Kbd>
       </SettingsField>
     </SettingsSection>
+
+    <SettingsSection>
+      <template #section-title>In a preview</template>
+
+      <SettingsField
+        v-for="hotkey in previewHotkeyDefinitions"
+        :key="hotkey.id">
+        <template #label>
+          <span class="font-light">
+            {{ hotkey.description }}
+          </span>
+        </template>
+        <Kbd class="bg-foreground/10 dark:bg-foreground/15">{{
+          hotkey.shortcut
+        }}</Kbd>
+      </SettingsField>
+    </SettingsSection>
   </div>
 </template>
 
@@ -39,7 +56,10 @@ import { computed, ref } from "vue";
 
 import { Kbd } from "@/components/ui/kbd";
 import { useSettings } from "@/composables/useSettings";
-import { hotkeyDefinitions } from "@/constants/hotkeys";
+import {
+  hotkeyDefinitions,
+  previewHotkeyDefinitions,
+} from "@/constants/hotkeys";
 
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";

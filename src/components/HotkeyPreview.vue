@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import ArrowLeftIcon from "~icons/tabler/chevron-left";
 import CommandIcon from "~icons/tabler/command";
 import OptionIcon from "~icons/tabler/option";
 
@@ -53,6 +54,7 @@ function getKeyLabel(key: HotkeyPreviewKey): string {
           v-if="key.type === 'modifier' && key.value === 'command'" />
         <OptionIcon
           v-else-if="key.type === 'modifier' && key.value === 'option'" />
+        <ArrowLeftIcon v-else-if="key.type === 'key' && key.value === '←'" />
         <span v-else>{{ getKeyLabel(key) }}</span>
       </Kbd>
     </TransitionGroup>
