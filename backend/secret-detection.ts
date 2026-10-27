@@ -104,9 +104,10 @@ const secretRules: SecretRule[] = [
   },
   {
     label: "Password in URL",
-    // user:password@ in a URL, such as a database connection string
+    // user:password@ in a URL, such as a database connection string. The scheme
+    // is capped: unbounded, a long run of letters and dots takes quadratic time
     keywords: ["://"],
-    pattern: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:(?<secret>[^\s/@]+)@/dg,
+    pattern: /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:(?<secret>[^\s/@]+)@/dg,
   },
 ];
 

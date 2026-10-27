@@ -6,17 +6,23 @@ import { findAppPath, isValidBundleId } from "./find-app";
 const ICON_SIZE = 32;
 // one promise per app, so cards asking for the same icon at once share one lookup
 const iconUrls = new Map<string, Promise<string | null>>();
+// apps that couldn't be found, so a copy from one doesn't search again every time
+// shortcut: lasts until Teneo restarts; an app installed meanwhile is picked up then
+const missingApps = new Set<string>();
 
 /** Save the app's icon once and return the saved png, or null if the app isn't installed. */
 export async function saveAppIcon(
   bundleId: string,
   app: TinyApp,
 ): Promise<string | null> {
-  if (!isValidBundleId(bundleId)) return null;
+  if (!isValidBundleId(bundleId) || missingApps.has(bundleId)) return null;
   const iconPath = `${await dataFolder(app, "icons")}/${bundleId}.png`;
   if (await fileExists(iconPath)) return iconPath;
   const appPath = await findAppPath(bundleId);
-  if (!appPath) return null;
+  if (!appPath) {
+    missingApps.add(bundleId);
+    return null;
+  }
   const thumbnail = await app.thumbnail(appPath, ICON_SIZE);
   await tjs.copyFile(thumbnail.path, iconPath);
   return iconPath;

@@ -18,7 +18,7 @@ async function isSetupComplete(app: TinyApp): Promise<boolean> {
 async function showInMenuBar(app: TinyApp): Promise<void> {
   const { resources } = await appPaths(app);
   app.tray.set({ icon: `${resources}/tray.png` });
-  syncOpenPanelShortcut(app);
+  await syncOpenPanelShortcut(app);
 }
 
 export async function showMenuBarOrSetup(app: TinyApp): Promise<void> {

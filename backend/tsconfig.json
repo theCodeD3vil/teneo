@@ -14,5 +14,8 @@
     // a few of txiki's own .d.ts files don't type-check; our code still does
     "skipLibCheck": true
   },
-  "include": ["./**/*"]
+  // tiny.d.ts is the one copy the page uses too: the backend's `app` api is in it
+  "include": ["./**/*", "../src/tiny.d.ts"],
+  // run by `bun test`, which has its own types
+  "exclude": ["./**/*.test.ts"]
 }

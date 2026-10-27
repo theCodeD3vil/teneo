@@ -84,7 +84,7 @@ export const api: Record<string, TinyApiHandler> = {
     // encryption moves saved keys too, so it only changes through setSecretEncryption
     const { encryptSecrets: _, ...otherChanges } = pickSettings(changes);
     const settings = await updateSettings(otherChanges, app);
-    syncOpenPanelShortcut(app);
+    await syncOpenPanelShortcut(app);
     await trimClipboardHistory(app); // a tighter history limit applies now
     // turning update checks on looks now, not only at the next launch
     if (settings.checkForUpdates && !wasCheckingForUpdates) {
@@ -117,7 +117,7 @@ export function onWindowClosed(windowId: string, app: TinyApp) {
   void handleWindowClosed(windowId, app);
   void quitIfSetupClosedEarly(windowId, app);
   // settings may close mid-recording; bring the shortcut back
-  pauseOpenPanelShortcut(false, app);
+  void pauseOpenPanelShortcut(false, app);
 }
 
 export async function init(app: TinyApp) {
