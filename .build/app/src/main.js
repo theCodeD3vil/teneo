@@ -700,7 +700,8 @@ import { Database } from "tjs:sqlite";
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/file-previews.ts
 var PREVIEW_SIZE = 64;
-async function getFilePreview(path, app) {
+var MAX_PREVIEW_SIZE = 600;
+async function getFilePreview(path, size, app) {
   if (typeof path !== "string" || !path.startsWith("/")) {
     return { url: null, isMissing: true };
   }
@@ -710,12 +711,15 @@ async function getFilePreview(path, app) {
     return { url: null, isMissing: !isAccessDenied(error) };
   }
   try {
-    const thumbnail = await app.thumbnail(path, PREVIEW_SIZE);
+    const thumbnail = await app.thumbnail(path, previewSize(size));
     return { url: await pngDataUrl(thumbnail.path), isMissing: false };
   } catch (error) {
     logError(`filePreview failed for ${path}:`, error);
     return { url: null, isMissing: true };
   }
+}
+function previewSize(size) {
+  return typeof size === "number" && size > 0 ? Math.min(Math.round(size), MAX_PREVIEW_SIZE) : PREVIEW_SIZE;
 }
 function isAccessDenied(error) {
   const code = error?.code;
@@ -844,6 +848,7 @@ function findSecrets(text) {
 
 // ../../../../../../../Users/michaelnji/Projects/desktop-apps/teneo/backend/link-previews.ts
 var PREVIEW_SIZE2 = 64;
+var LARGE_PREVIEW_SIZE = 300;
 var CACHE_LIFETIME = 7 * 24 * 60 * 60 * 1e3;
 var FETCH_TIMEOUT = 8e3;
 var MAX_HTML_BYTES = 256 * 1024;
@@ -922,6 +927,34 @@ async function getLinkPreview(url, app) {
     app,
     () => findPageImage(page.href, app)
   );
+}
+async function getLinkPreviewImage(url, app) {
+  if (!getSettings().showLinkPreviews || typeof url !== "string") return null;
+  const link = findLink(url);
+  if (!link) return null;
+  const page = new URL(link.url);
+  if (isLocalAddress(page)) return null;
+  const isHomePage = page.href === new URL(page.origin).href;
+  if (!isHomePage && canOpenPage(page)) {
+    const image = await cached(
+      `page-large-${await hash(page.href)}`,
+      app,
+      () => findPageImage(page.href, app, LARGE_PREVIEW_SIZE)
+    );
+    if (image) return { image, source: "page" };
+  }
+  const homeImage = await cached(
+    `home-large-${await hash(page.origin)}`,
+    app,
+    () => findPageImage(page.origin, app, LARGE_PREVIEW_SIZE)
+  );
+  if (homeImage) return { image: homeImage, source: "home" };
+  const icon = await cached(
+    `site-${await hash(page.origin)}`,
+    app,
+    () => findSiteIcon(page.origin, app)
+  );
+  return icon ? { image: icon, source: "icon" } : null;
 }
 async function clearLinkPreviews(app) {
   await tjs.remove(await cacheFolder(app)).catch(
@@ -1002,13 +1035,13 @@ async function findSiteIcon(origin, app) {
   }
   return null;
 }
-async function findPageImage(pageUrl, app) {
+async function findPageImage(pageUrl, app, size = PREVIEW_SIZE2) {
   const page = await fetchHtml(
     pageUrl,
     (url) => isLocalAddress(url) || !canOpenPage(url)
   );
   const imageUrl = page && findPageImageUrl(page.html, page.url);
-  return imageUrl ? downloadThumbnail(imageUrl, app) : null;
+  return imageUrl ? downloadThumbnail(imageUrl, app, size) : null;
 }
 function findHeadTags(html) {
   const headEnd = html.search(/<\/head\s*>|<body[\s>]/i);
@@ -1145,7 +1178,7 @@ var imageExtensions = {
   "image/vnd.microsoft.icon": "ico",
   "image/bmp": "bmp"
 };
-async function downloadThumbnail(url, app) {
+async function downloadThumbnail(url, app, size = PREVIEW_SIZE2) {
   const signal = AbortSignal.timeout(FETCH_TIMEOUT);
   const response = await fetchFollowingRedirects(
     url,
@@ -1163,7 +1196,7 @@ async function downloadThumbnail(url, app) {
   await tjs.makeDir(folder, { recursive: true });
   await tjs.writeFile(imagePath, image);
   try {
-    const thumbnail = await app.thumbnail(imagePath, PREVIEW_SIZE2);
+    const thumbnail = await app.thumbnail(imagePath, size);
     const png = await tjs.readFile(thumbnail.path);
     await tjs.remove(thumbnail.path).catch(() => void 0);
     return png;
@@ -2023,9 +2056,10 @@ var api = {
   pinClipboardItem: ({ id, pinned }, app) => setClipboardItemPinned(id, pinned === true, app),
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
   excludedApps: ({ addedBundleIds }, app) => listExcludedApps(addedBundleIds, app),
-  filePreview: ({ path }, app) => getFilePreview(path, app),
+  filePreview: ({ path, size }, app) => getFilePreview(path, size, app),
   requestFolderAccess: () => requestFolderAccess(),
   linkPreview: ({ url }, app) => getLinkPreview(url, app),
+  linkPreviewImage: ({ url }, app) => getLinkPreviewImage(url, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
   finishSetup: (_parameters, app) => finishSetup(app),

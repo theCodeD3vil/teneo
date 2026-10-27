@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted, toValue, type MaybeRefOrGetter } from "vue";
 
 import {
   getHotkeyMatch,
@@ -7,9 +7,12 @@ import {
 } from "@/constants/hotkeys";
 import { blocksHotkeys } from "@/utils/keyboard";
 
-export function useHotkeys(handlers: HotkeyHandlers): void {
+export function useHotkeys(
+  handlers: HotkeyHandlers,
+  enabled: MaybeRefOrGetter<boolean> = true,
+): void {
   function handleKeydown(event: KeyboardEvent): void {
-    if (blocksHotkeys(event.target)) return;
+    if (!toValue(enabled) || blocksHotkeys(event.target)) return;
 
     const hotkey = getHotkeyMatch(event);
     if (!hotkey || !runHandler(hotkey, handlers)) return;

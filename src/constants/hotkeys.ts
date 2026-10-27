@@ -1,4 +1,8 @@
-import { hasTypedText, isEditableKeyboardTarget } from "@/utils/keyboard";
+import {
+  hasTypedText,
+  isEditableKeyboardTarget,
+  isInMenu,
+} from "@/utils/keyboard";
 
 const quickCopyItemNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
@@ -125,6 +129,32 @@ export function getHotkeyMatch(event: KeyboardEvent): HotkeyMatch | null {
   }
 
   return null;
+}
+
+const previewBackKeys: Record<string, string> = {
+  Escape: "Esc",
+  " ": "Space",
+  ArrowLeft: "←",
+};
+
+/** In an item preview, only the keys that go back to the list (ItemPreview). */
+export function getPreviewHotkeyProgress(
+  event: KeyboardEvent,
+): HotkeyProgress | null {
+  const label = previewBackKeys[event.key];
+  if (
+    !label ||
+    event.repeat ||
+    !hasNoModifiers(event) ||
+    isInMenu(event.target)
+  ) {
+    return null;
+  }
+  return {
+    hotkeyName: null,
+    keys: [{ type: "key", value: label }],
+    state: "complete",
+  };
 }
 
 export function getHotkeyProgress(event: KeyboardEvent): HotkeyProgress | null {

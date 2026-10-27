@@ -29,7 +29,11 @@ import {
   startTrimmingClipboardHistory,
   trimClipboardHistory,
 } from "./history-limits";
-import { getLinkPreview, removeStaleLinkPreviews } from "./link-previews";
+import {
+  getLinkPreview,
+  getLinkPreviewImage,
+  removeStaleLinkPreviews,
+} from "./link-previews";
 import { getSettings, loadSettings, updateSettings } from "./settings";
 import {
   finishSetup,
@@ -60,9 +64,10 @@ export const api: Record<string, TinyApiHandler> = {
   chooseAppToExclude: (_parameters, app) => chooseAppToExclude(app),
   excludedApps: ({ addedBundleIds }, app) =>
     listExcludedApps(addedBundleIds, app),
-  filePreview: ({ path }, app) => getFilePreview(path, app),
+  filePreview: ({ path, size }, app) => getFilePreview(path, size, app),
   requestFolderAccess: () => requestFolderAccess(),
   linkPreview: ({ url }, app) => getLinkPreview(url, app),
+  linkPreviewImage: ({ url }, app) => getLinkPreviewImage(url, app),
   hidePanel: (_parameters, app) => hidePanel(app),
   openSettings: (_parameters, app) => openSettingsWindow(app),
   finishSetup: (_parameters, app) => finishSetup(app),

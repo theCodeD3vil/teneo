@@ -22,6 +22,7 @@ import { useSettings } from "@/composables/useSettings";
 import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import { cn } from "@/lib/utils";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
+import { getClipboardData, getImageName } from "@/utils/clipboard-items";
 import { formatFileSize } from "@/utils/file-size";
 import { resetPanel } from "@/utils/panel-reset";
 import { maskSecrets } from "@/utils/secrets";
@@ -37,10 +38,13 @@ const props = defineProps<{
   linkPreviewUrl?: string | null;
 }>();
 
+const emit = defineEmits<{
+  (e: "preview"): void;
+}>();
+
 defineExpose({
   copyAndHideWindow,
   pasteAndHideWindow,
-  previewItem,
   deleteItem,
   pinItem,
 });
@@ -48,6 +52,9 @@ defineExpose({
 const cardElement = ref<HTMLElement | null>(null);
 const isCopying = ref(false);
 let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
+let clickCopyTimeout: ReturnType<typeof setTimeout> | undefined;
+// How long a click waits to see if it's the start of a double-click
+const doubleClickWait = 250;
 
 const copyFeedbackTransition = {
   enterActiveClass: "transition-all duration-200 ease-out",
@@ -124,25 +131,7 @@ const secretLabels = computed(() =>
   ].join(", "),
 );
 
-/** Original filename from a browser copy's `<img src>` html, or null. */
-function imageNameFromHtml(html: string | null): string | null {
-  const src = html?.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
-  if (!src) return null;
-  try {
-    const { protocol, pathname } = new URL(src);
-    if (protocol === "data:") return null;
-    return decodeURIComponent(pathname.split("/").pop() ?? "") || null;
-  } catch {
-    return null; // relative or malformed src
-  }
-}
-
-// Copied image data has no filename: use the browser's <img src> name when there
-// is one, otherwise label the image by the app it came from.
-const sourceAppName = props.itemDetails.sourceApp?.name;
-const imageName =
-  imageNameFromHtml(props.itemDetails.html) ??
-  (sourceAppName ? `Image from ${sourceAppName}` : "Image");
+const imageName = getImageName(props.itemDetails);
 
 function handleQuickCopy(itemNumber: QuickCopyItemNumber): boolean {
   if (
@@ -164,20 +153,18 @@ function pasteAndHideWindow(): boolean {
   return copyItem(true, true);
 }
 
-/** Quick Look the copied file(s) or image; text and colors have no file to show. */
-function previewItem(): boolean {
-  if (isPreviewMissing.value || !previewPath) return false;
-
-  void tiny.macos
-    .quickLook(isFiles ? props.itemDetails.paths : [previewPath])
-    .catch(() => undefined);
-  return true;
+// A click copies once it's clear no second click follows; a double-click
+// previews instead. event.detail counts the clicks in a row.
+function handleClick(event: MouseEvent): void {
+  clearTimeout(clickCopyTimeout);
+  if (event.detail > 1) return;
+  clickCopyTimeout = setTimeout(() => copyItem(), doubleClickWait);
 }
 
 function copyItem(hideWindow = false, paste = false): boolean {
   if (isPreviewMissing.value || isCopying.value) return false;
 
-  const clipboardData = getClipboardDataForQuickCopy(props.itemDetails);
+  const clipboardData = getClipboardData(props.itemDetails);
   if (!clipboardData) return false;
 
   void copyToClipboard(clipboardData, hideWindow, paste).catch(() => undefined);
@@ -230,24 +217,6 @@ async function copyToClipboard(
   }
 }
 
-function getClipboardDataForQuickCopy(
-  item: ClipboardHistoryItem,
-): TinyClipboardWrite | null {
-  switch (item.kind) {
-    case "text":
-      return item.text === null
-        ? null
-        : { text: item.text, html: item.html ?? undefined };
-    case "files":
-      return item.paths.length ? { paths: item.paths } : null;
-    case "image":
-      if (!item.image) return null;
-      return item.pasteAsFile ? { paths: [item.image] } : { image: item.image };
-    case "color":
-      return item.color ? { color: item.color } : null;
-  }
-}
-
 useHotkeys({ copyItemByNumber: handleQuickCopy });
 
 function scrollActiveCardIntoView(): void {
@@ -257,14 +226,18 @@ function scrollActiveCardIntoView(): void {
 }
 
 onMounted(scrollActiveCardIntoView);
-onUnmounted(() => clearTimeout(copyFinishedTimeout));
+onUnmounted(() => {
+  clearTimeout(copyFinishedTimeout);
+  clearTimeout(clickCopyTimeout);
+});
 watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
 </script>
 <template>
   <div
     ref="cardElement"
     :data-active="isActive || undefined"
-    @click="copyItem()"
+    @click="handleClick"
+    @dblclick="emit('preview')"
     :class="
       cn([
         'group/card hover:bg-foreground/5 dark:hover:bg-foreground/6 cursor-pointer rounded-md p-3 transition-[bg]',
@@ -446,7 +419,8 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             size="icon-sm"
             :title="itemDetails.pinned ? 'Unpin' : 'Pin'"
             class="text-foreground/60 hover:text-foreground hover:bg-foreground/10! dark:hover:bg-foreground/15!"
-            @click.stop="pinItem">
+            @click.stop="pinItem"
+            @dblclick.stop>
             <PinOffIcon v-if="itemDetails.pinned" />
             <PinIcon v-else />
           </Button>
@@ -455,7 +429,8 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             size="icon-sm"
             title="Delete"
             class="text-foreground/60 hover:text-destructive hover:bg-destructive/10! dark:hover:bg-destructive/20!"
-            @click.stop="deleteItem">
+            @click.stop="deleteItem"
+            @dblclick.stop>
             <DeleteIcon />
           </Button>
         </div>

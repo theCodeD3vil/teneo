@@ -39,10 +39,13 @@ const props = withDefaults(
   { emptyMessage: "No clipboard history yet." },
 );
 
+const emit = defineEmits<{
+  (e: "preview", item: ClipboardHistoryItem): void;
+}>();
+
 type ClipboardItemCardAction =
   | "copyAndHideWindow"
   | "pasteAndHideWindow"
-  | "previewItem"
   | "deleteItem"
   | "pinItem";
 
@@ -200,8 +203,6 @@ defineExpose({
     runCardAction(itemId, "copyAndHideWindow"),
   pasteActiveItem: (itemId: string | null) =>
     runCardAction(itemId, "pasteAndHideWindow"),
-  previewActiveItem: (itemId: string | null) =>
-    runCardAction(itemId, "previewItem"),
   deleteActiveItem: (itemId: string | null) =>
     runCardAction(itemId, "deleteItem"),
   pinActiveItem: (itemId: string | null) => runCardAction(itemId, "pinItem"),
@@ -257,7 +258,8 @@ defineExpose({
             :link-preview-url="linkPreviewUrl(row.item)"
             :is-active="row.item.id === props.activeItemId"
             :quick-paste-index="row.index + 1"
-            :supports-quick-paste="row.index + 1 < 10" />
+            :supports-quick-paste="row.index + 1 < 10"
+            @preview="emit('preview', row.item)" />
         </template>
       </TransitionGroup>
       <Empty v-else>

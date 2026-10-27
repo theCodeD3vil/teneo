@@ -6,3 +6,9 @@ export const resetPanelEvent = "teneo:reset-panel";
 export function resetPanel(): void {
   window.dispatchEvent(new Event(resetPanelEvent));
 }
+
+/** Hide the panel, e.g. once an opened file or link takes the user elsewhere. */
+export async function hidePanel(): Promise<void> {
+  await tiny.api.call("hidePanel");
+  resetPanel();
+}
