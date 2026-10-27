@@ -1,80 +1,13 @@
-import {
-  anyOf,
-  caseInsensitive,
-  char,
-  charIn,
-  charNotIn,
-  createRegExp,
-  digit,
-  exactly,
-  letter,
-  maybe,
-  oneOrMore,
-} from "magic-regexp";
+const cssNumber = /[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.source;
 
-const hexadecimalDigit = charIn("0123456789abcdef");
-const cssNumber = exactly(
-  maybe(anyOf("+", "-")),
-  anyOf(
-    exactly(digit.times.atLeast(1), maybe(".", digit.times.any())),
-    exactly(".", digit.times.atLeast(1)),
-  ),
-  maybe(anyOf("e", "E"), maybe(anyOf("+", "-")), digit.times.atLeast(1)),
-);
-const cssPercentage = exactly(cssNumber, "%");
-
-const CSS_NUMBER_PATTERN = createRegExp(cssNumber.at.lineStart().at.lineEnd());
-const CSS_PERCENTAGE_PATTERN = createRegExp(
-  cssPercentage.at.lineStart().at.lineEnd(),
-);
-const CSS_HEX_COLOR_PATTERN = createRegExp(
-  exactly(
-    "#",
-    anyOf(
-      hexadecimalDigit.times(3),
-      hexadecimalDigit.times(4),
-      hexadecimalDigit.times(6),
-      hexadecimalDigit.times(8),
-    ),
-  )
-    .at.lineStart()
-    .at.lineEnd(),
-  [caseInsensitive],
-);
-const CSS_COLOR_FUNCTION_PATTERN = createRegExp(
-  exactly(
-    anyOf(
-      "rgb",
-      "rgba",
-      "hsl",
-      "hsla",
-      "hwb",
-      "lab",
-      "lch",
-      "oklab",
-      "oklch",
-      "color",
-      "device-cmyk",
-    ),
-    "(",
-    charNotIn(")").times.atLeast(1),
-    ")",
-  )
-    .at.lineStart()
-    .at.lineEnd(),
-  [caseInsensitive],
-);
-const CSS_COMPOSITE_COLOR_FUNCTION_PATTERN = createRegExp(
-  exactly(anyOf("color-mix", "light-dark"), "(", char.times.atLeast(1), ")")
-    .at.lineStart()
-    .at.lineEnd(),
-  [caseInsensitive],
-);
-const CSS_IDENTIFIER_PATTERN = createRegExp(
-  oneOrMore(letter).at.lineStart().at.lineEnd(),
-  [caseInsensitive],
-);
-
+const CSS_NUMBER_PATTERN = new RegExp(`^${cssNumber}$`);
+const CSS_PERCENTAGE_PATTERN = new RegExp(`^${cssNumber}%$`);
+const CSS_HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const CSS_COLOR_FUNCTION_PATTERN =
+  /^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|device-cmyk)\([^)]+\)$/i;
+const CSS_COMPOSITE_COLOR_FUNCTION_PATTERN =
+  /^(?:color-mix|light-dark)\(.+\)$/i;
+const CSS_IDENTIFIER_PATTERN = /^[a-z]+$/i;
 const CSS_NAMED_COLORS = new Set(
   "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen transparent".split(
     " ",

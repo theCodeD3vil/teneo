@@ -3,8 +3,8 @@ import { showPanelEvent } from "../shared/types/windows";
 const settingsWindowId = "settings";
 export const setupWindowId = "setup";
 export const updateWindowId = "update";
-// Teneo shows a Dock icon while either of these is open
-const dockWindowIds = [settingsWindowId, setupWindowId];
+// Windows hidePanel keeps on screen when it hides the app
+const appWindowIds = [settingsWindowId, setupWindowId];
 
 // Same frame and material as the panel
 const windowChrome: TinyChromeOptions = {
@@ -55,9 +55,9 @@ export async function hidePanel(app: TinyApp): Promise<void> {
   if ((await app.frontmostApp())?.pid !== tjs.pid) return;
 
   const isOnScreen = await Promise.all(
-    dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId)),
+    appWindowIds.map((windowId) => isWindowOnScreen(app, windowId)),
   );
-  const windowIdsToKeep = dockWindowIds.filter((_, index) => isOnScreen[index]);
+  const windowIdsToKeep = appWindowIds.filter((_, index) => isOnScreen[index]);
   // A bare hide() on main hides the whole app: macOS refocuses the previous app
   panel.hide();
   if (!windowIdsToKeep.length) return;
@@ -69,7 +69,9 @@ export async function hidePanel(app: TinyApp): Promise<void> {
   }
 }
 
-// Show the Dock icon (the app icon, icon.png)
+// Show the Dock icon (the app icon, icon.png). Only setup gets one: in Dock mode
+// the panel opens on Teneo's own Space instead of over a full-screen app, and
+// Settings can stay open in the background for a long time.
 function showInDock(app: TinyApp): void {
   app.presence("normal");
   // Dev runs aren't a .app, so the new Dock tile shows a generic icon until
@@ -77,36 +79,18 @@ function showInDock(app: TinyApp): void {
   if (tjs.env.TINYJS_ICON) app.icon(tjs.env.TINYJS_ICON);
 }
 
-/** Returns whether Teneo left the Dock. */
-async function leaveDockUnlessWindowOpen(
-  app: TinyApp,
-  closedWindowId: string,
-): Promise<boolean> {
-  const openWindowIds = await app.windows();
-  const isOtherWindowOpen = dockWindowIds.some(
-    (windowId) =>
-      windowId !== closedWindowId && openWindowIds.includes(windowId),
-  );
-  if (isOtherWindowOpen) return false;
-  app.presence("menubar");
-  return true;
-}
-
 export async function openSettingsWindow(app: TinyApp): Promise<void> {
   app.window("main").hide({ app: false });
-  showInDock(app);
-
-  if (await isWindowOpen(app, settingsWindowId)) {
-    app.window(settingsWindowId).show();
-    return;
+  if (!(await isWindowOpen(app, settingsWindowId))) {
+    app.win.open(settingsWindowId, {
+      page: "settings.html",
+      title: "Settings",
+      size: "820x640",
+      chrome: windowChrome,
+    });
   }
-
-  app.win.open(settingsWindowId, {
-    page: "settings.html",
-    title: "Settings",
-    size: "820x640",
-    chrome: windowChrome,
-  });
+  // Without a Dock icon Teneo doesn't come to the front by itself
+  app.window(settingsWindowId).show();
 }
 
 // Opens at first launch, and again from the banner in Settings
@@ -154,7 +138,7 @@ export async function openUpdateWindow(
 export async function closeUpdateWindow(app: TinyApp): Promise<void> {
   app.window(updateWindowId).close();
   const isOnScreen = await Promise.all(
-    dockWindowIds.map((windowId) => isWindowOnScreen(app, windowId)),
+    appWindowIds.map((windowId) => isWindowOnScreen(app, windowId)),
   );
   // Focus moves to Settings or setup by itself; otherwise hand it back to
   // the app the user was in. A bare hide() on main hides the whole app.
@@ -167,9 +151,8 @@ export async function closeSetupWindow(app: TinyApp): Promise<void> {
   app.window(setupWindowId).close();
   // Leaving the Dock makes macOS hand focus to another app a moment later. A
   // panel shown before that loses focus and hides itself, so wait it out.
-  if (await leaveDockUnlessWindowOpen(app, setupWindowId)) {
-    await waitForFocusToLeave(app, teneoProcessId);
-  }
+  app.presence("menubar");
+  await waitForFocusToLeave(app, teneoProcessId);
 }
 
 type TrayRect = Awaited<ReturnType<TinyApp["tray"]["position"]>>;
@@ -213,7 +196,14 @@ export async function handleWindowClosed(
   windowId: string,
   app: TinyApp,
 ): Promise<void> {
-  if (dockWindowIds.includes(windowId)) {
-    await leaveDockUnlessWindowOpen(app, windowId);
-  }
+  if (windowId === setupWindowId) app.presence("menubar");
+  if (windowId !== settingsWindowId) return;
+
+  // Settings has no Dock icon to leave, so nothing hands focus back by itself
+  const isOnScreen = await Promise.all(
+    [...appWindowIds, updateWindowId].map((id) => isWindowOnScreen(app, id)),
+  );
+  if (isOnScreen.includes(true)) return;
+  // A bare hide() on main hides the whole app: macOS refocuses the previous app
+  if ((await app.frontmostApp())?.pid === tjs.pid) app.window("main").hide();
 }

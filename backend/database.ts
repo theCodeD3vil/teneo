@@ -223,6 +223,10 @@ export async function setClipboardItemPinned(
   notifyClipboardHistoryChanged(app);
 }
 
+// A saved image never changes, so it is measured once instead of on every
+// copy that applies the storage limit
+let imageSizes = new Map<string, number>();
+
 /** Bytes each history item takes, newest first: its text, color or file
  *  list, plus its saved image. The storage limit counts the unpinned ones. */
 export async function listClipboardItemSizes(
@@ -241,17 +245,25 @@ export async function listClipboardItemSizes(
     `,
   );
   const { data: dataDirectory } = await appPaths(app);
-  return Promise.all(
+  const measuredImages = new Map<string, number>();
+  const sizes = await Promise.all(
     rows.map(async (row) => {
       const imagePath =
         row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
       // a missing image file takes no space
-      const imageBytes = imagePath
-        ? await tjs.stat(imagePath).then(
+      let imageBytes = 0;
+      if (imagePath) {
+        const bytes =
+          imageSizes.get(imagePath) ??
+          (await tjs.stat(imagePath).then(
             (stat: { size: number }) => stat.size,
-            () => 0,
-          )
-        : 0;
+            () => undefined,
+          ));
+        if (bytes !== undefined) {
+          measuredImages.set(imagePath, bytes);
+          imageBytes = bytes;
+        }
+      }
       return {
         kind: row.kind,
         bytes: row.rowBytes + imageBytes,
@@ -259,6 +271,8 @@ export async function listClipboardItemSizes(
       };
     }),
   );
+  imageSizes = measuredImages; // images no longer in history drop out
+  return sizes;
 }
 
 /** How many images, and how many copied files, history holds. */
