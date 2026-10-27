@@ -38,12 +38,12 @@ export const hotkeyDefinitions = {
   },
   moveActiveTab: {
     id: "move-active-tab",
-    shortcut: "← / →",
+    shortcut: "← | →",
     description: "Move between tabs",
   },
   moveActiveItem: {
     id: "move-active-item",
-    shortcut: "↑ / ↓",
+    shortcut: "↑ | ↓",
     description: "Move between items",
   },
   copyActiveItem: {
@@ -52,6 +52,20 @@ export const hotkeyDefinitions = {
     description: "Copy the active item",
   },
 } as const;
+
+// Listed only: ItemPreview and usePreviewCopy handle these themselves
+export const previewHotkeyDefinitions = [
+  {
+    id: "leave-preview",
+    shortcut: "Esc | Space | ←",
+    description: "Go back to the list",
+  },
+  {
+    id: "copy-previewed-item",
+    shortcut: "Enter",
+    description: "Copy the item and close Teneo",
+  },
+] as const;
 
 // D and P are left out of hotkeyDefinitions so Settings doesn't list them; the README does
 export type HotkeyMatch =

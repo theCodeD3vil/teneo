@@ -1,43 +1,62 @@
 <script setup lang="ts">
 import CheckIcon from "~icons/tabler/circle-check-filled";
+import InProgressIcon from "~icons/tabler/circle-half-2";
+import BetaIcon from "~icons/tabler/test-pipe";
 
-// What's built first, then what's planned (the README's roadmap).
-const items = [
+import { Badge } from "@/components/ui/badge";
+
+type Status = "done" | "in-progress" | "planned";
+
+const statusLabels: Record<Status, string> = {
+  done: "Complete",
+  "in-progress": "In progress",
+  planned: "Planned",
+};
+
+// What's built, what's being built, then what's planned (the README's roadmap).
+const items: Array<{
+  title: string;
+  description: string;
+  status: Status;
+  /** out to try in the app, but still changing */
+  beta?: boolean;
+}> = [
   {
     title: "Clipboard history",
     description:
       "Text, images, files and colors are saved from the menu bar as you copy, each with the app it came from and when. Pin the ones you want to keep.",
-    done: true,
+    status: "done",
   },
   {
     title: "Find and paste fast",
     description:
       "Search your history, narrow it by type, and open Teneo from any app with your own shortcut. Paste straight into the app you were using.",
-    done: true,
+    status: "done",
   },
   {
     title: "Private by default",
     description:
       "Password managers are skipped and API keys are hidden in history, with optional encryption for those keys.",
-    done: true,
+    status: "done",
   },
   {
     title: "Previews",
     description:
       "Open any item in your history to see it in full, and do more with it than copy and paste.",
-    done: false,
+    status: "in-progress",
+    beta: true,
   },
   {
     title: "Sync engine",
     description:
       "Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).",
-    done: false,
+    status: "planned",
   },
   {
     title: "Android app",
     description:
       "Sync your clipboard history between your Android phone and your Mac.",
-    done: false,
+    status: "planned",
   },
 ];
 </script>
@@ -63,7 +82,11 @@ const items = [
         :key="item.title"
         class="relative flex gap-5 pb-12 last:pb-0 sm:gap-6">
         <CheckIcon
-          v-if="item.done"
+          v-if="item.status === 'done'"
+          aria-hidden="true"
+          class="text-primary size-7 shrink-0 rounded-full bg-white" />
+        <InProgressIcon
+          v-else-if="item.status === 'in-progress'"
           aria-hidden="true"
           class="text-primary size-7 shrink-0 rounded-full bg-white" />
         <span
@@ -74,7 +97,7 @@ const items = [
           v-if="i < items.length - 1"
           aria-hidden="true"
           :class="
-            items[i + 1]?.done
+            items[i + 1]?.status === 'done'
               ? 'border-primary'
               : 'border-foreground/25 border-dashed'
           "
@@ -82,12 +105,22 @@ const items = [
 
         <div>
           <p
-            :class="item.done ? 'text-primary' : 'text-foreground/70'"
+            :class="
+              item.status === 'planned' ? 'text-foreground/70' : 'text-primary'
+            "
             class="text-sm leading-7 font-medium">
-            {{ item.done ? "Complete" : "Planned" }}
+            {{ statusLabels[item.status] }}
           </p>
-          <h3 class="text-xl font-medium tracking-tight lg:text-2xl">
+          <h3
+            class="flex items-center gap-2 text-xl font-medium tracking-tight lg:text-2xl">
             {{ item.title }}
+            <Badge
+              v-if="item.beta"
+              variant="outline"
+              class="text-foreground/70 gap-1 text-xs font-normal tracking-normal">
+              <BetaIcon />
+              Beta
+            </Badge>
           </h3>
           <p class="text-foreground/70 mt-2 leading-relaxed">
             {{ item.description }}
