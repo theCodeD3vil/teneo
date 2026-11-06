@@ -67,6 +67,31 @@ export function startCheckingForUpdates(app: TinyApp): void {
   setInterval(checkIfEnabled, oneDayMs);
 }
 
+// The archive is told by the name of what came back, not by the URL asked
+// for: update.install() follows redirects one hop at a time, and GitHub
+// answers the .zip URL with an empty 302 to a signed blob URL (a bare path
+// plus a query string) that carries the bytes. Only that final, successful
+// hop is worth counting.
+export function isUpdateArchive(url: string, response: Response): boolean {
+  if (!response.ok || !response.body) return false;
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const named = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(disposition)?.[1];
+  let name = named ?? "";
+  if (!name) {
+    try {
+      name = new URL(url).pathname.split("/").pop() ?? "";
+    } catch {
+      name = url;
+    }
+  }
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    // leave it as sent
+  }
+  return /\.(zip|tar\.gz|tgz)$/i.test(name);
+}
+
 /** Install the available update and relaunch into it. */
 export async function installUpdate(app: TinyApp): Promise<void> {
   // update.install() reports no progress, but it downloads through the
@@ -74,10 +99,13 @@ export async function installUpdate(app: TinyApp): Promise<void> {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const response = await originalFetch(input, init);
-    // It fetches the manifest first; the update itself is the .zip
-    if (String(input).endsWith(".zip") && response.body) {
-      trackDownload(response, app);
-    }
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (isUpdateArchive(url, response)) trackDownload(response, app);
     return response;
   };
   try {
