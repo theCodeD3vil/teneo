@@ -1,20 +1,18 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
-import TickIcon from "~icons/tabler/check";
 import ClipboardIcon from "~icons/tabler/clipboard";
 import CommandIcon from "~icons/tabler/command";
 import FileIcon from "~icons/tabler/file";
-import FileVerifiedIcon from "~icons/tabler/file-check";
 import LinkIcon from "~icons/tabler/link";
 import ImageIcon from "~icons/tabler/photo";
-import ImageDoneIcon from "~icons/tabler/photo-check";
 import PinIcon from "~icons/tabler/pin";
 import PinOffIcon from "~icons/tabler/pinned-off";
 import DeleteIcon from "~icons/tabler/trash";
 
 import BetaBadge from "@/components/BetaBadge.vue";
 import Button from "@/components/ui/button/Button.vue";
+import { showCopiedNotice } from "@/composables/useCopiedNotice";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { getPreviewPath } from "@/composables/useItemPreviews";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
@@ -55,13 +53,6 @@ let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
 let clickCopyTimeout: ReturnType<typeof setTimeout> | undefined;
 // How long a click waits to see if it's the start of a double-click
 const doubleClickWait = 250;
-
-const copyFeedbackTransition = {
-  enterActiveClass: "transition-all duration-200 ease-out",
-  enterFromClass: "translate-y-1 opacity-0 scale-95",
-  leaveActiveClass: "transition-all duration-150 ease-in",
-  leaveToClass: "-translate-y-1 opacity-0 scale-95",
-};
 
 function getClipboardThemeClasses() {
   switch (props.itemDetails.kind) {
@@ -221,6 +212,7 @@ async function copyToClipboard(
 
   try {
     await tiny.clipboard.write(clipboardData);
+    showCopiedNotice();
     if (hideWindow) await tiny.api.call("hidePanel");
     // after the hide, focus is back in the app the user was typing in
     if (paste) await pasteIntoFrontmostApp();
@@ -262,7 +254,7 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
     ">
     <div class="flex items-start gap-4">
       <!-- media -->
-      <div v-if="mediaUrl" class="relative size-9 shrink-0">
+      <div v-if="mediaUrl" class="size-9 shrink-0">
         <!-- a link's icon fills the square like an app icon -->
         <img
           :src="mediaUrl"
@@ -273,20 +265,6 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
               isFiles ? 'object-contain' : 'object-cover',
             ])
           " />
-        <div
-          v-if="isCopying"
-          class="pointer-events-none absolute inset-0 rounded-md bg-gradient-to-br from-black/65 via-black/40 to-black/20" />
-        <Transition v-bind="copyFeedbackTransition">
-          <ImageDoneIcon
-            v-if="isCopying && isImage"
-            class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
-          <FileVerifiedIcon
-            v-else-if="isCopying && isFiles"
-            class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
-          <TickIcon
-            v-else-if="isCopying"
-            class="text-success pointer-events-none absolute inset-0 m-auto size-5" />
-        </Transition>
       </div>
       <div
         v-else
@@ -296,16 +274,13 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             ? 'Allow Teneo to see this folder in System Settings › Privacy & Security › Files and Folders to preview it'
             : undefined
         ">
-        <Transition v-bind="copyFeedbackTransition" mode="out-in">
-          <TickIcon v-if="isCopying" class="text-success size-5" />
-          <LinkIcon v-else-if="link" class="size-5" />
-          <TextAlignLeftIcon
-            v-else-if="itemDetails.kind === 'text'"
-            class="size-5" />
-          <FileIcon v-else-if="itemDetails.kind === 'files'" class="size-5" />
-          <ImageIcon v-else-if="itemDetails.kind === 'image'" class="size-5" />
-          <ClipboardIcon v-else class="size-5" />
-        </Transition>
+        <LinkIcon v-if="link" class="size-5" />
+        <TextAlignLeftIcon
+          v-else-if="itemDetails.kind === 'text'"
+          class="size-5" />
+        <FileIcon v-else-if="itemDetails.kind === 'files'" class="size-5" />
+        <ImageIcon v-else-if="itemDetails.kind === 'image'" class="size-5" />
+        <ClipboardIcon v-else class="size-5" />
       </div>
       <!-- main content -->
       <div class="min-w-0 flex-1 space-y-2">

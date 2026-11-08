@@ -1,6 +1,7 @@
 import { onKeyStroke } from "@vueuse/core";
 import { computed, onUnmounted, ref } from "vue";
 
+import { showCopiedNotice } from "@/composables/useCopiedNotice";
 import { isInMenu } from "@/utils/keyboard";
 import { hidePanel } from "@/utils/panel-reset";
 
@@ -22,6 +23,7 @@ export function usePreviewCopy(getData: () => TinyClipboardWrite | null) {
     if (!data) return;
 
     await tiny.clipboard.write(data);
+    showCopiedNotice();
     if (hideWindow) return hidePanel();
 
     copiedKey.value = key;

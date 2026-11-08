@@ -1,8 +1,10 @@
 <script lang="ts" setup>
+import TickIcon from "~icons/tabler/check";
 import CommandIcon from "~icons/tabler/command";
 import ShutDownIcon from "~icons/tabler/power";
 import Settings from "~icons/tabler/settings";
 
+import { useCopiedNotice } from "@/composables/useCopiedNotice";
 import { useHotkeyPreview } from "@/composables/useHotkeyPreview";
 
 import HotkeyPreview from "./HotkeyPreview.vue";
@@ -14,6 +16,7 @@ defineProps<{
 }>();
 
 const { hotkeyProgress } = useHotkeyPreview();
+const { isCopiedNoticeShown } = useCopiedNotice();
 
 function openSettings(): void {
   void tiny.api.call("openSettings");
@@ -38,7 +41,13 @@ function quitApp(): void {
       enter-from-class="translate-y-1 opacity-0 scale-95"
       leave-active-class="transition-all duration-150 ease-in"
       leave-to-class="-translate-y-1 opacity-0 scale-95">
-      <HotkeyPreview v-if="hotkeyProgress" :progress="hotkeyProgress" />
+      <Kbd
+        v-if="isCopiedNoticeShown"
+        class="bg-success/15! text-success text-xs">
+        <TickIcon />
+        Copied
+      </Kbd>
+      <HotkeyPreview v-else-if="hotkeyProgress" :progress="hotkeyProgress" />
       <div v-else class="text-foreground/70 flex items-center gap-x-3 text-xs">
         <!-- <div class="flex items-center gap-1">
           <Kbd class="bg-foreground/10 dark:bg-foreground/15"> <SpaceIcon /> Space </Kbd>
