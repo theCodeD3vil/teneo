@@ -25,7 +25,7 @@ import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { getClipboardData, getImageName } from "@/utils/clipboard-items";
 import { formatFileSize } from "@/utils/file-size";
 import { resetPanel } from "@/utils/panel-reset";
-import { maskSecrets } from "@/utils/secrets";
+import { maskSecrets, type TextPart } from "@/utils/secrets";
 
 const props = defineProps<{
   itemDetails: ClipboardHistoryItem;
@@ -119,15 +119,31 @@ const dateCopied = useRelativeTimeAgo(props.itemDetails.dateCopied);
 
 // Secrets in the text show as asterisks unless masking is off in Settings; copying
 // and pasting always give the real text
-const textParts = computed(() => {
+const maskedTextParts = computed(() => {
   const text = props.itemDetails.text ?? "";
   return settings.value.maskSecrets
     ? maskSecrets(text, props.itemDetails.secrets)
     : [{ text }];
 });
+// The card shows two lines, but a copy can be megabytes of text. Kept whole
+// in the page, it made every click in the panel take a second or more:
+// WebKit's Look Up hit test walks the text one character at a time.
+const cardTextLimit = 500;
+const textParts = computed(() => {
+  const parts: TextPart[] = [];
+  let room = cardTextLimit;
+  for (const part of maskedTextParts.value) {
+    if (room <= 0) break;
+    parts.push({ ...part, text: part.text.slice(0, room) });
+    room -= part.text.length;
+  }
+  return parts;
+});
 const secretLabels = computed(() =>
   [
-    ...new Set(textParts.value.map((part) => part.secretLabel).filter(Boolean)),
+    ...new Set(
+      maskedTextParts.value.map((part) => part.secretLabel).filter(Boolean),
+    ),
   ].join(", "),
 );
 
