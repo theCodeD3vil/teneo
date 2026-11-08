@@ -49,6 +49,8 @@ defineExpose({
 
 const cardElement = ref<HTMLElement | null>(null);
 const isCopying = ref(false);
+// Bumped on each copy so the sweep across the card plays again
+const shimmerKey = ref(0);
 let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
 let clickCopyTimeout: ReturnType<typeof setTimeout> | undefined;
 // How long a click waits to see if it's the start of a double-click
@@ -212,6 +214,7 @@ async function copyToClipboard(
 
   try {
     await tiny.clipboard.write(clipboardData);
+    shimmerKey.value += 1;
     showCopiedNotice();
     if (hideWindow) await tiny.api.call("hidePanel");
     // after the hide, focus is back in the app the user was typing in
@@ -248,7 +251,7 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
     @dblclick="emit('preview')"
     :class="
       cn([
-        'group/card hover:bg-foreground/5 dark:hover:bg-foreground/6 cursor-pointer rounded-md p-3 transition-[bg]',
+        'group/card hover:bg-foreground/5 dark:hover:bg-foreground/6 relative cursor-pointer rounded-md p-3 transition-[bg]',
         props.isActive && 'bg-foreground/5 dark:bg-foreground/6',
       ])
     ">
@@ -426,6 +429,15 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
           </Button>
         </div>
       </div>
+    </div>
+    <!-- a light sweeps across the card just copied, so it's clear which one -->
+    <div
+      v-if="shimmerKey"
+      :key="shimmerKey"
+      class="pointer-events-none absolute inset-0 overflow-hidden rounded-md motion-reduce:hidden">
+      <div
+        class="animate-copy-shimmer via-success/20 absolute inset-y-0 left-0 w-1/2 -skew-x-12 bg-gradient-to-r from-transparent to-transparent"
+        @animationend="shimmerKey = 0" />
     </div>
   </div>
 </template>
