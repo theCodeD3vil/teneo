@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { showWindowWhenPainted } from "@/lib/window-ready";
 import { formatFileSize } from "@/utils/file-size";
 
 import {
@@ -13,9 +14,11 @@ import {
 import ReleaseNotes from "./ReleaseNotes.vue";
 
 const update = ref<TinyUpdateInfo | null>(null);
-void tiny.api
+const updateLoaded = tiny.api
   .call("availableUpdate")
   .then((info: TinyUpdateInfo | null) => (update.value = info));
+// The window opened hidden; surface it with the update already on screen
+void showWindowWhenPainted(updateLoaded);
 
 const isInstalling = ref(false);
 const didInstallFail = ref(false);

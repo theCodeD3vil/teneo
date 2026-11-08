@@ -438,6 +438,9 @@ declare interface TinyOpenWindowOptions {
    *  Windows/Linux gets no taskbar entry. Open-time only — it can't be set
    *  later. macOS difference: the window also MOVES with its parent. */
   parent?: true | string;
+  /** false: create the window hidden; the page (tiny.win.show()) or the
+   *  backend decides when it appears. Nothing shows it for you. Default true. */
+  show?: boolean;
 }
 
 declare interface TinyClipboardData {
