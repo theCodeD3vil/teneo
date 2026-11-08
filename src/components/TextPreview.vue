@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import { useVirtualizer } from "@tanstack/vue-virtual";
 import { computedAsync } from "@vueuse/core";
-import { type Component, computed, ref } from "vue";
+import {
+  type Component,
+  type ComponentPublicInstance,
+  computed,
+  onMounted,
+  ref,
+} from "vue";
 import ResetIcon from "~icons/tabler/arrow-back-up";
 import TickIcon from "~icons/tabler/check";
 import CopyIcon from "~icons/tabler/copy";
@@ -70,6 +77,62 @@ const shownText = computed(() => {
   }
   return textCase.value ? convertCase(text.value, textCase.value) : text.value;
 });
+
+// A copy can be megabytes of text. WebKit lays out and hit-tests all of the
+// text in the page, which made every click slow, so the preview shows at most
+// this much, and past longText renders only the rows on screen. Copying still
+// takes all of it.
+const previewTextLimit = 200_000;
+const longText = 20_000;
+// Long lines are cut into rows this long, at a space where there is one
+const rowLength = 1_000;
+
+const isCapped = computed(() => shownText.value.length > previewTextLimit);
+const previewText = computed(() => shownText.value.slice(0, previewTextLimit));
+const isLong = computed(() => previewText.value.length > longText);
+
+function splitIntoRows(text: string): string[] {
+  const rows: string[] = [];
+  for (const line of text.split("\n")) {
+    let rest = line;
+    while (rest.length > rowLength) {
+      const space = rest.lastIndexOf(" ", rowLength);
+      const end = space > rowLength / 2 ? space + 1 : rowLength;
+      rows.push(rest.slice(0, end));
+      rest = rest.slice(end);
+    }
+    rows.push(rest);
+  }
+  return rows;
+}
+
+const rows = computed(() =>
+  isLong.value ? splitIntoRows(previewText.value) : [],
+);
+
+const scrollArea = ref<ComponentPublicInstance | null>(null);
+const viewport = ref<HTMLElement | null>(null);
+onMounted(() => {
+  viewport.value =
+    scrollArea.value?.$el.querySelector("[data-slot=scroll-area-viewport]") ??
+    null;
+});
+
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: rows.value.length,
+    getScrollElement: () => viewport.value,
+    estimateSize: () => 23,
+    overscan: 10,
+    paddingStart: 12,
+    paddingEnd: 12,
+  })),
+);
+const virtualRows = computed(() => virtualizer.value.getVirtualItems());
+
+function measureRow(row: Element | ComponentPublicInstance | null): void {
+  if (row instanceof Element) virtualizer.value.measureElement(row);
+}
 
 // Detected once from the copied text; a case change keeps the language
 const language = computedAsync(() => detectCodeLanguage(text.value), null);
@@ -157,17 +220,38 @@ const { isCopied, copy } = usePreviewCopy(() =>
         </Tooltip>
       </div>
 
-      <ScrollArea class="bg-foreground/5 min-h-0 flex-1 rounded-md">
+      <ScrollArea
+        ref="scrollArea"
+        class="bg-foreground/5 min-h-0 flex-1 rounded-md">
+        <!-- only the rows on screen are in the page -->
+        <div
+          v-if="isLong"
+          class="relative w-full"
+          :style="{ height: `${virtualizer.getTotalSize()}px` }">
+          <div
+            v-for="row in virtualRows"
+            :key="row.key as number"
+            :ref="measureRow"
+            :data-index="row.index"
+            class="absolute inset-x-3 top-0 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap"
+            :style="{ transform: `translateY(${row.start}px)` }"
+            v-text="rows[row.index] || ' '" />
+        </div>
         <!-- hljs escapes the text, so its output is safe to render as HTML -->
         <pre
-          v-if="highlightedHtml"
+          v-else-if="highlightedHtml"
           class="hljs p-3 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap"
           v-html="highlightedHtml" />
         <pre
           v-else
           class="p-3 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap"
-          >{{ shownText }}</pre>
+          >{{ previewText }}</pre>
       </ScrollArea>
+      <p v-if="isCapped" class="text-foreground/50 text-xs">
+        Showing the first {{ previewTextLimit.toLocaleString() }} of
+        {{ shownText.length.toLocaleString() }} characters. Copy takes all of
+        it.
+      </p>
     </div>
   </TooltipProvider>
 </template>

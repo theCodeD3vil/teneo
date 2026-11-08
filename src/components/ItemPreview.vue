@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { onKeyStroke } from "@vueuse/core";
 import { defineAsyncComponent } from "vue";
+import TickIcon from "~icons/tabler/check";
 import BackIcon from "~icons/tabler/chevron-left";
 import PinIcon from "~icons/tabler/pin";
 import PinOffIcon from "~icons/tabler/pinned-off";
 import DeleteIcon from "~icons/tabler/trash";
 
+import { useCopiedNotice } from "@/composables/useCopiedNotice";
 import { useHotkeyPreview } from "@/composables/useHotkeyPreview";
 import { getPreviewHotkeyProgress } from "@/constants/hotkeys";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
@@ -44,6 +46,7 @@ onKeyStroke(
 
 // The pressed back key flashes here while the preview slides out
 const { hotkeyProgress } = useHotkeyPreview(getPreviewHotkeyProgress);
+const { isCopiedNoticeShown } = useCopiedNotice();
 
 function togglePin(): void {
   void tiny.api
@@ -109,7 +112,13 @@ function deleteItem(): void {
         enter-from-class="translate-y-1 opacity-0 scale-95"
         leave-active-class="transition-all duration-150 ease-in"
         leave-to-class="-translate-y-1 opacity-0 scale-95">
-        <HotkeyPreview v-if="hotkeyProgress" :progress="hotkeyProgress" />
+        <Kbd
+          v-if="isCopiedNoticeShown"
+          class="bg-success/15! text-success text-xs">
+          <TickIcon />
+          Copied
+        </Kbd>
+        <HotkeyPreview v-else-if="hotkeyProgress" :progress="hotkeyProgress" />
         <div v-else class="text-foreground/70 flex items-center gap-1 text-xs">
           <Kbd class="bg-foreground/10 dark:bg-foreground/15">Esc</Kbd>
           <div class="divide"></div>

@@ -1,20 +1,18 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
-import TickIcon from "~icons/tabler/check";
 import ClipboardIcon from "~icons/tabler/clipboard";
 import CommandIcon from "~icons/tabler/command";
 import FileIcon from "~icons/tabler/file";
-import FileVerifiedIcon from "~icons/tabler/file-check";
 import LinkIcon from "~icons/tabler/link";
 import ImageIcon from "~icons/tabler/photo";
-import ImageDoneIcon from "~icons/tabler/photo-check";
 import PinIcon from "~icons/tabler/pin";
 import PinOffIcon from "~icons/tabler/pinned-off";
 import DeleteIcon from "~icons/tabler/trash";
 
 import BetaBadge from "@/components/BetaBadge.vue";
 import Button from "@/components/ui/button/Button.vue";
+import { showCopiedNotice } from "@/composables/useCopiedNotice";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { getPreviewPath } from "@/composables/useItemPreviews";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
@@ -25,7 +23,7 @@ import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { getClipboardData, getImageName } from "@/utils/clipboard-items";
 import { formatFileSize } from "@/utils/file-size";
 import { resetPanel } from "@/utils/panel-reset";
-import { maskSecrets } from "@/utils/secrets";
+import { maskSecrets, type TextPart } from "@/utils/secrets";
 
 const props = defineProps<{
   itemDetails: ClipboardHistoryItem;
@@ -51,17 +49,12 @@ defineExpose({
 
 const cardElement = ref<HTMLElement | null>(null);
 const isCopying = ref(false);
+// Bumped on each copy so the sweep across the card plays again
+const shimmerKey = ref(0);
 let copyFinishedTimeout: ReturnType<typeof setTimeout> | undefined;
 let clickCopyTimeout: ReturnType<typeof setTimeout> | undefined;
 // How long a click waits to see if it's the start of a double-click
 const doubleClickWait = 250;
-
-const copyFeedbackTransition = {
-  enterActiveClass: "transition-all duration-200 ease-out",
-  enterFromClass: "translate-y-1 opacity-0 scale-95",
-  leaveActiveClass: "transition-all duration-150 ease-in",
-  leaveToClass: "-translate-y-1 opacity-0 scale-95",
-};
 
 function getClipboardThemeClasses() {
   switch (props.itemDetails.kind) {
@@ -119,15 +112,31 @@ const dateCopied = useRelativeTimeAgo(props.itemDetails.dateCopied);
 
 // Secrets in the text show as asterisks unless masking is off in Settings; copying
 // and pasting always give the real text
-const textParts = computed(() => {
+const maskedTextParts = computed(() => {
   const text = props.itemDetails.text ?? "";
   return settings.value.maskSecrets
     ? maskSecrets(text, props.itemDetails.secrets)
     : [{ text }];
 });
+// The card shows two lines, but a copy can be megabytes of text. Kept whole
+// in the page, it made every click in the panel take a second or more:
+// WebKit's Look Up hit test walks the text one character at a time.
+const cardTextLimit = 500;
+const textParts = computed(() => {
+  const parts: TextPart[] = [];
+  let room = cardTextLimit;
+  for (const part of maskedTextParts.value) {
+    if (room <= 0) break;
+    parts.push({ ...part, text: part.text.slice(0, room) });
+    room -= part.text.length;
+  }
+  return parts;
+});
 const secretLabels = computed(() =>
   [
-    ...new Set(textParts.value.map((part) => part.secretLabel).filter(Boolean)),
+    ...new Set(
+      maskedTextParts.value.map((part) => part.secretLabel).filter(Boolean),
+    ),
   ].join(", "),
 );
 
@@ -205,6 +214,8 @@ async function copyToClipboard(
 
   try {
     await tiny.clipboard.write(clipboardData);
+    shimmerKey.value += 1;
+    showCopiedNotice();
     if (hideWindow) await tiny.api.call("hidePanel");
     // after the hide, focus is back in the app the user was typing in
     if (paste) await pasteIntoFrontmostApp();
@@ -240,13 +251,13 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
     @dblclick="emit('preview')"
     :class="
       cn([
-        'group/card hover:bg-foreground/5 dark:hover:bg-foreground/6 cursor-pointer rounded-md p-3 transition-[bg]',
+        'group/card hover:bg-foreground/5 dark:hover:bg-foreground/6 relative cursor-pointer rounded-md p-3 transition-[bg]',
         props.isActive && 'bg-foreground/5 dark:bg-foreground/6',
       ])
     ">
     <div class="flex items-start gap-4">
       <!-- media -->
-      <div v-if="mediaUrl" class="relative size-9 shrink-0">
+      <div v-if="mediaUrl" class="size-9 shrink-0">
         <!-- a link's icon fills the square like an app icon -->
         <img
           :src="mediaUrl"
@@ -257,20 +268,6 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
               isFiles ? 'object-contain' : 'object-cover',
             ])
           " />
-        <div
-          v-if="isCopying"
-          class="pointer-events-none absolute inset-0 rounded-md bg-gradient-to-br from-black/65 via-black/40 to-black/20" />
-        <Transition v-bind="copyFeedbackTransition">
-          <ImageDoneIcon
-            v-if="isCopying && isImage"
-            class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
-          <FileVerifiedIcon
-            v-else-if="isCopying && isFiles"
-            class="text-foreground pointer-events-none absolute inset-0 m-auto size-5" />
-          <TickIcon
-            v-else-if="isCopying"
-            class="text-success pointer-events-none absolute inset-0 m-auto size-5" />
-        </Transition>
       </div>
       <div
         v-else
@@ -280,16 +277,13 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
             ? 'Allow Teneo to see this folder in System Settings › Privacy & Security › Files and Folders to preview it'
             : undefined
         ">
-        <Transition v-bind="copyFeedbackTransition" mode="out-in">
-          <TickIcon v-if="isCopying" class="text-success size-5" />
-          <LinkIcon v-else-if="link" class="size-5" />
-          <TextAlignLeftIcon
-            v-else-if="itemDetails.kind === 'text'"
-            class="size-5" />
-          <FileIcon v-else-if="itemDetails.kind === 'files'" class="size-5" />
-          <ImageIcon v-else-if="itemDetails.kind === 'image'" class="size-5" />
-          <ClipboardIcon v-else class="size-5" />
-        </Transition>
+        <LinkIcon v-if="link" class="size-5" />
+        <TextAlignLeftIcon
+          v-else-if="itemDetails.kind === 'text'"
+          class="size-5" />
+        <FileIcon v-else-if="itemDetails.kind === 'files'" class="size-5" />
+        <ImageIcon v-else-if="itemDetails.kind === 'image'" class="size-5" />
+        <ClipboardIcon v-else class="size-5" />
       </div>
       <!-- main content -->
       <div class="min-w-0 flex-1 space-y-2">
@@ -435,6 +429,15 @@ watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
           </Button>
         </div>
       </div>
+    </div>
+    <!-- a light sweeps across the card just copied, so it's clear which one -->
+    <div
+      v-if="shimmerKey"
+      :key="shimmerKey"
+      class="pointer-events-none absolute inset-0 overflow-hidden rounded-md motion-reduce:hidden">
+      <div
+        class="animate-copy-shimmer via-success/20 absolute inset-y-0 left-0 w-1/2 -skew-x-12 bg-gradient-to-r from-transparent to-transparent"
+        @animationend="shimmerKey = 0" />
     </div>
   </div>
 </template>
