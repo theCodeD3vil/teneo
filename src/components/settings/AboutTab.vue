@@ -56,14 +56,5 @@ const updateStatus = computed(() => {
         </Button>
       </SettingsField>
     </SettingsSection>
-
-    <SettingsSection>
-      <template #section-title>Credits</template>
-
-      <SettingsField>
-        <template #label>Logo</template>
-        <ExternalLink name="shapes.gallery" url="https://shapes.gallery" />
-      </SettingsField>
-    </SettingsSection>
   </div>
 </template>

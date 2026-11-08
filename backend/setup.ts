@@ -17,7 +17,8 @@ async function isSetupComplete(app: TinyApp): Promise<boolean> {
 
 async function showInMenuBar(app: TinyApp): Promise<void> {
   const { resources } = await appPaths(app);
-  app.tray.set({ icon: `${resources}/tray.png` });
+  // full-colour duotone mark, so template: false keeps the two blues
+  app.tray.set({ icon: `${resources}/tray.png`, template: false });
   await syncOpenPanelShortcut(app);
 }
 

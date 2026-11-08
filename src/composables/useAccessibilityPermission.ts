@@ -1,5 +1,5 @@
 import { useEventListener } from "@vueuse/core";
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 
 // Accessibility lets Teneo post ⌘V to paste into other apps
 export function useAccessibilityPermission() {
@@ -15,9 +15,10 @@ export function useAccessibilityPermission() {
     await refresh();
   }
 
-  onMounted(refresh);
+  // The first check, so a window opened hidden can wait for it before showing
+  const initialCheck = refresh();
   // Access is granted in System Settings, so re-check when the user comes back
   useEventListener(window, "focus", refresh);
 
-  return { status, refresh, request };
+  return { status, refresh, request, initialCheck };
 }

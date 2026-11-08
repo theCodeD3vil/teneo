@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
+import { showWindowWhenPainted } from "@/lib/window-ready";
 
 // Shown on every tab while setup is unfinished, e.g. after "Set up later"
-const { status: accessibilityStatus } = useAccessibilityPermission();
+const { status: accessibilityStatus, initialCheck } =
+  useAccessibilityPermission();
 const isSetupUnfinished = computed(
   () =>
     accessibilityStatus.value === "denied" ||
@@ -23,6 +25,9 @@ const isSetupUnfinished = computed(
 function openSetup(): void {
   void tiny.api.call("openSetup");
 }
+
+// The window opened hidden; surface it once the shell, banner included, has painted
+void showWindowWhenPainted(initialCheck);
 </script>
 
 <template>

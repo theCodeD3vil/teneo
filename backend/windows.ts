@@ -79,15 +79,37 @@ function showInDock(app: TinyApp): void {
   if (tjs.env.TINYJS_ICON) app.icon(tjs.env.TINYJS_ICON);
 }
 
+/** A fresh window opens hidden and the page shows itself once it has
+ *  painted (showWindowWhenPainted in src/lib/window-ready.ts), so no blank
+ *  vibrancy sheet sits on screen while the bundle loads. If the page never
+ *  gets there, show it anyway. */
+const windowReadyFallbackMs = 1500;
+
+function openHiddenUntilReady(
+  app: TinyApp,
+  windowId: string,
+  options: TinyOpenWindowOptions,
+): void {
+  app.win.open(windowId, { ...options, show: false });
+  setTimeout(() => {
+    void (async () => {
+      // closed again already, or the page beat us to it: nothing to do
+      if (!(await isWindowOpen(app, windowId))) return;
+      if (!(await isWindowOnScreen(app, windowId))) app.window(windowId).show();
+    })();
+  }, windowReadyFallbackMs);
+}
+
 export async function openSettingsWindow(app: TinyApp): Promise<void> {
   app.window("main").hide({ app: false });
   if (!(await isWindowOpen(app, settingsWindowId))) {
-    app.win.open(settingsWindowId, {
+    openHiddenUntilReady(app, settingsWindowId, {
       page: "settings.html",
       title: "Settings",
       size: "820x640",
       chrome: windowChrome,
     });
+    return;
   }
   // Without a Dock icon Teneo doesn't come to the front by itself
   app.window(settingsWindowId).show();
@@ -122,7 +144,7 @@ export async function openUpdateWindow(
 ): Promise<void> {
   availableUpdate = update;
   if (!(await isWindowOpen(app, updateWindowId))) {
-    app.win.open(updateWindowId, {
+    openHiddenUntilReady(app, updateWindowId, {
       page: "update.html",
       title: `Teneo ${update.latest} is available`,
       size: "480x720",
@@ -131,6 +153,7 @@ export async function openUpdateWindow(
     // Like an alert: above other apps, and on any Space or full-screen app
     app.window(updateWindowId).setLevel("floating");
     app.window(updateWindowId).setAllSpaces(true);
+    return;
   }
   app.window(updateWindowId).show();
 }
