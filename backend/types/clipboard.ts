@@ -23,6 +23,15 @@ export interface ClipboardItemRow {
   pasteAsFile: number | null;
   /** 1 when value is encrypted, because the text holds a secret */
   encrypted: number | null;
+  /** JSON SecretSpan[] found in the text, or null when there are none */
+  secrets: string | null;
+  linkUrl: string | null;
+  linkHost: string | null;
+  /** the detectionVersion secrets and link were found with; null for rows
+   *  from before they were stored */
+  detectorVersion: number | null;
+  /** characters in value: the list selects only the start of a long text */
+  valueLength?: number | null;
 }
 
 export interface ClipboardItemColumn {

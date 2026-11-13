@@ -1,7 +1,22 @@
 import { Database } from "tjs:sqlite";
 
+import { textPreviewLength } from "../shared/types/clipboard";
+import type {
+  ClipboardLink,
+  ClipboardListCursor,
+  ClipboardListPage,
+  ClipboardListRequest,
+  SecretSpan,
+} from "../shared/types/clipboard";
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";
+import {
+  afterCursor,
+  likePattern,
+  listOrder,
+  matchesSearch,
+  truncateTextPreview,
+} from "./history-query";
 import { findLink } from "./link-previews";
 import { appPaths } from "./paths";
 import { findSecrets } from "./secret-detection";
@@ -26,6 +41,11 @@ import { generateUUID } from "./utils/uuid-generator";
 export type { ClipboardHistoryItem } from "./types/clipboard";
 
 let databasePromise: Promise<Database> | null = null;
+
+// Secrets and links are found once, when a text is copied, and stored with
+// it. Bump this when findSecrets or findLink changes: at the next start every
+// older text is looked at again (see refreshDetectionMetadata).
+const detectionVersion = 1;
 
 export function initializeDatabase(app: TinyApp): Promise<Database> {
   databasePromise ??= openDatabase(app);
@@ -84,8 +104,8 @@ export async function saveClipboardItem(
     pinned: false,
     pasteAsFile: item.pasteAsFile === true,
     fileSize: null, // read when history is listed
-    secrets: item.kind === "text" && item.text ? findSecrets(item.text) : [],
-    link: item.kind === "text" && item.text ? findLink(item.text) : null,
+    ...detectInText(item.kind === "text" ? item.text : null),
+    isTruncated: false,
   };
   // With encryption on, text holding a secret is only ever saved encrypted:
   // when the key can't be read, encryptText throws and the item isn't saved
@@ -101,9 +121,10 @@ export async function saveClipboardItem(
     await initializeDatabase(app),
     `
       INSERT INTO "CLIPBOARD_ITEMS" (
-        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted
+        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted,
+        secrets, linkUrl, linkHost, detectorVersion
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     savedItem.id,
     savedItem.kind,
@@ -115,10 +136,83 @@ export async function saveClipboardItem(
     savedItem.sourceApp?.bundleId ?? null,
     savedItem.pasteAsFile ? 1 : null,
     isEncrypted ? 1 : null,
+    serializeSecrets(savedItem.secrets),
+    savedItem.link?.url ?? null,
+    savedItem.link?.host ?? null,
+    detectionVersion,
   );
   notifyClipboardHistoryChanged(app);
 
   return savedItem;
+}
+
+function detectInText(text: string | null): {
+  secrets: SecretSpan[];
+  link: ClipboardLink | null;
+} {
+  if (!text) return { secrets: [], link: null };
+  return { secrets: findSecrets(text), link: findLink(text) };
+}
+
+function serializeSecrets(secrets: SecretSpan[]): string | null {
+  return secrets.length ? JSON.stringify(secrets) : null;
+}
+
+function parseSecrets(secrets: string | null): SecretSpan[] {
+  if (!secrets) return [];
+  try {
+    const parsed: unknown = JSON.parse(secrets);
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (span): span is SecretSpan =>
+            !!span &&
+            typeof span === "object" &&
+            typeof span.start === "number" &&
+            typeof span.end === "number" &&
+            typeof span.label === "string",
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Find secrets and links again in texts detected with older rules, or with
+ *  none: copies from before the results were stored. Run at startup, so a
+ *  rule added in an update covers older copies too. */
+export async function refreshDetectionMetadata(app: TinyApp): Promise<void> {
+  const database = await initializeDatabase(app);
+  const rows = all<Pick<ClipboardItemRow, "id" | "value" | "encrypted">>(
+    database,
+    `
+      SELECT id, value, encrypted FROM "CLIPBOARD_ITEMS"
+      WHERE kind = 'text' AND value IS NOT NULL
+        AND (detectorVersion IS NULL OR detectorVersion < ?)
+    `,
+    detectionVersion,
+  );
+  let changed = false;
+  for (const row of rows) {
+    // left for the next start when it can't be decrypted now
+    const decrypted = await decryptRow(row, app);
+    if (!decrypted) continue;
+    const { secrets, link } = detectInText(decrypted.value);
+    run(
+      database,
+      `
+        UPDATE "CLIPBOARD_ITEMS"
+        SET secrets = ?, linkUrl = ?, linkHost = ?, detectorVersion = ?
+        WHERE id = ?
+      `,
+      serializeSecrets(secrets),
+      link?.url ?? null,
+      link?.host ?? null,
+      detectionVersion,
+      row.id,
+    );
+    changed = true;
+  }
+  if (changed) notifyClipboardHistoryChanged(app);
 }
 
 // Matches unpinned items copied before ?1 (ms) or beyond the newest ?2
@@ -299,45 +393,217 @@ export function notifyClipboardHistoryChanged(app: TinyApp): void {
   app.push(clipboardHistoryChangedEvent);
 }
 
+// The list reads only the start of a long text: the card shows two lines, and
+// the whole text comes by id when it's previewed or copied. A text holding a
+// secret is read whole, so the search can tell the secret from the rest.
+const listColumns = `
+  id, kind, imageSize, path, dateCopied, sourceAppName, sourceAppBundleId,
+  pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
+  CASE WHEN kind != 'text' OR encrypted IS 1 OR secrets IS NOT NULL
+    THEN value ELSE substr(value, 1, ?) END AS value,
+  length(value) AS valueLength
+`;
+
+/** One page of the history: pinned items first, then newest first. Only the
+ *  rows of the page are decrypted and looked at, not the whole history. */
 export async function listClipboardItems(
   app: TinyApp,
-): Promise<ClipboardHistoryItem[]> {
-  const rows = all<ClipboardItemRow>(
+  request: ClipboardListRequest,
+): Promise<ClipboardListPage> {
+  const database = await initializeDatabase(app);
+  const { data: dataDirectory } = await appPaths(app);
+  const search = request.search.trim().toLowerCase();
+  const { maskSecrets } = getSettings();
+  const items: ClipboardHistoryItem[] = [];
+  let cursor = request.cursor;
+  let exhausted = false;
+
+  // The query matches a page's worth of rows; the few a row-by-row check
+  // then drops (a search hit inside a masked key, a text that can't be
+  // decrypted) are made up for from the rows after them.
+  while (items.length < request.limit && !exhausted) {
+    const batchSize = Math.max(request.limit - items.length, 20);
+    const { where, values } = listConditions(request.kind, search, cursor);
+    const rows = all<ClipboardItemRow>(
+      database,
+      `
+        SELECT ${listColumns} FROM "CLIPBOARD_ITEMS"
+        WHERE ${where} ORDER BY ${listOrder} LIMIT ?
+      `,
+      textPreviewLength,
+      ...values,
+      batchSize,
+    );
+    let reachedLimit = false;
+    for (const row of rows) {
+      cursor = {
+        pinnedAt: row.pinnedAt,
+        dateCopied: row.dateCopied,
+        id: row.id,
+      };
+      const decrypted = await decryptRow(row, app);
+      if (!decrypted) continue;
+      if (search && needsSearchCheck(row, maskSecrets)) {
+        if (!matchesSearch(toSearchable(decrypted), search, maskSecrets))
+          continue;
+      }
+      const item = rowToClipboardItem(decrypted, dataDirectory, true);
+      if (!item) continue;
+      items.push(item);
+      if (items.length === request.limit) {
+        reachedLimit = true;
+        break;
+      }
+    }
+    if (!reachedLimit && rows.length < batchSize) exhausted = true;
+  }
+
+  await readFileSizes(items);
+  return {
+    items,
+    nextCursor: exhausted ? null : (cursor ?? null),
+    total: await countClipboardItems(app, request.kind, search, maskSecrets),
+  };
+}
+
+/** One item whole, with all of its text, or null once it's gone from the history. */
+export async function getClipboardItem(
+  id: string,
+  app: TinyApp,
+): Promise<ClipboardHistoryItem | null> {
+  const [row] = all<ClipboardItemRow>(
     await initializeDatabase(app),
     `
-      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, pasteAsFile, encrypted
+      SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId,
+        pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost
       FROM "CLIPBOARD_ITEMS"
-      WHERE deletedAt IS NULL
-      ORDER BY pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC
+      WHERE id = ? AND deletedAt IS NULL
     `,
+    id,
   );
-
-  const decryptedRows = await Promise.all(
-    rows.map((row) => decryptRow(row, app)),
-  );
+  if (!row) return null;
+  const decrypted = await decryptRow(row, app);
   const { data: dataDirectory } = await appPaths(app);
-  const items = decryptedRows.flatMap((row) => {
-    const item = row && rowToClipboardItem(row, dataDirectory);
-    return item ? [item] : [];
-  });
-  // Only for a single copied file: next to "+N" the first file's size would
-  // read as the total. Read now, not when copied, since the file may change.
+  const item = decrypted && rowToClipboardItem(decrypted, dataDirectory, false);
+  if (!item) return null;
+  await readFileSizes([item]);
+  return item;
+}
+
+// Only for a single copied file: next to "+N" the first file's size would
+// read as the total. Read now, not when copied, since the file may change.
+async function readFileSizes(items: ClipboardHistoryItem[]): Promise<void> {
   await Promise.all(
     items.map(async (item) => {
       if (item.paths.length === 1)
         item.fileSize = await getFileSize(item.paths[0]);
     }),
   );
-  return items;
+}
+
+/** The WHERE clause of a list request. A search is matched by sqlite, except
+ *  on rows whose text can't be read there: encrypted ones, and ones holding a
+ *  masked key, which the search must not find by the key's body. Those pass
+ *  here and are checked row by row (needsSearchCheck, matchesSearch). */
+function listConditions(
+  kind: ClipboardListRequest["kind"],
+  search: string,
+  cursor?: ClipboardListCursor,
+): { where: string; values: unknown[] } {
+  const conditions = [`deletedAt IS NULL`];
+  const values: unknown[] = [];
+  if (kind !== "all") {
+    conditions.push(`kind = ?`);
+    values.push(kind);
+  }
+  if (search) {
+    const pattern = likePattern(search);
+    conditions.push(`(
+      encrypted IS 1
+      OR value LIKE ? ESCAPE '\\'
+      OR path LIKE ? ESCAPE '\\'
+      OR sourceAppName LIKE ? ESCAPE '\\'
+      OR secrets LIKE ? ESCAPE '\\'
+    )`);
+    values.push(pattern, pattern, pattern, pattern);
+  }
+  if (cursor) {
+    const after = afterCursor(cursor);
+    conditions.push(after.condition);
+    values.push(...after.values);
+  }
+  return { where: conditions.join(" AND "), values };
+}
+
+function needsSearchCheck(
+  row: Pick<ClipboardItemRow, "encrypted" | "secrets">,
+  maskSecrets: boolean,
+): boolean {
+  return row.encrypted === 1 || (maskSecrets && row.secrets !== null);
+}
+
+function toSearchable(row: ClipboardItemRow) {
+  return {
+    text: row.kind === "text" ? row.value : null,
+    secrets: parseSecrets(row.secrets),
+    color: row.kind === "color" ? row.value : null,
+    paths: parsePaths(row.path),
+    sourceAppName: row.sourceAppName,
+  };
+}
+
+/** How many items a list request matches in all, for the footer. */
+async function countClipboardItems(
+  app: TinyApp,
+  kind: ClipboardListRequest["kind"],
+  search: string,
+  maskSecrets: boolean,
+): Promise<number> {
+  const database = await initializeDatabase(app);
+  const { where, values } = listConditions(kind, search);
+  if (!search) {
+    const [result] = all<{ count: number }>(
+      database,
+      `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE ${where}`,
+      ...values,
+    );
+    return result?.count ?? 0;
+  }
+  // IS, not =: an unencrypted row has NULL there, and NOT NULL is NULL
+  const uncertain = maskSecrets
+    ? `(encrypted IS 1 OR secrets IS NOT NULL)`
+    : `encrypted IS 1`;
+  const [sure] = all<{ count: number }>(
+    database,
+    `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE ${where} AND NOT ${uncertain}`,
+    ...values,
+  );
+  // the few rows sqlite can't decide are read and checked like the list does
+  const uncertainRows = all<ClipboardItemRow>(
+    database,
+    `SELECT ${listColumns} FROM "CLIPBOARD_ITEMS" WHERE ${where} AND ${uncertain}`,
+    textPreviewLength,
+    ...values,
+  );
+  let count = sure?.count ?? 0;
+  for (const row of uncertainRows) {
+    const decrypted = await decryptRow(row, app);
+    if (
+      decrypted &&
+      matchesSearch(toSearchable(decrypted), search, maskSecrets)
+    ) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /** The row with its text decrypted, or null while it can't be: the Keychain
  *  can't be read, or the key there isn't the one it was encrypted with. The
  *  row stays saved, in case the key comes back. */
-async function decryptRow(
-  row: ClipboardItemRow,
-  app: TinyApp,
-): Promise<ClipboardItemRow | null> {
+async function decryptRow<
+  Row extends Pick<ClipboardItemRow, "id" | "value" | "encrypted">,
+>(row: Row, app: TinyApp): Promise<Row | null> {
   if (row.encrypted !== 1 || row.value === null) return row;
   try {
     return { ...row, value: await decryptText(row.value, app) };
@@ -478,6 +744,10 @@ const addedColumns = {
   pinnedAt: "INTEGER",
   pasteAsFile: "INTEGER",
   encrypted: "INTEGER",
+  secrets: "TEXT",
+  linkUrl: "TEXT",
+  linkHost: "TEXT",
+  detectorVersion: "INTEGER",
 };
 
 function addMissingColumns(database: Database): void {
@@ -494,20 +764,37 @@ function addMissingColumns(database: Database): void {
   }
 }
 
+/** The item a row holds; `preview` cuts a long text down for the list. */
 function rowToClipboardItem(
   row: ClipboardItemRow,
   dataDirectory: string,
+  preview: boolean,
 ): ClipboardHistoryItem | null {
   if (!isClipboardItemKind(row.kind) || !isValidDate(row.dateCopied)) {
     return null;
   }
+
+  const isText = row.kind === "text";
+  const fullText = isText ? row.value : null;
+  const secrets = isText ? parseSecrets(row.secrets) : [];
+  const text =
+    preview && fullText !== null
+      ? truncateTextPreview(
+          fullText,
+          secrets,
+          // sqlite's length is of the plain text, not of a ciphertext
+          row.encrypted === 1
+            ? fullText.length
+            : (row.valueLength ?? fullText.length),
+        )
+      : { text: fullText, secrets, isTruncated: false };
 
   return {
     id: row.id,
     dateCopied: row.dateCopied,
     kind: row.kind,
     changeCount: row.dateCopied,
-    text: row.kind === "text" ? row.value : null,
+    text: text.text,
     html: null,
     paths: row.kind === "files" ? parsePaths(row.path) : [],
     image:
@@ -519,9 +806,13 @@ function rowToClipboardItem(
     sourceURL: null,
     pinned: row.pinnedAt != null,
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,
-    fileSize: null, // filled in by listClipboardItems
-    secrets: row.kind === "text" && row.value ? findSecrets(row.value) : [],
-    link: row.kind === "text" && row.value ? findLink(row.value) : null,
+    fileSize: null, // filled in by readFileSizes
+    secrets: text.secrets,
+    link:
+      isText && row.linkUrl && row.linkHost
+        ? { url: row.linkUrl, host: row.linkHost }
+        : null,
+    isTruncated: text.isTruncated,
   };
 }
 

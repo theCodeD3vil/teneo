@@ -1,10 +1,12 @@
 <script lang="ts" setup>
+import { useVirtualizer } from "@tanstack/vue-virtual";
 import {
   computed,
+  type ComponentPublicInstance,
+  onMounted,
   onUnmounted,
   ref,
   watch,
-  type ComponentPublicInstance,
 } from "vue";
 import AlertCircleIcon from "~icons/tabler/alert-circle";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
@@ -21,9 +23,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useItemPreviews } from "@/composables/useItemPreviews";
+import { getPreviewPath, useItemPreviews } from "@/composables/useItemPreviews";
 import { currentTime } from "@/composables/useRelativeTimeAgo";
+import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import type { ClipboardHistoryItem, TabVariant } from "@/types/clipboard";
+import { getClipboardData } from "@/utils/clipboard-items";
+import { copyItemToClipboard } from "@/utils/copy-item";
+import { resetPanelEvent } from "@/utils/panel-reset";
 
 import ClipboardItemCard from "./ClipboardItemCard.vue";
 
@@ -34,6 +40,9 @@ const props = withDefaults(
     activeItemId: string | null;
     loading: boolean;
     error: Error | null;
+    /** there are items after the last one loaded */
+    hasMore?: boolean;
+    loadingMore?: boolean;
     emptyMessage?: string;
   }>(),
   { emptyMessage: "No clipboard history yet." },
@@ -41,16 +50,9 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: "preview", item: ClipboardHistoryItem): void;
+  /** the list is near its end: load the next page */
+  (e: "load-more"): void;
 }>();
-
-type ClipboardItemCardAction =
-  | "copyAndHideWindow"
-  | "pasteAndHideWindow"
-  | "deleteItem"
-  | "pinItem";
-
-type ClipboardItemCardReference = ComponentPublicInstance &
-  Record<ClipboardItemCardAction, () => boolean>;
 
 interface ClipboardItemGroup {
   key: number | "pinned";
@@ -58,12 +60,16 @@ interface ClipboardItemGroup {
   items: Array<{ item: ClipboardHistoryItem; index: number }>;
 }
 
-// One set of queries for the whole list, not three per card
-const { sourceAppIconUrl, filePreview, linkPreviewUrl } = useItemPreviews(
-  () => props.items,
-);
+type ListRow =
+  | { type: "header"; key: string; label: string; isFirst: boolean }
+  | {
+      type: "item";
+      key: string;
+      item: ClipboardHistoryItem;
+      index: number;
+      isFirst: boolean;
+    };
 
-const cardReferences = new Map<string, ClipboardItemCardReference>();
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 // Changes once a day, so the groups below regroup at midnight, not on every tick
 const todayStart = computed(() => getDayStart(currentTime.value.getTime()));
@@ -104,9 +110,8 @@ const groupedItems = computed<ClipboardItemGroup[]>(() => {
   return pinnedGroup.items.length ? [pinnedGroup, ...dayGroups] : dayGroups;
 });
 
-// Headers and cards in one flat keyed list: a card that moves to another group
-// keeps its instance (and loaded preview), so TransitionGroup can slide it there
-const listRows = computed(() =>
+// Headers and cards in one flat list, so the rows on screen can be picked by index
+const listRows = computed<ListRow[]>(() =>
   groupedItems.value.flatMap((group, groupIndex) => [
     {
       type: "header" as const,
@@ -124,33 +129,97 @@ const listRows = computed(() =>
   ]),
 );
 
-// Only pinning or unpinning slides cards; tab switches, searches and new copies
-// change the list instantly, as before
-const pinMoveDuration = 300;
-const isAnimatingPinMove = ref(false);
-let pinMoveTimeout: ReturnType<typeof setTimeout> | undefined;
+// Only the rows on screen are in the page: a history of thousands of items
+// costs no more than one of a dozen. Each row carries the gap above it, so
+// the rows can be laid out from their measured heights alone.
+const headerHeight = 16;
+const cardHeight = 60;
+function rowGap(row: ListRow): number {
+  if (row.type === "header") return row.isFirst ? 0 : 20;
+  return row.isFirst ? 8 : 16;
+}
 
-watch(
-  () => props.items,
-  (items, previousItems) => {
-    const wasPinned = new Map(
-      previousItems.map((item) => [item.id, item.pinned]),
-    );
-    const pinChanged = items.some(
-      (item) =>
-        wasPinned.has(item.id) && wasPinned.get(item.id) !== item.pinned,
-    );
-    if (!pinChanged) return;
+const scrollArea = ref<InstanceType<typeof ScrollArea> | null>(null);
+const viewport = ref<HTMLElement | null>(null);
+onMounted(() => {
+  viewport.value =
+    scrollArea.value?.$el.querySelector("[data-slot=scroll-area-viewport]") ??
+    null;
+});
 
-    isAnimatingPinMove.value = true;
-    clearTimeout(pinMoveTimeout);
-    pinMoveTimeout = setTimeout(() => {
-      isAnimatingPinMove.value = false;
-    }, pinMoveDuration);
-  },
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: listRows.value.length,
+    getScrollElement: () => viewport.value,
+    estimateSize: (index: number) => {
+      const row = listRows.value[index];
+      if (!row) return cardHeight;
+      return rowGap(row) + (row.type === "header" ? headerHeight : cardHeight);
+    },
+    getItemKey: (index: number) => listRows.value[index]?.key ?? index,
+    overscan: 6,
+  })),
+);
+const virtualRows = computed(() => virtualizer.value.getVirtualItems());
+// each row on screen with its place, so the template can tell the two apart
+const visibleRows = computed(() =>
+  virtualRows.value.flatMap((virtualRow) => {
+    const row = listRows.value[virtualRow.index];
+    return row ? [{ virtualRow, row }] : [];
+  }),
 );
 
-onUnmounted(() => clearTimeout(pinMoveTimeout));
+function measureRow(row: Element | ComponentPublicInstance | null): void {
+  if (row instanceof Element) virtualizer.value.measureElement(row);
+}
+
+// Previews, icons and link icons only for the cards on screen
+const visibleItems = computed(() =>
+  visibleRows.value.flatMap(({ row }) =>
+    row.type === "item" ? [row.item] : [],
+  ),
+);
+const { sourceAppIconUrl, filePreview, linkPreviewUrl } =
+  useItemPreviews(visibleItems);
+
+// The selected card is scrolled into view; at the top of its group, its
+// header comes along so the group is named
+watch(
+  () => props.activeItemId,
+  (activeItemId) => {
+    if (!activeItemId) return;
+    const index = listRows.value.findIndex(
+      (row) => row.type === "item" && row.item.id === activeItemId,
+    );
+    if (index < 0) return;
+    const header = listRows.value[index - 1]?.type === "header";
+    virtualizer.value.scrollToIndex(header ? index - 1 : index, {
+      align: "auto",
+    });
+  },
+  { flush: "post" },
+);
+
+// Nearing the last loaded rows, ask for the next page
+const loadMoreThreshold = 10;
+watch(virtualRows, (rows) => {
+  const lastRow = rows.at(-1);
+  if (
+    lastRow &&
+    props.hasMore &&
+    !props.loadingMore &&
+    lastRow.index >= listRows.value.length - loadMoreThreshold
+  ) {
+    emit("load-more");
+  }
+});
+
+// The panel comes back at the top of the list
+function scrollToTop(): void {
+  virtualizer.value.scrollToOffset(0);
+}
+onMounted(() => window.addEventListener(resetPanelEvent, scrollToTop));
+onUnmounted(() => window.removeEventListener(resetPanelEvent, scrollToTop));
 
 function getDayStart(timestamp: number): number {
   const date = new Date(timestamp);
@@ -169,47 +238,59 @@ function getDayLabel(dayStart: number): string {
   return `${daysAgo} days ago`;
 }
 
-function setCardReference(
-  itemId: string,
-  card: Element | ComponentPublicInstance | null,
-): void {
-  if (isClipboardItemCardReference(card)) {
-    cardReferences.set(itemId, card);
-  } else {
-    cardReferences.delete(itemId);
-  }
+// The keys act on items by id, not through their cards: the card for an item
+// further down, or for ⌘1 while scrolled down, isn't in the page
+function findItem(itemId: string | null): ClipboardHistoryItem | null {
+  return props.items.find((item) => item.id === itemId) ?? null;
 }
 
-function isClipboardItemCardReference(
-  card: Element | ComponentPublicInstance | null,
-): card is ClipboardItemCardReference {
-  return (
-    card !== null &&
-    "copyAndHideWindow" in card &&
-    typeof card.copyAndHideWindow === "function"
+// an image or file that was moved or deleted since can't be copied
+function isPreviewMissing(item: ClipboardHistoryItem): boolean {
+  if (item.kind !== "image" && item.kind !== "files") return false;
+  return !getPreviewPath(item) || filePreview(item)?.isMissing === true;
+}
+
+function copyItem(itemId: string | null, paste: boolean): boolean {
+  const item = findItem(itemId);
+  if (!item || isPreviewMissing(item) || !getClipboardData(item)) return false;
+  void copyItemToClipboard(item, { hideWindow: true, paste }).catch(
+    () => undefined,
   );
+  return true;
 }
 
-function runCardAction(
-  itemId: string | null,
-  action: ClipboardItemCardAction,
-): boolean {
+// Soft delete: the history refreshes once the backend reports the change
+function deleteItem(itemId: string | null): boolean {
   if (!itemId) return false;
-  return cardReferences.get(itemId)?.[action]() ?? false;
+  void tiny.api
+    .call("deleteClipboardItem", { id: itemId })
+    .catch(() => undefined);
+  return true;
+}
+
+// Toggles: P unpins an already pinned item
+function pinItem(itemId: string | null): boolean {
+  const item = findItem(itemId);
+  if (!item) return false;
+  void tiny.api
+    .call("pinClipboardItem", { id: item.id, pinned: !item.pinned })
+    .catch(() => undefined);
+  return true;
 }
 
 defineExpose({
-  copyActiveItem: (itemId: string | null) =>
-    runCardAction(itemId, "copyAndHideWindow"),
-  pasteActiveItem: (itemId: string | null) =>
-    runCardAction(itemId, "pasteAndHideWindow"),
-  deleteActiveItem: (itemId: string | null) =>
-    runCardAction(itemId, "deleteItem"),
-  pinActiveItem: (itemId: string | null) => runCardAction(itemId, "pinItem"),
+  copyActiveItem: (itemId: string | null) => copyItem(itemId, false),
+  pasteActiveItem: (itemId: string | null) => copyItem(itemId, true),
+  deleteActiveItem: deleteItem,
+  pinActiveItem: pinItem,
+  copyItemByNumber: (itemNumber: QuickCopyItemNumber) =>
+    copyItem(props.items[itemNumber - 1]?.id ?? null, false),
 });
 </script>
 <template>
-  <ScrollArea class="scroll-fade size-full scrollbar-none! rounded-md">
+  <ScrollArea
+    ref="scrollArea"
+    class="scroll-fade size-full scrollbar-none! rounded-md">
     <p v-if="props.loading" class="text-foreground/50 p-3 text-sm">
       Loading clipboard history…
     </p>
@@ -226,59 +307,53 @@ defineExpose({
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
-    <div v-else>
-      <!-- css=false: items appear and disappear instantly; only moves animate.
-             transition-transform! beats the card's own transition property. -->
-      <TransitionGroup
-        v-if="props.items.length"
-        tag="div"
-        class="flex flex-col gap-2"
-        :css="false"
-        :move-class="
-          isAnimatingPinMove
-            ? 'transition-transform! duration-300 ease-out'
-            : ''
-        ">
-        <template v-for="row in listRows" :key="row.key">
-          <h2
-            v-if="row.type === 'header'"
-            :class="[
-              'text-foreground/50 px-1 text-xs font-medium',
-              !row.isFirst && 'mt-3',
-            ]">
-            {{ row.label }}
-          </h2>
-          <ClipboardItemCard
-            v-else
-            :ref="(card) => setCardReference(row.item.id, card)"
-            :class="!row.isFirst && 'mt-2'"
-            :item-details="row.item"
-            :source-app-icon-url="sourceAppIconUrl(row.item)"
-            :file-preview="filePreview(row.item)"
-            :link-preview-url="linkPreviewUrl(row.item)"
-            :is-active="row.item.id === props.activeItemId"
-            :quick-paste-index="row.index + 1"
-            :supports-quick-paste="row.index + 1 < 10"
-            @preview="emit('preview', row.item)" />
-        </template>
-      </TransitionGroup>
-      <Empty v-else>
-        <EmptyHeader>
-          <EmptyMedia variant="icon" class="bg-foreground/5 text-foreground/70">
-            <ImageIcon v-if="props.tab === 'image'" />
-            <FileIcon v-else-if="props.tab === 'files'" />
-            <PaletteIcon v-else-if="props.tab === 'color'" />
-            <TextAlignLeftIcon v-else-if="props.tab === 'text'" />
-            <ClipboardListIcon v-else />
-          </EmptyMedia>
-          <EmptyTitle class="text-foreground/70">
-            {{ props.emptyMessage }}
-          </EmptyTitle>
-          <EmptyDescription class="text-foreground/50">
-            Copy something to see it here.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+    <div
+      v-else-if="props.items.length"
+      class="relative w-full"
+      :style="{ height: `${virtualizer.getTotalSize()}px` }">
+      <div
+        v-for="{ virtualRow, row } in visibleRows"
+        :key="row.key"
+        :ref="measureRow"
+        :data-index="virtualRow.index"
+        class="absolute inset-x-0 top-0"
+        :style="{
+          transform: `translateY(${virtualRow.start}px)`,
+          paddingTop: `${rowGap(row)}px`,
+        }">
+        <h2
+          v-if="row.type === 'header'"
+          class="text-foreground/50 px-1 text-xs font-medium">
+          {{ row.label }}
+        </h2>
+        <ClipboardItemCard
+          v-else
+          :item-details="row.item"
+          :source-app-icon-url="sourceAppIconUrl(row.item)"
+          :file-preview="filePreview(row.item)"
+          :link-preview-url="linkPreviewUrl(row.item)"
+          :is-active="row.item.id === props.activeItemId"
+          :quick-paste-index="row.index + 1"
+          :supports-quick-paste="row.index + 1 < 10"
+          @preview="emit('preview', row.item)" />
+      </div>
     </div>
+    <Empty v-else>
+      <EmptyHeader>
+        <EmptyMedia variant="icon" class="bg-foreground/5 text-foreground/70">
+          <ImageIcon v-if="props.tab === 'image'" />
+          <FileIcon v-else-if="props.tab === 'files'" />
+          <PaletteIcon v-else-if="props.tab === 'color'" />
+          <TextAlignLeftIcon v-else-if="props.tab === 'text'" />
+          <ClipboardListIcon v-else />
+        </EmptyMedia>
+        <EmptyTitle class="text-foreground/70">
+          {{ props.emptyMessage }}
+        </EmptyTitle>
+        <EmptyDescription class="text-foreground/50">
+          Copy something to see it here.
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   </ScrollArea>
 </template>

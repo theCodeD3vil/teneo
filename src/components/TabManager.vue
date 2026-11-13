@@ -1,22 +1,15 @@
 <script setup lang="ts">
-import {
-  computed,
-  onBeforeMount,
-  onMounted,
-  onUnmounted,
-  ref,
-  watch,
-} from "vue";
+import { onBeforeMount, onMounted, onUnmounted, ref, watch } from "vue";
 import ArrowLeftIcon from "~icons/tabler/chevron-left";
 import ArrowRightIcon from "~icons/tabler/chevron-right";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useClipboard } from "@/composables/useClipboard";
+import { useClipboardList } from "@/composables/useClipboard";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useSettings } from "@/composables/useSettings";
+import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import { omit } from "@/utils/helpers";
 import { resetPanelEvent } from "@/utils/panel-reset";
-import { maskSecrets } from "@/utils/secrets";
 
 import {
   clipboardItemVariants,
@@ -42,16 +35,30 @@ const selectedTab = ref<TabVariant>(defaultTab);
 const activeItemId = ref<string | null>(null);
 const allTabContent = ref<InstanceType<typeof AllTabContent> | null>(null);
 const debouncedSearchQuery = ref(normalizeSearchQuery(props.searchQuery));
-const { clipboardItems, error, loading } = useClipboard();
+// The backend filters by tab and search and returns a page at a time, so the
+// page never holds the whole history (see useClipboardList)
+const {
+  items: selectedItems,
+  total,
+  error,
+  loading,
+  hasMore,
+  loadingMore,
+  loadMore,
+} = useClipboardList(() => ({
+  kind: selectedTab.value,
+  search: debouncedSearchQuery.value,
+}));
 const { settings } = useSettings();
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | undefined;
 
 // The panel always opens on All, on its first item: neither the tab nor the
 // item is remembered between visits. It's reset as the panel hides, and again
 // before it shows (see utils/panel-reset).
+// (the selectedItems watch below picks the first item once its list is in)
 function showAllTab(): void {
   selectedTab.value = defaultTab;
-  activeItemId.value = getItemsForTab(defaultTab)[0]?.id ?? null;
+  activeItemId.value = selectedItems.value[0]?.id ?? null;
 }
 onBeforeMount(showAllTab);
 onMounted(() => {
@@ -63,14 +70,6 @@ function normalizeSearchQuery(searchQuery: string): string {
   return searchQuery.trim().toLowerCase();
 }
 
-const itemsByTab = computed<Record<TabVariant, ClipboardHistoryItem[]>>(() => ({
-  all: clipboardItems.value,
-  files: clipboardItems.value.filter((item) => item.kind === "files"),
-  image: clipboardItems.value.filter((item) => item.kind === "image"),
-  color: clipboardItems.value.filter((item) => item.kind === "color"),
-  text: clipboardItems.value.filter((item) => item.kind === "text"),
-}));
-
 const emptyMessages: Record<TabVariant, string> = {
   all: "No clipboard history yet.",
   files: "No copied files yet.",
@@ -79,51 +78,12 @@ const emptyMessages: Record<TabVariant, string> = {
   text: "No copied text yet.",
 };
 
-const selectedItems = computed(() => getItemsForTab(selectedTab.value));
-
-function getItemsForTab(tab: TabVariant): ClipboardHistoryItem[] {
-  const items = itemsByTab.value[tab];
-  const searchQuery = debouncedSearchQuery.value;
-
-  return searchQuery
-    ? items.filter((item) => matchesSearchQuery(item, searchQuery))
-    : items;
-}
-
-function matchesSearchQuery(
-  item: ClipboardHistoryItem,
-  searchQuery: string,
-): boolean {
-  return [
-    searchableText(item),
-    item.html,
-    item.color,
-    item.paths.join(" "),
-    item.sourceApp?.name,
-    item.sourceURL,
-  ].some((value) => value?.toLowerCase().includes(searchQuery));
-}
-
-// A masked key is found by what the card shows and by its kind ("GitHub
-// token"), so searching for part of it can't reveal which item holds it
-function searchableText(item: ClipboardHistoryItem): string | null {
-  if (!item.text || !settings.value.maskSecrets || !item.secrets.length) {
-    return item.text;
-  }
-  return maskSecrets(item.text, item.secrets)
-    .map((part) =>
-      part.secretLabel ? `${part.text} ${part.secretLabel} ` : part.text,
-    )
-    .join("");
-}
-
 function moveActiveTab(direction: -1 | 1): boolean {
   const nextTabIndex = tabValues.indexOf(selectedTab.value) + direction;
   const nextTab = tabValues[nextTabIndex];
   if (!nextTab) return false;
 
   selectedTab.value = nextTab;
-  activeItemId.value = getItemsForTab(nextTab)[0]?.id ?? null;
   return true;
 }
 
@@ -192,12 +152,18 @@ function getActiveItemNeighbourId(): string | null {
   return (items[index + 1] ?? items[index - 1])?.id ?? null;
 }
 
+// ⌘1-9 copy the item at that place in the tab, whether or not its card is on screen
+function copyItemByNumber(itemNumber: QuickCopyItemNumber): boolean {
+  return allTabContent.value?.copyItemByNumber(itemNumber) ?? false;
+}
+
 // The list stays mounted under the preview, so its keys must not act on it
 useHotkeys(
   {
     moveActiveTab,
     moveActiveItem,
     copyActiveItem,
+    copyItemByNumber,
     pasteSelectedItem: pasteActiveItem,
     previewSelectedItem: previewActiveItem,
     deleteSelectedItem: deleteActiveItem,
@@ -224,8 +190,6 @@ watch(selectedTab, () => {
 watch(
   selectedItems,
   (items) => {
-    emit("tab-change", items.length);
-
     if (!items.some((item) => item.id === activeItemId.value)) {
       activeItemId.value = items[0]?.id ?? null;
     }
@@ -234,6 +198,9 @@ watch(
     immediate: true,
   },
 );
+
+// how many the tab holds in all, not only the pages loaded so far
+watch(total, (count) => emit("tab-change", count), { immediate: true });
 
 onUnmounted(() => {
   clearTimeout(searchDebounceTimeout);
@@ -272,8 +239,11 @@ onUnmounted(() => {
         :active-item-id="activeItemId"
         :loading="loading"
         :error="error"
+        :has-more="hasMore"
+        :loading-more="loadingMore"
         :empty-message="emptyMessages[selectedTab]"
-        @preview="previewItem" />
+        @preview="previewItem"
+        @load-more="loadMore" />
     </TabsContent>
   </Tabs>
 </template>
