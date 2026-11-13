@@ -104,6 +104,6 @@ export interface ClipboardListPage {
   items: ClipboardHistoryItem[];
   /** null once there is no page after this one */
   nextCursor: ClipboardListCursor | null;
-  /** how many items match the request in all */
-  total: number;
+  /** how many items match the request in all; only the first page counts them */
+  total: number | null;
 }

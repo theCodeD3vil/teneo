@@ -28,11 +28,16 @@ function unique(values: (string | null | undefined)[]): string[] {
  * Given only the cards on screen, nothing loads for the rest of the history.
  * Everything loads after the list shows and is cached, so a list seen before
  * shows it at once. A lookup is undefined until its query has loaded.
+ * While `isScrolling`, nothing new is fetched: a flick past hundreds of cards
+ * would queue a thumbnail for each. What's loaded still shows, and the rest
+ * follows once scrolling stops.
  */
 export function useItemPreviews(
   items: MaybeRefOrGetter<ClipboardHistoryItem[]>,
+  isScrolling: MaybeRefOrGetter<boolean> = false,
 ) {
   const { settings } = useSettings();
+  const fetching = computed(() => !toValue(isScrolling));
 
   const bundleIds = computed(() =>
     unique(toValue(items).map((item) => item.sourceApp?.bundleId)),
@@ -76,6 +81,9 @@ export function useItemPreviews(
         // would redo every preview
         refetchOnWindowFocus: false,
         refetchOnMount: false,
+        // never stale, so re-enabling after a scroll doesn't redo what's loaded
+        staleTime: Infinity,
+        enabled: fetching.value,
       })),
     ),
     combine: toMap,
@@ -94,6 +102,7 @@ export function useItemPreviews(
         staleTime: Infinity,
         refetchOnWindowFocus: false,
         retry: false,
+        enabled: fetching.value,
       })),
     ),
     combine: toMap,

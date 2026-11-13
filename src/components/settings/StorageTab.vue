@@ -401,9 +401,11 @@ const clearHistoryMutation = useMutation({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="confirmLimitChange">
+          <!-- A plain Button, not AlertDialogAction: that closes the dialog
+               first, which clears the pending change before this can apply it -->
+          <Button variant="destructive" @click="confirmLimitChange">
             Delete and apply
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
