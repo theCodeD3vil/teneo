@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { openPanelHotkeyId } from "../shared/types/settings";
 import { showPanelEvent } from "../shared/types/windows";
@@ -7,33 +7,43 @@ import HomeFooter from "./components/HomeFooter.vue";
 import ItemPreview from "./components/ItemPreview.vue";
 import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
-import { useClipboard } from "./composables/useClipboard";
+import { useClipboardItem } from "./composables/useClipboard";
 import { useHotkeys } from "./composables/useHotkeys";
+import { usePanelIdleCleanup } from "./composables/usePanelIdleCleanup";
 import { PANEL_WIDTH } from "./constants/system";
 import type { ClipboardHistoryItem } from "./types/clipboard";
-import { resetPanel, resetPanelEvent } from "./utils/panel-reset";
+import {
+  notifyPanelVisibility,
+  resetPanel,
+  resetPanelEvent,
+} from "./utils/panel-reset";
 
 const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const searchQuery = ref("");
-// Space swaps the whole panel for this item's preview. It's looked up by id so
-// it follows history refreshes (a pin shows), and closes once it's deleted.
-const { clipboardItems } = useClipboard();
+// Space swaps the whole panel for this item's preview. The list's copy of the
+// item opens it at once; the whole item (a long text comes cut down with the
+// list) is fetched by id, follows history refreshes (a pin shows), and the
+// preview closes once it's deleted.
 const previewedItemId = ref<string | null>(null);
-const previewedItem = computed(
-  () =>
-    clipboardItems.value.find(({ id }) => id === previewedItemId.value) ?? null,
+const previewedListItem = ref<ClipboardHistoryItem | null>(null);
+const { item: previewedItem, isGone } = useClipboardItem(
+  previewedItemId,
+  previewedListItem,
 );
-watch(previewedItem, (item) => {
-  if (!item) closePreview();
+watch(isGone, (gone) => {
+  if (gone) closePreview();
 });
+usePanelIdleCleanup();
 
 function openPreview(item: ClipboardHistoryItem): void {
   searchInput.value?.blur(); // a hidden search field would still take keys
+  previewedListItem.value = item;
   previewedItemId.value = item.id;
 }
 
 function closePreview(): void {
   previewedItemId.value = null;
+  previewedListItem.value = null;
 }
 
 // As the panel hides, the list comes back with no slide: a hidden window can
@@ -66,6 +76,7 @@ async function toggleWindow() {
   const windowState = await tiny.win.getState();
   if (windowState?.visible) {
     await tiny.api.call("hidePanel");
+    notifyPanelVisibility(false);
     resetPanel();
     return;
   }
@@ -95,6 +106,7 @@ async function showWindow() {
   // The main window is a panel (tinyjs.json): show() gives it the keyboard
   // without activating Teneo, so macOS stays on a full-screen Space
   await tiny.win.show();
+  notifyPanelVisibility(true);
 }
 
 async function isCursorOverTray(): Promise<boolean> {
@@ -118,6 +130,7 @@ async function hideWindowOnBlur(): Promise<void> {
   // app, settings window included.
   if (windowState?.visible && !(await isCursorOverTray())) {
     await tiny.win.hide({ app: false });
+    notifyPanelVisibility(false);
     resetPanel();
   }
 }

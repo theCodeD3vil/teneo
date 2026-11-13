@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
 import ClipboardIcon from "~icons/tabler/clipboard";
 import CommandIcon from "~icons/tabler/command";
@@ -12,17 +12,14 @@ import DeleteIcon from "~icons/tabler/trash";
 
 import BetaBadge from "@/components/BetaBadge.vue";
 import Button from "@/components/ui/button/Button.vue";
-import { showCopiedNotice } from "@/composables/useCopiedNotice";
-import { useHotkeys } from "@/composables/useHotkeys";
 import { getPreviewPath } from "@/composables/useItemPreviews";
 import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
 import { useSettings } from "@/composables/useSettings";
-import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import { cn } from "@/lib/utils";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { getClipboardData, getImageName } from "@/utils/clipboard-items";
+import { copyItemToClipboard } from "@/utils/copy-item";
 import { formatFileSize } from "@/utils/file-size";
-import { resetPanel } from "@/utils/panel-reset";
 import { maskSecrets, type TextPart } from "@/utils/secrets";
 
 const props = defineProps<{
@@ -40,14 +37,9 @@ const emit = defineEmits<{
   (e: "preview"): void;
 }>();
 
-defineExpose({
-  copyAndHideWindow,
-  pasteAndHideWindow,
-  deleteItem,
-  pinItem,
-});
-
-const cardElement = ref<HTMLElement | null>(null);
+// Only what the card itself is clicked for lives here. The keys (Enter, ⌘1-9,
+// D, P) act through the list: with only the cards on screen in the page, the
+// card for a key's item may not be there at all (see AllTabContent).
 const isCopying = ref(false);
 // Bumped on each copy so the sweep across the card plays again
 const shimmerKey = ref(0);
@@ -142,26 +134,6 @@ const secretLabels = computed(() =>
 
 const imageName = getImageName(props.itemDetails);
 
-function handleQuickCopy(itemNumber: QuickCopyItemNumber): boolean {
-  if (
-    !props.supportsQuickPaste ||
-    props.quickPasteIndex !== itemNumber ||
-    isPreviewMissing.value
-  ) {
-    return false;
-  }
-
-  return copyItem(true);
-}
-
-function copyAndHideWindow(): boolean {
-  return copyItem(true);
-}
-
-function pasteAndHideWindow(): boolean {
-  return copyItem(true, true);
-}
-
 // A click copies once it's clear no second click follows; a double-click
 // previews instead. event.detail counts the clicks in a row.
 function handleClick(event: MouseEvent): void {
@@ -170,17 +142,23 @@ function handleClick(event: MouseEvent): void {
   clickCopyTimeout = setTimeout(() => copyItem(), doubleClickWait);
 }
 
-function copyItem(hideWindow = false, paste = false): boolean {
-  if (isPreviewMissing.value || isCopying.value) return false;
+function copyItem(): void {
+  if (isPreviewMissing.value || isCopying.value) return;
+  if (!getClipboardData(props.itemDetails)) return;
 
-  const clipboardData = getClipboardData(props.itemDetails);
-  if (!clipboardData) return false;
-
-  void copyToClipboard(clipboardData, hideWindow, paste).catch(() => undefined);
-  return true;
+  isCopying.value = true;
+  void copyItemToClipboard(props.itemDetails)
+    .then((copied) => {
+      if (copied) shimmerKey.value += 1;
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      copyFinishedTimeout = setTimeout(() => {
+        isCopying.value = false;
+      }, 1500);
+    });
 }
 
-// Posting ⌘V needs the Accessibility permission; ask for it when it is missing.
 // Soft delete: the history refreshes once the backend reports the change
 function deleteItem(): boolean {
   void tiny.api
@@ -200,52 +178,13 @@ function pinItem(): boolean {
   return true;
 }
 
-async function pasteIntoFrontmostApp(): Promise<void> {
-  const { trusted } = await tiny.app.paste();
-  if (!trusted) await tiny.app.permissions.request("accessibility");
-}
-
-async function copyToClipboard(
-  clipboardData: TinyClipboardWrite,
-  hideWindow: boolean,
-  paste: boolean,
-): Promise<void> {
-  isCopying.value = true;
-
-  try {
-    await tiny.clipboard.write(clipboardData);
-    shimmerKey.value += 1;
-    showCopiedNotice();
-    if (hideWindow) await tiny.api.call("hidePanel");
-    // after the hide, focus is back in the app the user was typing in
-    if (paste) await pasteIntoFrontmostApp();
-    // last, so the paste isn't held up behind the list re-rendering
-    if (hideWindow) resetPanel();
-  } finally {
-    copyFinishedTimeout = setTimeout(() => {
-      isCopying.value = false;
-    }, 1500);
-  }
-}
-
-useHotkeys({ copyItemByNumber: handleQuickCopy });
-
-function scrollActiveCardIntoView(): void {
-  if (props.isActive) {
-    cardElement.value?.scrollIntoView({ block: "nearest" });
-  }
-}
-
-onMounted(scrollActiveCardIntoView);
 onUnmounted(() => {
   clearTimeout(copyFinishedTimeout);
   clearTimeout(clickCopyTimeout);
 });
-watch(() => props.isActive, scrollActiveCardIntoView, { flush: "post" });
 </script>
 <template>
   <div
-    ref="cardElement"
     :data-active="isActive || undefined"
     @click="handleClick"
     @dblclick="emit('preview')"

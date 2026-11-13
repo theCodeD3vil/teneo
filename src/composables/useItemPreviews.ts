@@ -1,6 +1,7 @@
 import { useQueries } from "@tanstack/vue-query";
 import { computed, type MaybeRefOrGetter, toValue } from "vue";
 
+import { clipboardCacheDuration } from "@/composables/useClipboard";
 import { useSettings } from "@/composables/useSettings";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 
@@ -24,6 +25,7 @@ function unique(values: (string | null | undefined)[]): string[] {
 /**
  * The list asks for its cards' app icons, previews and link icons in one
  * place: a few queries per distinct app, file and link, not three per card.
+ * Given only the cards on screen, nothing loads for the rest of the history.
  * Everything loads after the list shows and is cached, so a list seen before
  * shows it at once. A lookup is undefined until its query has loaded.
  */
@@ -52,9 +54,10 @@ export function useItemPreviews(
         queryFn: (): Promise<string | null> =>
           tiny.api.call("appIcon", { bundleId }),
         select: (iconUrl: string | null) => [bundleId, iconUrl] as const,
-        // an app's icon doesn't change while Teneo runs
+        // an app's icon doesn't change while Teneo runs, but one no card on
+        // screen shows is let go of after a while (see usePanelIdleCleanup)
         staleTime: Infinity,
-        gcTime: Infinity,
+        gcTime: clipboardCacheDuration,
       })),
     ),
     combine: toMap,

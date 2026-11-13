@@ -67,9 +67,43 @@ export interface ClipboardHistoryItem {
   /** bytes of a single copied file, read each time history is listed; null
    *  for a folder, a missing file, several files and other kinds */
   fileSize: number | null;
-  /** secrets in the text, found each time history is listed, so a rule
-   *  added later covers older copies too */
+  /** secrets in the text, found when it's copied and stored with it; a rule
+   *  added later is applied to older copies once at startup */
   secrets: SecretSpan[];
-  /** set when the text is a link, found each time history is listed */
+  /** set when the text is a link, found when it's copied and stored with it */
   link: ClipboardLink | null;
+  /** the history list carries only the start of a long text (see
+   *  textPreviewLength); the whole of it comes from the clipboardItem api */
+  isTruncated: boolean;
+}
+
+/** How much of a text the history list carries. The card shows less; the
+ *  preview, copy and paste fetch the whole text by id. */
+export const textPreviewLength = 1000;
+
+/** Which items the history list asks for; "all" takes every kind. */
+export interface ClipboardListRequest {
+  kind: ClipboardItemKind | "all";
+  /** matched against the text, file paths, color and source app, case-insensitively */
+  search: string;
+  /** the last item of the page before; undefined for the first page */
+  cursor?: ClipboardListCursor;
+  limit: number;
+}
+
+/** Where a page ends: the sort keys of its last item (pinned first, newest
+ *  first, then id), so the next page starts after it even if the history
+ *  changed in between. */
+export interface ClipboardListCursor {
+  pinnedAt: number | null;
+  dateCopied: number;
+  id: string;
+}
+
+export interface ClipboardListPage {
+  items: ClipboardHistoryItem[];
+  /** null once there is no page after this one */
+  nextCursor: ClipboardListCursor | null;
+  /** how many items match the request in all */
+  total: number;
 }
