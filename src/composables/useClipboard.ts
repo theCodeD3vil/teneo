@@ -78,9 +78,9 @@ export function useClipboardList(
   const items = computed(() =>
     uniqueById(query.data.value?.pages.flatMap((page) => page.items) ?? []),
   );
-  // the page fetched last has the latest count
+  // only the first page counts; a change refetches it along with the rest
   const total = computed(
-    () => query.data.value?.pages.at(-1)?.total ?? items.value.length,
+    () => query.data.value?.pages[0]?.total ?? items.value.length,
   );
 
   return {
@@ -165,7 +165,7 @@ async function fetchClipboardPage(
   return {
     items,
     nextCursor: page.nextCursor ?? null,
-    total: typeof page.total === "number" ? page.total : items.length,
+    total: typeof page.total === "number" ? page.total : null,
   };
 }
 

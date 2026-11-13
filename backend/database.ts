@@ -462,7 +462,11 @@ export async function listClipboardItems(
   return {
     items,
     nextCursor: exhausted ? null : (cursor ?? null),
-    total: await countClipboardItems(app, request.kind, search, maskSecrets),
+    // the first page's count stands for the list: with a search, counting
+    // reads every encrypted row, too costly to repeat for each page
+    total: request.cursor
+      ? null
+      : await countClipboardItems(app, request.kind, search, maskSecrets),
   };
 }
 

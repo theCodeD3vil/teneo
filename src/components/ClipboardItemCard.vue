@@ -34,7 +34,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: "preview"): void;
+  // carries its item so the list can pass one handler to every card
+  (e: "preview", item: ClipboardHistoryItem): void;
 }>();
 
 // Only what the card itself is clicked for lives here. The keys (Enter, ⌘1-9,
@@ -187,7 +188,7 @@ onUnmounted(() => {
   <div
     :data-active="isActive || undefined"
     @click="handleClick"
-    @dblclick="emit('preview')"
+    @dblclick="emit('preview', itemDetails)"
     :class="
       cn([
         'group/card hover:bg-foreground/5 dark:hover:bg-foreground/6 relative cursor-pointer rounded-md p-3 transition-[bg]',

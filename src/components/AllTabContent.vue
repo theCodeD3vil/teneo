@@ -173,14 +173,17 @@ function measureRow(row: Element | ComponentPublicInstance | null): void {
   if (row instanceof Element) virtualizer.value.measureElement(row);
 }
 
-// Previews, icons and link icons only for the cards on screen
+// Previews, icons and link icons only for the cards on screen, and nothing
+// new fetched while the list is scrolling
 const visibleItems = computed(() =>
   visibleRows.value.flatMap(({ row }) =>
     row.type === "item" ? [row.item] : [],
   ),
 );
-const { sourceAppIconUrl, filePreview, linkPreviewUrl } =
-  useItemPreviews(visibleItems);
+const { sourceAppIconUrl, filePreview, linkPreviewUrl } = useItemPreviews(
+  visibleItems,
+  () => virtualizer.value.isScrolling,
+);
 
 // The selected card is scrolled into view; at the top of its group, its
 // header comes along so the group is named
@@ -335,7 +338,7 @@ defineExpose({
           :is-active="row.item.id === props.activeItemId"
           :quick-paste-index="row.index + 1"
           :supports-quick-paste="row.index + 1 < 10"
-          @preview="emit('preview', row.item)" />
+          @preview="emit('preview', $event)" />
       </div>
     </div>
     <Empty v-else>
