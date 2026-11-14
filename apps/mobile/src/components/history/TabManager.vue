@@ -229,7 +229,7 @@ watch(selectedTab, async (tab, previous) => {
       class="h-auto! w-full shrink-0 touch-pan-x [scrollbar-width:none] justify-start gap-x-2 overflow-x-auto overflow-y-hidden bg-transparent! p-0!">
       <div v-for="tabItem in tabValues" :key="tabItem" class="shrink-0">
         <TabsTrigger
-          class="data-active:bg-primary/10! dark:data-active:bg-primary/20! bg-foreground/5 dark:bg-foreground/10 data-active:text-primary! data-active:border-primary/80! h-9 min-w-14 rounded-full px-3.5 text-sm font-normal capitalize"
+          class="data-active:bg-primary/10! dark:data-active:bg-primary/20! bg-foreground/5 dark:bg-foreground/10 data-active:text-primary! h-9 min-w-14 rounded-full border-none! px-3.5 text-sm font-normal capitalize shadow-none!"
           :value="tabItem">
           {{ tabItem }}
         </TabsTrigger>
