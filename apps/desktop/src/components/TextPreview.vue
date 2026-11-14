@@ -1,5 +1,17 @@
 <script setup lang="ts">
 import { useVirtualizer } from "@tanstack/vue-virtual";
+import { ButtonGroup } from "@teneo/ui/components/button-group";
+import Button from "@teneo/ui/components/button/Button.vue";
+import ScrollArea from "@teneo/ui/components/scroll-area/ScrollArea.vue";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@teneo/ui/components/tooltip";
+import { detectCodeLanguage, highlightCode } from "@teneo/ui/utils/highlight";
+import { maskSecrets } from "@teneo/ui/utils/secrets";
+import { convertCase, type TextCase } from "@teneo/ui/utils/text-case";
 import { computedAsync } from "@vueuse/core";
 import {
   type Component,
@@ -20,22 +32,10 @@ import UpperCaseIcon from "~icons/tabler/letter-case-upper";
 import KebabCaseIcon from "~icons/tabler/minus";
 import SnakeCaseIcon from "~icons/tabler/underline";
 
-import { ButtonGroup } from "@/components/ui/button-group";
-import Button from "@/components/ui/button/Button.vue";
-import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { usePreviewCopy } from "@/composables/usePreviewCopy";
 import { useSettings } from "@/composables/useSettings";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
 import { getClipboardData } from "@/utils/clipboard-items";
-import { detectCodeLanguage, highlightCode } from "@/utils/highlight";
-import { maskSecrets } from "@/utils/secrets";
-import { convertCase, type TextCase } from "@/utils/text-case";
 
 const props = defineProps<{
   item: ClipboardHistoryItem;

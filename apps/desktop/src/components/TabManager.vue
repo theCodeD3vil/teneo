@@ -1,9 +1,15 @@
 <script setup lang="ts">
+import Kbd from "@teneo/ui/components/kbd/Kbd.vue";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@teneo/ui/components/tabs";
 import { onBeforeMount, onMounted, onUnmounted, ref, watch } from "vue";
 import ArrowLeftIcon from "~icons/tabler/chevron-left";
 import ArrowRightIcon from "~icons/tabler/chevron-right";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClipboardList } from "@/composables/useClipboard";
 import { useHotkeys } from "@/composables/useHotkeys";
 import { useSettings } from "@/composables/useSettings";
@@ -17,7 +23,6 @@ import {
   type TabVariant,
 } from "../types/clipboard";
 import AllTabContent from "./AllTabContent.vue";
-import Kbd from "./ui/kbd/Kbd.vue";
 
 const props = defineProps<{
   searchQuery: string;

@@ -1,9 +1,8 @@
 <script setup lang="ts">
+import { Badge } from "@teneo/ui/components/badge";
 import CheckIcon from "~icons/tabler/circle-check-filled";
 import InProgressIcon from "~icons/tabler/circle-half-2";
 import BetaIcon from "~icons/tabler/test-pipe";
-
-import { Badge } from "@/components/ui/badge";
 
 type Status = "done" | "in-progress" | "planned";
 

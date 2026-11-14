@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Badge } from "@teneo/ui/components/badge";
 import { type Component, ref } from "vue";
 import ClipboardIcon from "~icons/tabler/clipboard-filled";
 import PasteIcon from "~icons/tabler/clipboard-text-filled";
@@ -9,8 +10,6 @@ import KeyboardIcon from "~icons/tabler/keyboard-filled";
 import PasswordIcon from "~icons/tabler/lock-filled";
 import SearchIcon from "~icons/tabler/search-filled";
 import BetaIcon from "~icons/tabler/test-pipe";
-
-import { Badge } from "@/components/ui/badge";
 
 const features: Array<{
   title: string;

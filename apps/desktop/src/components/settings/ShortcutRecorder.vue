@@ -1,10 +1,10 @@
 <script lang="ts" setup>
+import { Button } from "@teneo/ui/components/button";
+import { Kbd } from "@teneo/ui/components/kbd";
 import { useEventListener } from "@vueuse/core";
 import { computed, onUnmounted, ref } from "vue";
 import CancelIcon from "~icons/tabler/x";
 
-import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
 import { getShortcutLabels, readShortcut } from "@/utils/shortcuts";
 
 /** the shortcut as a tinyjs combo, "" when none is set */

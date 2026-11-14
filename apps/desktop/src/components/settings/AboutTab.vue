@@ -1,8 +1,8 @@
 <script lang="ts" setup>
 import { useMutation } from "@tanstack/vue-query";
+import { Button } from "@teneo/ui/components/button";
 import { computed } from "vue";
 
-import { Button } from "@/components/ui/button";
 import { promptToInstallUpdate } from "@/utils/updates";
 
 import { version } from "../../../tinyjs.json";
