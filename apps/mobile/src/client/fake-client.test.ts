@@ -331,11 +331,19 @@ describe("FakeClient", () => {
       expect(status.state).toBe("not_paired");
       expect(status.devices.length).toBe(0);
 
+      // The link a Mac's QR code holds, with its addresses
+      const linkResult = await client.pair(
+        "teneo://pair?v=1&k=pub_secret123key456&a=192.168.1.20:47823,10.0.0.4:47823",
+      );
+      expect(linkResult.ok).toBe(true);
+      expect(syncStatusUpdates).toBe(3);
+      await client.unpair();
+
       // Recovery code format
       const recoveryResult = await client.pair("ABCD-1234-EFGH-5678");
       expect(recoveryResult.ok).toBe(true);
       expect(recoveryResult.deviceName).toBe("MacBook Pro");
-      expect(syncStatusUpdates).toBe(3);
+      expect(syncStatusUpdates).toBe(5);
     });
   });
 });

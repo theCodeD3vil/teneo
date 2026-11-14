@@ -4,11 +4,13 @@ import { Input } from "@teneo/ui/components/input";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { cn } from "@teneo/ui/lib/utils";
-import { computed, ref } from "vue";
+import { type Component, computed, ref } from "vue";
 import TickIcon from "~icons/tabler/check";
+import ScanIcon from "~icons/tabler/scan";
 
 import logoUrl from "../../assets/logo.svg";
 import { useNavigation } from "../../composables/useNavigation";
+import { canScanQrCode, useQrScanner } from "../../composables/useQrScanner";
 import { useSettings } from "../../composables/useSettings";
 import { markSetupDone } from "../../composables/useSetup";
 import { useSyncStatus } from "../../composables/useSyncStatus";
@@ -34,12 +36,27 @@ const isSyncOn = computed(
 const recoveryCode = ref("");
 const joinedDeviceName = ref<string | null>(null);
 
-async function joinWithCode(): Promise<void> {
-  const deviceName = await join(recoveryCode.value);
+async function joinWith(code: string): Promise<void> {
+  const deviceName = await join(code);
   if (!deviceName) return;
   joinedDeviceName.value = deviceName;
   recoveryCode.value = "";
   currentStep.value = "ready";
+}
+
+// Scanning the Mac's QR code is the quick way; typing its recovery code is
+// for when the camera can't be used
+const { scan, isPreparing, isScanning } = useQrScanner();
+const scanError = ref("");
+
+async function scanAndJoin(): Promise<void> {
+  scanError.value = "";
+  try {
+    const code = await scan();
+    if (code) await joinWith(code);
+  } catch (caught) {
+    scanError.value = caught instanceof Error ? caught.message : String(caught);
+  }
 }
 
 const captureOnOpen = computed({
@@ -62,6 +79,7 @@ const canSetUpLater = isJoining;
 interface FooterAction {
   label: string;
   run: () => unknown;
+  icon?: Component;
   disabled?: boolean;
   isBusy?: boolean;
 }
@@ -70,10 +88,20 @@ const primaryAction = computed<FooterAction>(() => {
   if (currentStep.value === "welcome") {
     return { label: "Continue", run: () => (currentStep.value = "sync") };
   }
+  // the button scans until a code is typed, then joins with it
+  if (isJoining.value && canScanQrCode && !recoveryCode.value.trim()) {
+    return {
+      label: isPreparing.value ? "Getting the scanner ready…" : "Scan QR code",
+      run: scanAndJoin,
+      icon: ScanIcon,
+      disabled: isBusy.value || isScanning.value,
+      isBusy: isBusy.value || isPreparing.value,
+    };
+  }
   if (isJoining.value) {
     return {
       label: "Join",
-      run: joinWithCode,
+      run: () => joinWith(recoveryCode.value),
       disabled: isBusy.value || !recoveryCode.value.trim(),
       isBusy: isBusy.value,
     };
@@ -118,7 +146,11 @@ const primaryAction = computed<FooterAction>(() => {
           <h1 class="text-2xl font-medium text-balance">Connect to your Mac</h1>
           <p class="text-foreground/60 max-w-md text-xs text-balance">
             On your Mac, open Teneo's Settings › Sync and choose Add a device.
-            Type the recovery code it shows.
+            {{
+              canScanQrCode
+                ? "Scan the QR code it shows."
+                : "Type the recovery code it shows."
+            }}
           </p>
 
           <SettingsSection class="mt-4 w-full text-left">
@@ -131,12 +163,16 @@ const primaryAction = computed<FooterAction>(() => {
               </span>
             </SettingsField>
             <SettingsField v-else>
-              <template #label>Recovery code</template>
+              <template #label>
+                {{
+                  canScanQrCode ? "Or type the recovery code" : "Recovery code"
+                }}
+              </template>
               <template #description
                 >Shown under the QR code on your Mac</template
               >
               <template #footer>
-                <form @submit.prevent="joinWithCode">
+                <form @submit.prevent="joinWith(recoveryCode)">
                   <Input
                     v-model="recoveryCode"
                     placeholder="XXXX-XXXX-XXXX"
@@ -149,8 +185,10 @@ const primaryAction = computed<FooterAction>(() => {
               </template>
             </SettingsField>
           </SettingsSection>
-          <p v-if="error" class="text-destructive text-xs text-balance">
-            {{ error }}
+          <p
+            v-if="scanError || error"
+            class="text-destructive text-xs text-balance">
+            {{ scanError || error }}
           </p>
           <p v-else class="text-foreground/60 text-xs text-balance">
             Your history syncs over Wi-Fi, encrypted, with no account or server.
@@ -211,7 +249,9 @@ const primaryAction = computed<FooterAction>(() => {
           class="w-full max-w-xs"
           :disabled="primaryAction.disabled"
           @click="primaryAction.run">
-          <Spinner v-if="primaryAction.isBusy" /> {{ primaryAction.label }}
+          <Spinner v-if="primaryAction.isBusy" />
+          <component :is="primaryAction.icon" v-else-if="primaryAction.icon" />
+          {{ primaryAction.label }}
         </Button>
         <Button
           variant="ghost"

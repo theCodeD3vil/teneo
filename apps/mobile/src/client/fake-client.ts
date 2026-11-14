@@ -244,8 +244,11 @@ export class FakeClient implements TeneoClient {
   async pair(code: string): Promise<PairResult> {
     const trimmed = code.trim();
 
-    // Check if code matches teneo://pair?v=1&k=... or a valid recovery code format
-    const isTeneoUri = /^teneo:\/\/pair\?v=1&k=[a-zA-Z0-9_-]+$/.test(trimmed);
+    // The QR code's link (teneo://pair?v=1&k=<key>, then the Mac's addresses
+    // and anything a later version adds) or a recovery code
+    const isTeneoUri = /^teneo:\/\/pair\?v=1&k=[a-zA-Z0-9_-]+(&\S*)?$/.test(
+      trimmed,
+    );
     const isRecoveryCode =
       /^[A-Za-z0-9]{4}(-[A-Za-z0-9]{4}){2,5}$/.test(trimmed) ||
       /^[a-fA-F0-9]{32,64}$/.test(trimmed);

@@ -4,7 +4,9 @@ import { Input } from "@teneo/ui/components/input";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { computed, ref } from "vue";
+import ScanIcon from "~icons/tabler/scan";
 
+import { canScanQrCode, useQrScanner } from "../../composables/useQrScanner";
 import { useSettings } from "../../composables/useSettings";
 import { useSyncStatus } from "../../composables/useSyncStatus";
 import type { PairedDevice } from "../../types/sync";
@@ -31,6 +33,19 @@ async function joinWithCode(): Promise<void> {
   if (await join(recoveryCode.value)) {
     recoveryCode.value = "";
     isJoining.value = false;
+  }
+}
+
+const { scan, isPreparing, isScanning } = useQrScanner();
+const scanError = ref("");
+
+async function scanAndJoin(): Promise<void> {
+  scanError.value = "";
+  try {
+    const code = await scan();
+    if (code) await join(code);
+  } catch (caught) {
+    scanError.value = caught instanceof Error ? caught.message : String(caught);
   }
 }
 
@@ -84,10 +99,32 @@ const isTurnOffWarningOpen = ref(false);
     <!-- sync is off -->
     <template v-if="!isOn">
       <SettingsSection>
-        <SettingsField>
+        <SettingsField v-if="canScanQrCode">
           <template #label>Join your other devices</template>
+          <template #description>Scan the QR code on your Mac</template>
+          <Button
+            size="sm"
+            :disabled="isBusy || isScanning"
+            @click="scanAndJoin">
+            <Spinner v-if="isPreparing || (isBusy && !isJoining)" />
+            <ScanIcon v-else />
+            Scan
+          </Button>
+        </SettingsField>
+        <SettingsField>
+          <template #label>
+            {{
+              canScanQrCode
+                ? "Type the recovery code"
+                : "Join your other devices"
+            }}
+          </template>
           <template #description>
-            Use the recovery code from your Mac
+            {{
+              canScanQrCode
+                ? "If the camera can't be used"
+                : "Use the recovery code from your Mac"
+            }}
           </template>
           <Button
             variant="outline"
@@ -121,8 +158,8 @@ const isTurnOffWarningOpen = ref(false);
       </SettingsSection>
       <p class="text-foreground/60 -mt-3 px-1 text-xs text-balance">
         On your Mac, open Teneo's Settings › Sync and choose Add a device to see
-        the code. Your history syncs over Wi-Fi, encrypted, with no account or
-        server.
+        the {{ canScanQrCode ? "QR code and recovery code" : "code" }}. Your
+        history syncs over Wi-Fi, encrypted, with no account or server.
       </p>
     </template>
 
@@ -190,12 +227,14 @@ const isTurnOffWarningOpen = ref(false);
       </SettingsSection>
     </template>
 
-    <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
+    <p v-if="scanError || error" class="text-destructive text-sm">
+      {{ scanError || error }}
+    </p>
 
     <ConfirmSheet
       v-model:open="isTurnOffWarningOpen"
       title="Turn off sync?"
-      description="This phone stops syncing but keeps your history. To sync again, use a recovery code from another device."
+      description="This phone stops syncing but keeps your history. To sync again, scan the QR code or use the recovery code from another device."
       confirm-label="Turn off sync"
       @confirm="turnOff()" />
 
