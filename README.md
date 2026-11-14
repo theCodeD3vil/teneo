@@ -130,7 +130,7 @@ Here's what's planned next. More will be added over time.
 - **Previews (in progress, beta).** Open any item in your history to see it in full, and do more with it than copy and paste. A first version is out to try; see [Features](#features).
 - **Landing page (done).** A proper home for Teneo, where you can explore what it does and download it.
 - **Sync engine.** Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).
-- **Android app.** Sync your clipboard history between your Android phone and your Mac.
+- **Android app (in progress).** Sync your clipboard history between your Android phone and your Mac. Its screens are built and running on sample data; saving your history on the phone and syncing it come next.
 
 ## Development
 
@@ -140,6 +140,8 @@ Teneo is a [Bun](https://bun.sh) workspaces monorepo, with [Turborepo](https://t
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `apps/desktop`    | The Mac app: Vue frontend in `src/`, TinyJS backend in `backend/`.                                                             |
 | `apps/site`       | The landing page.                                                                                                              |
+| `apps/mobile`     | The Android app (see [Android app](#android-app)).                                                                             |
+| `packages/ui`     | `@teneo/ui`: the UI components, theme and helpers that the Mac app, the site and the Android app share.                        |
 | `packages/shared` | `@teneo/shared`: the types and constants the app's frontend and backend share. It ships TypeScript source, with no build step. |
 
 Run these from the repo root:
@@ -149,9 +151,34 @@ Run these from the repo root:
 | `bun install`                                        | Installs every workspace.                         |
 | `bun run desktop`                                    | Runs the app with `tinyjs dev`.                   |
 | `bun run site`                                       | Serves the landing page.                          |
+| `bun run mobile`                                     | Serves the Android app in a browser.              |
 | `bun run build` \| `typecheck` \| `test`             | Runs that task in every workspace (Turbo caches). |
 | `bun run lint` \| `lint:fix` \| `fmt` \| `fmt:check` | Lints and formats the whole repo, once.           |
 
 TinyJS reads everything from the current folder, so run any `tinyjs` command (`dev`, `build`, `publish`) from `apps/desktop`. The release version lives in `apps/desktop/tinyjs.json`.
 
 `tinyjs dev` restarts the backend when a file in `apps/desktop/backend` changes, but not when one in `packages/shared` does (TinyJS only watches a `shared/` folder beside `backend/`). After editing `packages/shared`, restart `bun run desktop` to pick the change up in the backend. The frontend still reloads on its own.
+
+### Android app
+
+`apps/mobile` is the Android app: Vue and Tailwind on the shared `@teneo/ui` components, wrapped with [Capacitor](https://capacitorjs.com). The native project in `apps/mobile/android` is committed.
+
+For now the app runs on sample data. `FakeClient` (`apps/mobile/src/client`) keeps a seeded history in memory and pretends to sync and pair. Screens only talk to the `TeneoClient` interface, so a real client can take its place without changing them.
+
+To build it for a phone you need:
+
+- **Java 21.** `apps/mobile/mise.toml` pins it, and the Android scripts run Gradle through [mise](https://mise.jdx.dev), so run `mise install` in `apps/mobile` once. Newer Java versions break the Android build tools.
+- **The Android SDK**, with platform 36.1 and its build tools. Android Studio installs it. Gradle finds it through `ANDROID_HOME`, or `sdk.dir` in `apps/mobile/android/local.properties` (not committed).
+- **An Android phone** running Android 10 or later, with USB debugging on, that `adb devices` lists. Scanning the Mac's QR code uses Google's code scanner, so the phone needs Google Play services. Teneo never asks for the camera permission.
+
+Then, from the repo root:
+
+| Command                      | What it does                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run mobile`             | Serves the app at `http://127.0.0.1:5175`. Open it in a phone-sized browser window. The browser can't scan, so it offers the typed recovery code. |
+| `bun run mobile:android`     | Builds the app, installs it on the phone and opens it.                                                                                            |
+| `bun run mobile:android:dev` | Installs a build that loads the app from `bun run mobile` over USB, so edits show on the phone as you save. Keep `bun run mobile` running.        |
+
+`mobile:android:dev` points the phone at your Mac through `adb reverse`, so it only works while the phone is plugged in. Run `bun run mobile:android` to go back to a build that works on its own. The debug APK lands in `apps/mobile/android/app/build/outputs/apk/debug`.
+
+The Android scripts aren't part of Turbo's `build`, so CI and the release workflow don't need Java or the Android SDK.
