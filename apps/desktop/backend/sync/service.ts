@@ -1,6 +1,11 @@
 // The sync engine, its store, and the transport that carries it, put together:
 // what the app and the dev peer both start. Nothing runs until this is called.
-import { type Bytes, type ConnectedPeer, SyncEngine } from "@teneo/sync";
+import {
+  type Bytes,
+  type ConnectedPeer,
+  type PeerRecord,
+  SyncEngine,
+} from "@teneo/sync";
 
 import {
   getSyncIdentity,
@@ -31,6 +36,8 @@ export interface SyncService {
   /** The port listened on, or null when none was free. */
   readonly port: number | null;
   peers(): ConnectedPeer[];
+  /** Every device paired before, connected or not. */
+  knownPeers(): Promise<PeerRecord[]>;
   /** The history was changed here: send it on. */
   localChanged(): void;
   stop(): Promise<void>;
@@ -69,6 +76,7 @@ export async function startSyncService(
     deviceId,
     port: transport.port,
     peers: () => engine.peers(),
+    knownPeers: () => store.listPeers(),
     localChanged: () => engine.localChanged(),
     async stop() {
       engine.stop();

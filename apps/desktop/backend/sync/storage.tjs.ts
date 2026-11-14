@@ -19,12 +19,13 @@ import {
   listClipboardItemSizes,
   listClipboardItems,
   purgeOldTombstones,
+  restampSecretItems,
   saveClipboardItem,
   setClipboardItemPinned,
   softDeleteClipboardItem,
 } from "../database";
 import { clearClipboardHistory } from "../history-limits";
-import { loadSettings, updateSettings } from "../settings";
+import { getSettings, loadSettings, updateSettings } from "../settings";
 import { all, run } from "../sqlite";
 import type { ClipboardItemToSave } from "../types/clipboard";
 import { pinStampFor, tombstoneLifetime } from "./records";
@@ -880,6 +881,78 @@ await test("a Mac's history and a second device end up the same, through the rea
   same(errors.length, 0, `no engine errors: ${errors.map(String).join("; ")}`);
   engine.stop();
   network.stop();
+});
+
+await test("restampSecretItems sends the rows holding secrets again, and only those", async () => {
+  reset();
+  const plain = await saveClipboardItem(textItem("plain"), app);
+  const secret = await saveClipboardItem(
+    textItem("a secret " + secretText),
+    app,
+  );
+  await updateSettings({ encryptSecrets: true }, app);
+  const sealed = await saveClipboardItem(textItem("sealed " + secretText), app);
+  await updateSettings({ encryptSecrets: false }, app);
+  check(rowOf(sealed.id).encrypted === 1, "one of them is saved encrypted");
+  // as an older Teneo left it: encrypted, before any secret was recorded for it
+  run(
+    database,
+    `UPDATE "CLIPBOARD_ITEMS" SET secrets = NULL WHERE id = ?`,
+    sealed.id,
+  );
+  // deleted while sync was off: its text and its secret are still there
+  const syncWasOn = getSettings().syncEnabled;
+  await updateSettings({ syncEnabled: false }, app);
+  const gone = await saveClipboardItem(textItem("gone " + secretText), app);
+  await softDeleteClipboardItem(gone.id, app);
+  await updateSettings({ syncEnabled: syncWasOn }, app);
+  check(rowOf(gone.id).secrets !== null, "it still holds its secret");
+
+  const readPast = head(); // a device that has read everything so far
+  const places = {
+    plain: rowOf(plain.id).syncSeq,
+    gone: rowOf(gone.id).syncSeq,
+  };
+  same(
+    await restampSecretItems(app),
+    2,
+    "the plain secret and the encrypted one",
+  );
+  same(rowOf(plain.id).syncSeq, places.plain, "a plain text keeps its place");
+  same(rowOf(gone.id).syncSeq, places.gone, "a deleted one keeps its place");
+
+  const again = await store.changesAfter(readPast, 100);
+  same(
+    again.changes.map((change) => change.record.id).sort(),
+    [secret.id, sealed.id].sort(),
+    "the device that had read past them reads them again",
+  );
+  same(
+    again.changes.map((change) => change.hasSecret),
+    [true, true],
+    "still marked as holding secrets",
+  );
+});
+
+await test("forgetPeers forgets the paired devices and nothing else", async () => {
+  reset();
+  await store.transaction(async (tx) => {
+    await tx.put(record("t-forget", "kept"));
+    await tx.updatePeer(peerId, {
+      name: "Peer",
+      platform: "mac",
+      epoch: "e1",
+      receivedSeq: 3,
+    });
+  });
+  check(
+    (await store.listPeers()).some((peer) => peer.deviceId === peerId),
+    "the device is paired",
+  );
+  await store.forgetPeers();
+  same(await store.listPeers(), [], "no device is left");
+  same(await store.getPeer(peerId), null, "and its cursor went with it");
+  same(rowOf("t-forget").value, "kept", "the history stays");
 });
 
 await tjs.remove(folder).catch(() => {});

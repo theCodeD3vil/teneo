@@ -128,6 +128,14 @@ export class SqliteSyncStore implements SyncStore {
     );
   }
 
+  /** Forget every device paired before: what turning sync off does. */
+  async forgetPeers(): Promise<void> {
+    const database = await initializeDatabase(this.app);
+    await exclusive(async () => {
+      run(database, `DELETE FROM "SYNC_PEERS"`);
+    });
+  }
+
   async latestStamp(): Promise<string | null> {
     const [latest] = all<{ stamp: string | null }>(
       await initializeDatabase(this.app),

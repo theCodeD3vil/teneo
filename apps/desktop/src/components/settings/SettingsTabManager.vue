@@ -5,28 +5,40 @@ import {
   TabsList,
   TabsTrigger,
 } from "@teneo/ui/components/tabs";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import HardDriveIcon from "~icons/tabler/database";
 import InformationCircleIcon from "~icons/tabler/info-circle";
 import KeyboardIcon from "~icons/tabler/keyboard";
+import SyncIcon from "~icons/tabler/refresh";
 import SettingsIcon from "~icons/tabler/settings";
 import ShieldIcon from "~icons/tabler/shield";
+
+import { useSyncStatus } from "@/composables/useSyncStatus";
 
 import AboutTab from "./AboutTab.vue";
 import GeneralTab from "./GeneralTab.vue";
 import HotkeysTab from "./HotkeysTab.vue";
 import SecurityTab from "./SecurityTab.vue";
 import StorageTab from "./StorageTab.vue";
+import SyncTab from "./SyncTab.vue";
 
-const settingsTabs = [
+const allTabs = [
   { value: "general", icon: SettingsIcon, content: GeneralTab },
   { value: "security", icon: ShieldIcon, content: SecurityTab },
   { value: "hotkeys", icon: KeyboardIcon, content: HotkeysTab },
   { value: "storage", icon: HardDriveIcon, content: StorageTab },
+  { value: "sync", icon: SyncIcon, content: SyncTab },
   { value: "about", icon: InformationCircleIcon, content: AboutTab },
 ] as const;
 
-type SettingsTab = (typeof settingsTabs)[number]["value"];
+type SettingsTab = (typeof allTabs)[number]["value"];
+
+// Sync is behind a switch until it ships: the tab shows only when the backend
+// says it is available
+const { status: syncStatus } = useSyncStatus();
+const settingsTabs = computed(() =>
+  allTabs.filter((tab) => tab.value !== "sync" || syncStatus.value?.available),
+);
 
 const selectedTab = ref<SettingsTab>("general");
 </script>

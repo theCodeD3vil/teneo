@@ -451,6 +451,19 @@ export async function deleteClipboardItems(
   }
 }
 
+/** Send the items that hold secrets again. They were left out while "sync
+ *  items with secrets" was off, and a device that has read past a row never
+ *  asks for it again. Returns how many there are. */
+export async function restampSecretItems(app: TinyApp): Promise<number> {
+  const database = await initializeDatabase(app);
+  return exclusive(async () =>
+    restampRows(
+      database,
+      `kind = 'text' AND deletedAt IS NULL AND (secrets IS NOT NULL OR encrypted = 1)`,
+    ),
+  );
+}
+
 /** Remove the tombstones that have been kept their 30 days: any device that
  *  was away longer than that has to be paired again. */
 export async function purgeOldTombstones(app: TinyApp): Promise<void> {

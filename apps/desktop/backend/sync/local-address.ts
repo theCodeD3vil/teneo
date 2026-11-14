@@ -34,3 +34,28 @@ export function isLocalNetworkAddress(address: string): boolean {
     (first === 169 && second === 254)
   );
 }
+
+export interface NetworkAddress {
+  name: string;
+  address: string;
+  internal: boolean;
+}
+
+/** `ip:port` for each IPv4 address of this Mac that another device on the
+ *  network could connect to. Link-local ones are left out: a device that only
+ *  has those is not on a network with the Mac. */
+export function pairingAddresses(
+  interfaces: NetworkAddress[],
+  port: number,
+): string[] {
+  const found = interfaces
+    .filter(
+      (face) =>
+        !face.internal &&
+        /^\d+\.\d+\.\d+\.\d+$/.test(face.address) &&
+        !face.address.startsWith("169.254.") &&
+        isLocalNetworkAddress(face.address),
+    )
+    .map((face) => `${face.address}:${port}`);
+  return [...new Set(found)];
+}

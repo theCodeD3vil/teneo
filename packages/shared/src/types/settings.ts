@@ -17,6 +17,10 @@ export interface AppSettings {
    *  user turns it on; changed only through the sync api, which also starts or
    *  stops the sync engine */
   syncEnabled: boolean;
+  /** let items that hold a secret travel to the user's other devices too. Off
+   *  until the user turns it on; changed only through the sync api, which also
+   *  sends the items that were held back */
+  syncSecrets: boolean;
   /** show a copied link's site icon, fetched from the site itself */
   showLinkPreviews: boolean;
   /** bundle ids of apps the user added to the ignore list; known password
@@ -43,6 +47,7 @@ export const defaultSettings: AppSettings = {
   maskSecrets: true,
   encryptSecrets: false,
   syncEnabled: false,
+  syncSecrets: false,
   showLinkPreviews: true,
   excludedApps: [],
   openPanelShortcut: "",
