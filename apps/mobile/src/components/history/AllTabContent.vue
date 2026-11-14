@@ -10,14 +10,9 @@ import {
 } from "@teneo/ui/components/empty";
 import { currentTime } from "@teneo/ui/composables/useRelativeTimeAgo";
 import { computed, type ComponentPublicInstance, ref, watch } from "vue";
-import AlertCircleIcon from "~icons/tabler/alert-circle";
-import TextAlignLeftIcon from "~icons/tabler/align-left";
-import ClipboardListIcon from "~icons/tabler/clipboard-list";
-import FileIcon from "~icons/tabler/file";
-import PaletteIcon from "~icons/tabler/palette";
-import ImageIcon from "~icons/tabler/photo";
 
 import type { TabVariant } from "../../types/tabs";
+import EmptyIllustration from "../illustrations/EmptyIllustration.vue";
 import ClipboardItemCard from "./ClipboardItemCard.vue";
 import ItemActionSheet from "./ItemActionSheet.vue";
 
@@ -31,6 +26,9 @@ const props = withDefaults(
     hasMore?: boolean;
     loadingMore?: boolean;
     emptyMessage?: string;
+    /** what the list is filtered by; nothing matching it is told apart
+     *  from nothing copied */
+    searchQuery?: string;
   }>(),
   { emptyMessage: "No clipboard history yet." },
 );
@@ -264,8 +262,8 @@ function handleContextMenu(event: MouseEvent): void {
     </p>
     <Empty v-else-if="props.error">
       <EmptyHeader>
-        <EmptyMedia variant="icon" class="bg-destructive/10 text-destructive">
-          <AlertCircleIcon />
+        <EmptyMedia>
+          <EmptyIllustration kind="error" class="w-44" />
         </EmptyMedia>
         <EmptyTitle class="text-foreground/70">
           Could not load clipboard history.
@@ -312,14 +310,23 @@ function handleContextMenu(event: MouseEvent): void {
         :item="menuItem"
         @preview="emit('preview', $event)" />
     </template>
+    <Empty v-else-if="props.searchQuery">
+      <EmptyHeader>
+        <EmptyMedia>
+          <EmptyIllustration kind="search" class="w-44" />
+        </EmptyMedia>
+        <EmptyTitle class="text-foreground/70">
+          Nothing matches “{{ props.searchQuery }}”
+        </EmptyTitle>
+        <EmptyDescription class="text-foreground/50">
+          Try other words, or look in another tab.
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
     <Empty v-else>
       <EmptyHeader>
-        <EmptyMedia variant="icon" class="bg-foreground/5 text-foreground/70">
-          <ImageIcon v-if="props.tab === 'image'" />
-          <FileIcon v-else-if="props.tab === 'files'" />
-          <PaletteIcon v-else-if="props.tab === 'color'" />
-          <TextAlignLeftIcon v-else-if="props.tab === 'text'" />
-          <ClipboardListIcon v-else />
+        <EmptyMedia>
+          <EmptyIllustration :kind="props.tab" class="w-44" />
         </EmptyMedia>
         <EmptyTitle class="text-foreground/70">
           {{ props.emptyMessage }}

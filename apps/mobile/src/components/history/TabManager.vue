@@ -256,6 +256,7 @@ watch(selectedTab, async (tab, previous) => {
           :has-more="hasMore"
           :loading-more="loadingMore"
           :empty-message="emptyMessages[selectedTab]"
+          :search-query="debouncedSearchQuery"
           @preview="emit('preview', $event)"
           @load-more="loadMore" />
       </div>
