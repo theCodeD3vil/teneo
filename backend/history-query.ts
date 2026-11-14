@@ -12,22 +12,33 @@ import { textPreviewLength } from "../shared/types/clipboard";
  *  first. The id breaks ties so paging never skips or repeats an item. */
 export const listOrder = `pinnedAt IS NULL, pinnedAt DESC, dateCopied DESC, id DESC`;
 
-/** SQL that keeps only the rows after `cursor` in listOrder, with its values. */
+/** listOrder for a page past the pinned items. Its WHERE fixes pinnedAt to
+ *  NULL, so the two leading terms are constant; left out, sqlite reads the
+ *  page straight off the unpinned index instead of sorting the history. */
+export const unpinnedOrder = `dateCopied DESC, id DESC`;
+
+/** The ORDER BY of the page after `cursor` (the first page without one). */
+export function pageOrder(cursor?: ClipboardListCursor): string {
+  return cursor?.pinnedAt === null ? unpinnedOrder : listOrder;
+}
+
+/** SQL that keeps only the rows after `cursor` in listOrder, with its values.
+ *  Row values, not a chain of ORs: sqlite seeks an index to a row value. */
 export function afterCursor(cursor: ClipboardListCursor): {
   condition: string;
   values: unknown[];
 } {
   const { pinnedAt, dateCopied, id } = cursor;
-  const laterCopy = `(dateCopied < ? OR (dateCopied = ? AND id < ?))`;
   if (pinnedAt === null) {
     return {
-      condition: `(pinnedAt IS NULL AND ${laterCopy})`,
-      values: [dateCopied, dateCopied, id],
+      condition: `(pinnedAt IS NULL AND (dateCopied, id) < (?, ?))`,
+      values: [dateCopied, id],
     };
   }
+  // a NULL pinnedAt makes the row value NULL, so unpinned rows are kept apart
   return {
-    condition: `(pinnedAt IS NULL OR pinnedAt < ? OR (pinnedAt = ? AND ${laterCopy}))`,
-    values: [pinnedAt, pinnedAt, dateCopied, dateCopied, id],
+    condition: `(pinnedAt IS NULL OR (pinnedAt, dateCopied, id) < (?, ?, ?))`,
+    values: [pinnedAt, dateCopied, id],
   };
 }
 

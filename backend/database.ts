@@ -8,13 +8,14 @@ import type {
   ClipboardListRequest,
   SecretSpan,
 } from "../shared/types/clipboard";
+import { type LatestCopy, isRepeatCopy } from "./duplicate-copy";
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";
 import {
   afterCursor,
   likePattern,
-  listOrder,
   matchesSearch,
+  pageOrder,
   truncateTextPreview,
 } from "./history-query";
 import { findLink } from "./link-previews";
@@ -55,9 +56,15 @@ export function initializeDatabase(app: TinyApp): Promise<Database> {
 async function openDatabase(app: TinyApp): Promise<Database> {
   const { data } = await appPaths(app); // already created by the time it resolves
   const database = new Database(`${data}/teneo.sqlite`);
-  run(
-    database,
-    `
+  // WAL: listing a page while a copy is saved doesn't wait for the save, and
+  // a save doesn't wait for the disk to sync (NORMAL is still safe against a
+  // crash). The timeout covers a second process holding the file briefly.
+  database.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA busy_timeout = 5000;
+  `);
+  database.exec(`
       CREATE TABLE IF NOT EXISTS "CLIPBOARD_ITEMS" (
         id TEXT PRIMARY KEY,
         kind TEXT NOT NULL CHECK(kind IN ('text', 'image', 'files', 'color')),
@@ -72,18 +79,44 @@ async function openDatabase(app: TinyApp): Promise<Database> {
         pasteAsFile INTEGER,
         encrypted INTEGER
       )
-    `,
-  );
+  `);
   addMissingColumns(database);
-  run(
-    database,
-    `
-      CREATE INDEX IF NOT EXISTS clipboard_items_date_copied_index
-      ON "CLIPBOARD_ITEMS" (dateCopied DESC)
-    `,
-  );
+  createIndexes(database);
 
   return database;
+}
+
+// The list reads each page straight off one of these, already in order,
+// instead of sorting the history: with 100k items a page takes 0.2 ms rather
+// than 30 (the first page) to 60 (one deep in the scroll). Expression and
+// partial indexes, so the ORDER BY matches them term for term; see listOrder
+// and unpinnedOrder in history-query.ts.
+const indexes = {
+  // the first page, and the pages still among the pinned items
+  clipboard_items_list_order_index: `
+    ((pinnedAt IS NULL), pinnedAt DESC, dateCopied DESC, id DESC)
+    WHERE deletedAt IS NULL`,
+  clipboard_items_kind_list_order_index: `
+    (kind, (pinnedAt IS NULL), pinnedAt DESC, dateCopied DESC, id DESC)
+    WHERE deletedAt IS NULL`,
+  // the pages past the pinned items, the repeat-copy check, and the newest-N
+  // of "Maximum items" (deletionCondition), which counts deleted rows too
+  clipboard_items_unpinned_index: `
+    (dateCopied DESC, id DESC) WHERE pinnedAt IS NULL`,
+  clipboard_items_kind_unpinned_index: `
+    (kind, dateCopied DESC, id DESC) WHERE pinnedAt IS NULL`,
+};
+
+function createIndexes(database: Database): void {
+  for (const [name, definition] of Object.entries(indexes)) {
+    database.exec(
+      `CREATE INDEX IF NOT EXISTS ${name} ON "CLIPBOARD_ITEMS" ${definition}`,
+    );
+  }
+  // The first release's index on dateCopied alone. The ones above cover it,
+  // and while it exists sqlite picks it for a page deep in the scroll, then
+  // sorts the result anyway.
+  database.exec(`DROP INDEX IF EXISTS clipboard_items_date_copied_index`);
 }
 
 /** Save a clipboard item after transient clipboard data, such as images, is durable. */
@@ -114,11 +147,30 @@ export async function saveClipboardItem(
     getSettings().encryptSecrets &&
     value !== null &&
     savedItem.secrets.length > 0;
+  const database = await initializeDatabase(app);
+  const repeated = await findRepeatCopy(savedItem, database, app);
+  if (repeated) {
+    run(
+      database,
+      `
+        UPDATE "CLIPBOARD_ITEMS"
+        SET dateCopied = ?, sourceAppName = ?, sourceAppBundleId = ?
+        WHERE id = ?
+      `,
+      dateCopied,
+      savedItem.sourceApp?.name ?? null,
+      savedItem.sourceApp?.bundleId ?? null,
+      repeated.id,
+    );
+    notifyClipboardHistoryChanged(app);
+    return { ...savedItem, id: repeated.id };
+  }
+
   const storedValue = isEncrypted ? await encryptText(value, app) : value;
   const { data: dataDirectory } = await appPaths(app);
 
   run(
-    await initializeDatabase(app),
+    database,
     `
       INSERT INTO "CLIPBOARD_ITEMS" (
         id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted,
@@ -144,6 +196,30 @@ export async function saveClipboardItem(
   notifyClipboardHistoryChanged(app);
 
   return savedItem;
+}
+
+/** The newest unpinned item when it holds what `item` holds: copying the
+ *  same thing again then bumps it to the top instead of adding a row. A
+ *  pinned item isn't bumped, since it keeps its place among the pinned ones;
+ *  the copy shows at the top of the rest. */
+async function findRepeatCopy(
+  item: TinyClipboardData,
+  database: Database,
+  app: TinyApp,
+): Promise<LatestCopy | null> {
+  if (item.kind === "image") return null;
+  const [latest] = all<LatestCopy & Pick<ClipboardItemRow, "encrypted">>(
+    database,
+    `
+      SELECT id, kind, value, path, encrypted FROM "CLIPBOARD_ITEMS"
+      WHERE deletedAt IS NULL AND pinnedAt IS NULL
+      ORDER BY dateCopied DESC, id DESC LIMIT 1
+    `,
+  );
+  if (!latest || latest.kind !== item.kind) return null;
+  // a text that can't be decrypted now isn't a repeat; the copy is saved anew
+  const decrypted = await decryptRow(latest, app);
+  return decrypted && isRepeatCopy(item, decrypted) ? decrypted : null;
 }
 
 function detectInText(text: string | null): {
@@ -224,6 +300,13 @@ const deletionCondition = `
   ))
 `;
 
+/** Whether these limits can delete anything. With none set (the default)
+ *  deletionCondition matches nothing, but checking it after every copy would
+ *  still read the whole history for its NOT IN. */
+function limitsHistory(copiedBefore: number, keepNewest: number): boolean {
+  return copiedBefore > 0 || keepNewest >= 0;
+}
+
 /** How many items in the history deleteClipboardItems would delete with
  *  these limits. Already-deleted items still get removed, but aren't counted. */
 export async function countClipboardItemsToDelete(
@@ -231,6 +314,7 @@ export async function countClipboardItemsToDelete(
   copiedBefore: number,
   keepNewest: number,
 ): Promise<number> {
+  if (!limitsHistory(copiedBefore, keepNewest)) return 0;
   const [result] = all<{ count: number }>(
     await initializeDatabase(app),
     `
@@ -250,6 +334,7 @@ export async function deleteClipboardItems(
   copiedBefore: number,
   keepNewest: number,
 ): Promise<void> {
+  if (!limitsHistory(copiedBefore, keepNewest)) return;
   const database = await initializeDatabase(app);
   // Read and delete with no await in between (sqlite is sync), so an item
   // saved meanwhile can't be deleted without its image path being read
@@ -428,7 +513,7 @@ export async function listClipboardItems(
       database,
       `
         SELECT ${listColumns} FROM "CLIPBOARD_ITEMS"
-        WHERE ${where} ORDER BY ${listOrder} LIMIT ?
+        WHERE ${where} ORDER BY ${pageOrder(cursor)} LIMIT ?
       `,
       textPreviewLength,
       ...values,
