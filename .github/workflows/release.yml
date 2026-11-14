@@ -2,7 +2,8 @@ name: Release
 
 # A PR merged into main releases the "version" in apps/desktop/tinyjs.json,
 # unless that version is already tagged — so bump it in the PR to ship a
-# release.
+# release. A version with a suffix, such as 0.4.0-beta.1, is published as a
+# pre-release: it is never "latest", so installed apps are not updated to it.
 on:
   pull_request:
     types: [closed]
@@ -130,16 +131,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
+          # A beta must not become "latest": installed apps update from there
+          flags=()
+          if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "v$VERSION" \
             --target "$MERGE_COMMIT" \
             --title "Teneo $VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
+            "${flags[@]}" \
             "$RUNNER_TEMP"/dmg/*.dmg dist/publish/*.zip dist/publish/manifest.json
 
       # A dead link here is an updater failing silently on users' Macs
       - name: Verify update links
         working-directory: apps/desktop
         run: |
-          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
-            | jq -e --arg version "$VERSION" '.version == $version' > /dev/null
+          if [[ "$VERSION" == *-* ]]; then
+            # a beta leaves "latest" where it was, on the last full release
+            curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
+              | jq -e --arg version "$VERSION" '.version != $version' > /dev/null
+          else
+            curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
+              | jq -e --arg version "$VERSION" '.version == $version' > /dev/null
+          fi
           jq -r '.. | .url? // empty' dist/publish/manifest.json | sort -u | xargs -n 1 curl -fsSIL -o /dev/null

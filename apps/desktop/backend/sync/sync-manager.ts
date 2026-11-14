@@ -24,7 +24,7 @@ import { type NetworkAddress, pairingAddresses } from "./local-address";
 import type { SyncService, SyncServiceOptions } from "./service";
 
 export interface SyncManagerDeps {
-  /** Whether this build has sync switched on (TENEO_SYNC=1). */
+  /** Whether this build has sync switched on (a beta, or TENEO_SYNC=1). */
   available(): boolean;
   start(app: TinyApp, options: SyncServiceOptions): Promise<SyncService>;
   /** Send the items holding secrets again; how many there were. */

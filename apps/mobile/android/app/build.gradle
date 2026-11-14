@@ -6,6 +6,10 @@ apply plugin: 'com.android.application'
 // it there, and a bump of it is what makes a release
 def appVersion = new JsonSlurper().parse(file('../../package.json')).version
 def (major, minor, patch) = appVersion.tokenize('.-').take(3).collect { it as int }
+// Android only updates to a larger code, so a beta's must be under its full
+// release's: 1.2.3-beta.4 is 1020304, and 1.2.3 itself is 1020399
+def beta = (appVersion =~ /-beta\.(\d+)$/)
+def appVersionCode = major * 1000000 + minor * 10000 + patch * 100 + (beta ? (beta[0][1] as int) : 99)
 
 // The release key comes from the environment, so it is never in the repo.
 // Without it a release build is left unsigned, which a phone won't install.
@@ -22,8 +26,7 @@ android {
         applicationId "com.michael.teneo"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // Android only updates to a larger code: 1.2.3 is 10203
-        versionCode major * 10000 + minor * 100 + patch
+        versionCode appVersionCode
         versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
