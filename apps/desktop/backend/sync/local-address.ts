@@ -1,0 +1,36 @@
+// Sync connections come from this Mac or the local network, and from nowhere
+// else. Not link-safety's isLocalIp: that one is for blocking link previews, so
+// it calls anything it cannot read "local", which is the wrong way round here.
+
+/** A private, link-local or loopback address, IPv4 or IPv6. Anything that is
+ *  not an address at all is not. */
+export function isLocalNetworkAddress(address: string): boolean {
+  // an IPv4 address written as IPv6 is judged as the IPv4 address it is
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
+  const ip = mapped ? mapped[1]! : address;
+
+  if (ip.includes(":")) {
+    return (
+      ip === "::1" ||
+      /^fe[89ab][0-9a-f]:/i.test(ip) || // link-local, fe80::/10
+      /^f[cd][0-9a-f]{2}:/i.test(ip) // unique local, fc00::/7
+    );
+  }
+
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (!match) return false;
+  const [first, second, third, fourth] = match.slice(1).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+  ];
+  if ([first, second, third, fourth].some((part) => part > 255)) return false;
+  return (
+    first === 10 ||
+    first === 127 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 169 && second === 254)
+  );
+}

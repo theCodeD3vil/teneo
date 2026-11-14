@@ -130,6 +130,28 @@ test("a message that is not a hello ends the connection", async () => {
   await expect(opening).rejects.toMatchObject({ code: "protocol" });
 });
 
+test("a connection that never finishes the handshake is dropped", async () => {
+  const pair = memoryChannelPair();
+  pair.responder.onMessage(() => {}); // hears the hello, answers nothing
+  let closedWith: string | undefined;
+  pair.responder.onClose((reason) => (closedWith = reason));
+  const opening = Session.open(pair.initiator, {
+    deviceId: idA,
+    authKey: randomBytes(32),
+    handshakeMs: 30,
+  });
+  await expect(opening).rejects.toMatchObject({ code: "timeout" });
+  await wait(5);
+  expect(closedWith).toBe("timeout"); // and the other end is told
+});
+
+test("the handshake timer does not outlive a session that opened", async () => {
+  const { a, b } = await connect(); // the default is 10 s: an open session must not keep it
+  opened(a).close();
+  opened(b).close();
+  await wait(5); // bun would hang on the exit if a 10 s timer were left running
+});
+
 test("a device that meets itself closes the connection", async () => {
   const key = (await deriveVaultKeys(randomBytes(32))).authKey;
   const pair = memoryChannelPair();

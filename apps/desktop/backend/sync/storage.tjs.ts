@@ -28,43 +28,9 @@ import { loadSettings, updateSettings } from "../settings";
 import { all, run } from "../sqlite";
 import type { ClipboardItemToSave } from "../types/clipboard";
 import { pinStampFor, tombstoneLifetime } from "./records";
+import { check, finish, rejects, same, test } from "./runtime-test";
 import { backfillSyncColumns, syncEpoch, syncHead } from "./schema";
 import { SqliteSyncStore } from "./sync-store";
-
-// --- a tiny test runner
-
-let failed = 0;
-async function test(name: string, body: () => Promise<void>): Promise<void> {
-  try {
-    await body();
-    console.log(`ok   ${name}`);
-  } catch (error) {
-    failed += 1;
-    console.log(`FAIL ${name}`);
-    // txiki's stack has no message in it
-    console.log(
-      `     ${error instanceof Error ? `${error.message}\n${error.stack}` : String(error)}`,
-    );
-  }
-}
-
-function check(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-function same(actual: unknown, expected: unknown, what: string): void {
-  const [a, b] = [JSON.stringify(actual), JSON.stringify(expected)];
-  if (a !== b) throw new Error(`${what}: expected ${b}, got ${a}`);
-}
-
-async function rejects(work: Promise<unknown>, what: string): Promise<void> {
-  try {
-    await work;
-  } catch {
-    return;
-  }
-  throw new Error(`${what}: it did not fail`);
-}
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -917,8 +883,4 @@ await test("a Mac's history and a second device end up the same, through the rea
 });
 
 await tjs.remove(folder).catch(() => {});
-if (failed > 0) {
-  console.log(`\n${failed} failed`);
-  tjs.exit(1);
-}
-console.log("\nall passed");
+finish();

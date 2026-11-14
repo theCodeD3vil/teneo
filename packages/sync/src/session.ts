@@ -26,6 +26,7 @@ import {
   type ChangesFrame,
   type Frame,
   type StateFrame,
+  handshakeMs,
   heartbeat,
   maxMessageLength,
   parseFrame,
@@ -88,6 +89,8 @@ export interface SessionOptions {
   authKey: Bytes;
   scheduler?: Scheduler;
   now?: () => number;
+  /** How long the handshake may take. */
+  handshakeMs?: number;
 }
 
 export type FrameHandler = (
@@ -160,7 +163,18 @@ export class Session {
 
   /** Run the handshake. Rejects with a SyncError, after closing the channel. */
   static open(channel: Channel, options: SessionOptions): Promise<Session> {
-    return new Session(channel, options).opened;
+    const session = new Session(channel, options);
+    const timer = setTimeout(
+      () =>
+        session.end(
+          new SyncError(
+            "timeout",
+            "The other device did not finish connecting",
+          ),
+        ),
+      options.handshakeMs ?? handshakeMs,
+    );
+    return session.opened.finally(() => clearTimeout(timer));
   }
 
   /** Frames that arrive before this is called wait for it. */

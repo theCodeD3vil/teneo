@@ -7,6 +7,9 @@ export const protocolVersion = 1;
 
 export const batchLimits = { items: 200, bytes: 256 * 1024 };
 export const heartbeat = { everyMs: 15_000, silentMs: 45_000 };
+/** How long a connection has to finish the handshake, so a device that opens
+ *  one and says nothing cannot hold it forever. */
+export const handshakeMs = 10_000;
 
 /** The largest message a device accepts, before decrypting it. */
 export const maxMessageLength = 8 * 1024 * 1024;

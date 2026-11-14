@@ -34,6 +34,8 @@
     "test": "turbo run test",
     "desktop": "cd apps/desktop && tinyjs dev",
     "desktop:reset-dev-data": "cd apps/desktop && bun scripts/reset-dev-data.ts",
+    "sync:peer": "cd apps/desktop && bun run sync:peer",
+    "sync:check": "cd apps/desktop && bun run sync:check",
     "site": "turbo run dev --filter=@teneo/site",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

@@ -120,6 +120,14 @@ export class SqliteSyncStore implements SyncStore {
     return peer ?? null;
   }
 
+  /** Every device paired before, for the transport to look for again. */
+  async listPeers(): Promise<PeerRecord[]> {
+    return all<PeerRecord>(
+      await initializeDatabase(this.app),
+      `SELECT * FROM "SYNC_PEERS"`,
+    );
+  }
+
   async latestStamp(): Promise<string | null> {
     const [latest] = all<{ stamp: string | null }>(
       await initializeDatabase(this.app),
