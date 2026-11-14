@@ -1,7 +1,8 @@
 name: Release
 
-# A PR merged into main releases the "version" in tinyjs.json, unless that
-# version is already tagged — so bump it in the PR to ship a release.
+# A PR merged into main releases the "version" in apps/desktop/tinyjs.json,
+# unless that version is already tagged — so bump it in the PR to ship a
+# release.
 on:
   pull_request:
     types: [closed]
@@ -25,15 +26,15 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
-          sparse-checkout: tinyjs.json
+          sparse-checkout: apps/desktop/tinyjs.json
           sparse-checkout-cone-mode: false
 
       - id: version
         run: |
-          version=$(jq -r .version tinyjs.json)
+          version=$(jq -r .version apps/desktop/tinyjs.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
-            echo "::notice::v$version is already released. Bump \"version\" in tinyjs.json to publish a new release."
+            echo "::notice::v$version is already released. Bump \"version\" in apps/desktop/tinyjs.json to publish a new release."
             echo "is-new=false" >> "$GITHUB_OUTPUT"
           else
             echo "is-new=true" >> "$GITHUB_OUTPUT"
@@ -109,6 +110,7 @@ jobs:
       # Apple's timestamp server, which codesign calls, drops the odd request,
       # hence one retry per publish.
       - name: Build and package
+        working-directory: apps/desktop
         run: |
           retry() { "$@" || "$@"; }
           mkdir "$RUNNER_TEMP/dmg"
@@ -123,6 +125,7 @@ jobs:
           sed -i '' "s#/releases/latest/download/#/releases/download/v$VERSION/#" dist/publish/manifest.json
 
       - name: Create release
+        working-directory: apps/desktop
         env:
           GH_TOKEN: ${{ github.token }}
           MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
@@ -135,6 +138,7 @@ jobs:
 
       # A dead link here is an updater failing silently on users' Macs
       - name: Verify update links
+        working-directory: apps/desktop
         run: |
           curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
             | jq -e --arg version "$VERSION" '.version == $version' > /dev/null

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon.png" alt="Teneo logo" width="128" height="128">
+  <img src="apps/desktop/icon.png" alt="Teneo logo" width="128" height="128">
 </p>
 
 <h1 align="center">Teneo</h1>
@@ -131,3 +131,27 @@ Here's what's planned next. More will be added over time.
 - **Landing page (done).** A proper home for Teneo, where you can explore what it does and download it.
 - **Sync engine.** Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).
 - **Android app.** Sync your clipboard history between your Android phone and your Mac.
+
+## Development
+
+Teneo is a [Bun](https://bun.sh) workspaces monorepo, with [Turborepo](https://turborepo.dev) running its builds and checks.
+
+| Folder            | What it holds                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/desktop`    | The Mac app: Vue frontend in `src/`, TinyJS backend in `backend/`.                                                             |
+| `apps/site`       | The landing page.                                                                                                              |
+| `packages/shared` | `@teneo/shared`: the types and constants the app's frontend and backend share. It ships TypeScript source, with no build step. |
+
+Run these from the repo root:
+
+| Command                                              | What it does                                      |
+| ---------------------------------------------------- | ------------------------------------------------- |
+| `bun install`                                        | Installs every workspace.                         |
+| `bun run desktop`                                    | Runs the app with `tinyjs dev`.                   |
+| `bun run site`                                       | Serves the landing page.                          |
+| `bun run build` \| `typecheck` \| `test`             | Runs that task in every workspace (Turbo caches). |
+| `bun run lint` \| `lint:fix` \| `fmt` \| `fmt:check` | Lints and formats the whole repo, once.           |
+
+TinyJS reads everything from the current folder, so run any `tinyjs` command (`dev`, `build`, `publish`) from `apps/desktop`. The release version lives in `apps/desktop/tinyjs.json`.
+
+`tinyjs dev` restarts the backend when a file in `apps/desktop/backend` changes, but not when one in `packages/shared` does (TinyJS only watches a `shared/` folder beside `backend/`). After editing `packages/shared`, restart `bun run desktop` to pick the change up in the backend. The frontend still reloads on its own.

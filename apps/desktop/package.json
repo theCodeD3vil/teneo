@@ -1,0 +1,45 @@
+{
+  "name": "@teneo/desktop",
+  "version": "0.3.7",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "build": "vue-tsc -b && vite build --base=./",
+    "preview": "vite preview",
+    "test": "bun test backend",
+    "typecheck": "vue-tsc -b && tsc -p backend/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@tanstack/vue-query": "^5.104.3",
+    "@tanstack/vue-virtual": "^3.13.45",
+    "@teneo/shared": "workspace:*",
+    "@vueuse/core": "catalog:",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "culori": "^4.0.2",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.1.1",
+    "reka-ui": "catalog:",
+    "tailwind-merge": "catalog:",
+    "tailwindcss": "catalog:",
+    "vue": "catalog:",
+    "vue-sonner": "catalog:"
+  },
+  "devDependencies": {
+    "@iconify-json/tabler": "catalog:",
+    "@iconify/vue": "^5.0.3",
+    "@txikijs/types": "26.6.0",
+    "@types/culori": "^4.0.1",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/tsconfig": "catalog:",
+    "shadcn-vue": "^2.8.2",
+    "tw-animate-css": "catalog:",
+    "typescript": "catalog:",
+    "unplugin-icons": "catalog:",
+    "vite": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}

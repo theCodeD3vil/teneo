@@ -1,0 +1,35 @@
+{
+  "name": "@teneo/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc -b"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@vueuse/core": "catalog:",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "reka-ui": "catalog:",
+    "shadcn-vue": "^2.8.2",
+    "tailwind-merge": "catalog:",
+    "tailwindcss": "catalog:",
+    "vue": "catalog:",
+    "vue-sonner": "catalog:"
+  },
+  "devDependencies": {
+    "@iconify-json/tabler": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/tsconfig": "catalog:",
+    "tw-animate-css": "catalog:",
+    "typescript": "catalog:",
+    "unplugin-icons": "catalog:",
+    "vite": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}
