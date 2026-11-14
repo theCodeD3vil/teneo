@@ -1,79 +1,96 @@
 <script setup lang="ts">
-import { Badge } from "@teneo/ui/components/badge";
-import { Button } from "@teneo/ui/components/button";
-import { ref } from "vue";
+import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
+import { onMounted } from "vue";
 
-const showDetails = ref(false);
+import { useClient } from "./client";
+import ActionSheet from "./components/ActionSheet.vue";
+import HistoryScreen from "./components/HistoryScreen.vue";
+import ItemViewScreen from "./components/ItemViewScreen.vue";
+import SettingsScreen from "./components/SettingsScreen.vue";
+import ToastNotification from "./components/ToastNotification.vue";
+import WelcomePairingScreen from "./components/WelcomePairingScreen.vue";
+import { useNavigation } from "./composables/useNavigation";
+import { useToast } from "./composables/useToast";
+
+const client = useClient();
+const {
+  currentState,
+  activeSheetItem,
+  closeActionSheet,
+  openItemView,
+  initNavigation,
+} = useNavigation();
+const { showToast } = useToast();
+
+onMounted(() => {
+  initNavigation();
+});
+
+async function handleSheetCopy(item: ClipboardHistoryItem) {
+  closeActionSheet();
+  await client.copyToClipboard(item.id);
+  showToast("Copied to clipboard");
+}
+
+function handleSheetView(item: ClipboardHistoryItem) {
+  closeActionSheet();
+  openItemView(item.id);
+}
+
+async function handleSheetTogglePin(item: ClipboardHistoryItem) {
+  closeActionSheet();
+  const nextPinned = !item.pinned;
+  await client.setPinned(item.id, nextPinned);
+  showToast(nextPinned ? "Item pinned" : "Item unpinned");
+}
+
+async function handleSheetShare(item: ClipboardHistoryItem) {
+  closeActionSheet();
+  if (item.text && typeof navigator !== "undefined" && navigator.share) {
+    try {
+      await navigator.share({ text: item.text });
+    } catch {
+      // User cancelled share
+    }
+  } else {
+    await handleSheetCopy(item);
+  }
+}
+
+async function handleSheetDelete(item: ClipboardHistoryItem) {
+  closeActionSheet();
+  await client.deleteItem(item.id);
+  showToast("Item deleted");
+}
 </script>
 
 <template>
-  <main class="safe-area mx-auto flex min-h-dvh max-w-lg flex-col">
-    <header class="flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <span
-          class="bg-primary flex size-10 items-center justify-center rounded-xl text-white"
-          aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" class="size-6">
-            <rect
-              x="6"
-              y="5"
-              width="12"
-              height="15"
-              rx="3"
-              stroke="currentColor"
-              stroke-width="1.8" />
-            <path
-              d="M9 5.5V4.7A1.7 1.7 0 0 1 10.7 3h2.6A1.7 1.7 0 0 1 15 4.7v.8"
-              stroke="currentColor"
-              stroke-width="1.8" />
-            <path
-              d="M9.5 10h5M9.5 13.5h5"
-              stroke="currentColor"
-              stroke-linecap="round"
-              stroke-width="1.8" />
-          </svg>
-        </span>
-        <span class="text-lg font-bold tracking-tight">Teneo</span>
-      </div>
-      <Badge variant="secondary">In development</Badge>
-    </header>
+  <div class="bg-background text-foreground relative min-h-dvh select-none">
+    <!-- Active screen -->
+    <HistoryScreen v-if="currentState.screen === 'history'" />
 
-    <section
-      class="flex flex-1 flex-col justify-center py-16"
-      aria-labelledby="welcome-heading">
-      <p
-        class="text-primary mb-4 text-sm font-semibold tracking-wide uppercase">
-        A little more room to remember
-      </p>
-      <h1
-        id="welcome-heading"
-        class="text-foreground text-4xl leading-[1.1] font-bold tracking-tight sm:text-5xl">
-        Everything you copy, within reach.
-      </h1>
-      <p class="text-muted-foreground mt-5 max-w-sm text-base leading-7">
-        Teneo is coming to Android. Your clipboard history will feel right at
-        home here.
-      </p>
-      <div class="mt-8">
-        <Button
-          class="min-h-12 px-5"
-          :aria-expanded="showDetails"
-          aria-controls="details"
-          @click="showDetails = !showDetails">
-          {{ showDetails ? "Hide details" : "What’s coming" }}
-        </Button>
-      </div>
-      <div
-        v-if="showDetails"
-        id="details"
-        class="bg-muted text-muted-foreground mt-5 rounded-2xl p-5 text-sm leading-6">
-        Search and pin text, copy it again, and pair with your Mac. This screen
-        is a preview; nothing is saved or synced yet.
-      </div>
-    </section>
+    <ItemViewScreen
+      v-else-if="currentState.screen === 'item-view' && currentState.itemId"
+      :item-id="currentState.itemId" />
 
-    <footer class="text-muted-foreground border-border border-t pt-5 text-sm">
-      Built for the things worth keeping.
-    </footer>
-  </main>
+    <SettingsScreen v-else-if="currentState.screen === 'settings'" />
+
+    <WelcomePairingScreen
+      v-else-if="currentState.screen === 'pairing'"
+      :initial-step="currentState.pairingStep ?? 'scan'" />
+
+    <!-- Action Sheet for items -->
+    <ActionSheet
+      :item="activeSheetItem"
+      :is-open="Boolean(activeSheetItem)"
+      @close="closeActionSheet"
+      @copy="handleSheetCopy"
+      @view="handleSheetView"
+      @toggle-pin="handleSheetTogglePin"
+      @share="handleSheetShare"
+      @delete="handleSheetDelete" />
+
+    <!-- Global Toast Confirmation -->
+    <ToastNotification />
+  </div>
 </template>
