@@ -1,10 +1,13 @@
 /// <reference lib="esnext.typedarrays" />
 // ↑ types for Uint8Array's base64 methods, which txiki has
 
+import { devName } from "./dev-run";
+
 // With "Encrypt API keys" on, text holding a secret is saved encrypted
 // (AES-GCM) with a key kept in the macOS Keychain, so the database file alone
 // never gives the secret away. The Keychain only hands the key to Teneo itself.
-const keychainKeyName = "history-encryption-key";
+// a dev run keeps its own key, so it never reads or replaces the real one
+const keychainKeyName = () => devName("history-encryption-key");
 const ivLength = 12; // bytes, the size AES-GCM is designed for
 
 // Read once per launch. A failed read (the user denied the Keychain prompt)
@@ -24,12 +27,12 @@ async function loadOrCreateEncryptionKey(app: TinyApp): Promise<CryptoKey> {
   if (savedKey) return savedKey;
 
   const keyBytes = crypto.getRandomValues(new Uint8Array(32));
-  await app.secrets.set(keychainKeyName, keyBytes.toBase64());
+  await app.secrets.set(keychainKeyName(), keyBytes.toBase64());
   return importEncryptionKey(keyBytes);
 }
 
 async function loadSavedEncryptionKey(app: TinyApp): Promise<CryptoKey | null> {
-  const savedKey = await app.secrets.get(keychainKeyName);
+  const savedKey = await app.secrets.get(keychainKeyName());
   return savedKey ? importEncryptionKey(Uint8Array.fromBase64(savedKey)) : null;
 }
 
@@ -52,7 +55,7 @@ export async function restrictToSavedEncryptionKey(
 
 export async function deleteEncryptionKey(app: TinyApp): Promise<void> {
   encryptionKeyPromise = null;
-  await app.secrets.delete(keychainKeyName);
+  await app.secrets.delete(keychainKeyName());
 }
 
 function importEncryptionKey(

@@ -147,10 +147,17 @@ Run these from the repo root:
 | Command                                              | What it does                                      |
 | ---------------------------------------------------- | ------------------------------------------------- |
 | `bun install`                                        | Installs every workspace.                         |
-| `bun run desktop`                                    | Runs the app with `tinyjs dev`.                   |
+| `bun run desktop`                                    | Runs the app with `tinyjs dev`, on its own data.  |
+| `bun run desktop:reset-dev-data`                     | Wipes that dev data (see below).                  |
 | `bun run site`                                       | Serves the landing page.                          |
 | `bun run build` \| `typecheck` \| `test`             | Runs that task in every workspace (Turbo caches). |
 | `bun run lint` \| `lint:fix` \| `fmt` \| `fmt:check` | Lints and formats the whole repo, once.           |
+
+**A dev run never touches your real history.** `bun run desktop` keeps its own database, images, link previews, settings and Keychain key apart from the installed Teneo's: files go in a `dev` folder inside the app's data and cache folders, and the settings, setup flag and Keychain entry get a `-dev` name. A packaged build is not affected. The dev data starts empty, so the setup window shows on the first dev run.
+
+- `bun run desktop:reset-dev-data` deletes the dev folders and the dev keys and Keychain entry. It leaves the installed app's data alone.
+- `TENEO_REAL_DATA=1 bun run desktop` runs on the real data instead, to check a change against a real history. Teneo logs a warning at startup when it does. Back up `~/Library/Application Support/com.michael.teneo` first.
+- Teneo allows one instance per app id, so quit the installed Teneo before `bun run desktop`.
 
 TinyJS reads everything from the current folder, so run any `tinyjs` command (`dev`, `build`, `publish`) from `apps/desktop`. The release version lives in `apps/desktop/tinyjs.json`.
 
