@@ -2,6 +2,7 @@
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 import { ref } from "vue";
 
+import logoUrl from "../../assets/logo.svg";
 import { useNavigation } from "../../composables/useNavigation";
 import HomeFooter from "./HomeFooter.vue";
 import SearchInput from "./SearchInput.vue";
@@ -21,7 +22,7 @@ function openPreview(item: ClipboardHistoryItem): void {
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3">
     <header class="flex items-center gap-2">
-      <img class="size-9 shrink-0" src="/icon.png" alt="Teneo" />
+      <img class="size-9 shrink-0" :src="logoUrl" alt="Teneo" />
       <SearchInput ref="searchInput" v-model="searchQuery" />
     </header>
     <TabManager
