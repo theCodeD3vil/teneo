@@ -3,6 +3,7 @@ import { cn } from "@teneo/ui/lib/utils";
 import { computed } from "vue";
 import ChevronIcon from "~icons/tabler/chevron-right";
 
+import logoUrl from "../../assets/logo.svg";
 import {
   type SettingsPageName,
   useNavigation,
@@ -39,7 +40,7 @@ const groups: SettingsPageName[][] = [
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
     <SettingsHeader back-label="Back to clipboard history">
-      <img class="aspect-square size-8" src="/icon.png" alt="" />
+      <img class="aspect-square size-8" :src="logoUrl" alt="" />
       <span class="text-lg font-medium">Teneo</span>
     </SettingsHeader>
     <div
