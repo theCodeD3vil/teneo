@@ -8,6 +8,7 @@ import { computed, ref } from "vue";
 import TickIcon from "~icons/tabler/check";
 import CheckmarkCircleIcon from "~icons/tabler/circle-check";
 
+import logoUrl from "../../assets/logo.svg";
 import { useNavigation } from "../../composables/useNavigation";
 import { useSettings } from "../../composables/useSettings";
 import { markSetupDone } from "../../composables/useSetup";
@@ -63,7 +64,7 @@ function finishSetup(): void {
         v-if="currentStep === 'welcome'"
         key="welcome"
         class="flex flex-1 flex-col items-center justify-center gap-y-4 text-center">
-        <img class="mb-2 size-24" src="/icon.png" alt="Teneo logo" />
+        <img class="mb-2 size-24" :src="logoUrl" alt="Teneo logo" />
         <h1 class="text-2xl font-medium text-balance">
           Everything you copy, always within reach
         </h1>
