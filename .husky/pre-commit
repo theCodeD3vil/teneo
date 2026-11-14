@@ -1,7 +1,3 @@
 bun run lint-staged
-# type-check the whole frontend: a change in one file can break another
-bunx vue-tsc -b
-# the landing page has its own packages and type check
-if git diff --cached --name-only | grep -q '^site/'; then
-  bun run --cwd site typecheck
-fi
+# type-check both apps: a change in one file can break another (Turbo caches it)
+bunx turbo run typecheck
