@@ -1,6 +1,11 @@
 <script lang="ts" setup>
 import type { PairingInfo, SyncDevice } from "@teneo/shared/types/sync";
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@teneo/ui/components/alert";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -16,6 +21,9 @@ import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { renderSVG } from "uqr";
 import { computed, ref, watch } from "vue";
+import AlertCircleIcon from "~icons/tabler/alert-circle";
+import CheckIcon from "~icons/tabler/check";
+import CopyIcon from "~icons/tabler/copy";
 
 import { useSettings } from "@/composables/useSettings";
 import { messageOf, useSyncStatus } from "@/composables/useSyncStatus";
@@ -48,22 +56,60 @@ async function joinWithCode(): Promise<void> {
 }
 
 // --- adding a device. The code unlocks the whole history, so it shows only
-// when asked for, and goes away when sync does.
+// when asked for, in a modal, and is dropped when the modal closes or sync ends.
 
+const isPairingOpen = ref(false);
 const pairing = ref<PairingInfo | null>(null);
 const isLoadingPairing = ref(false);
 const pairingError = ref("");
+// two even rows of groups, so the code never breaks in the middle of one
+const codeLines = computed(() => {
+  const groups = pairing.value?.recoveryCode.split("-") ?? [];
+  const half = Math.ceil(groups.length / 2);
+  return [groups.slice(0, half).join("-"), groups.slice(half).join("-")];
+});
+const isCodeCopied = ref(false);
+const copiedIconTimeout = 1500;
+let copiedTimeout: ReturnType<typeof setTimeout> | undefined;
 
 async function showPairing(): Promise<void> {
+  isPairingOpen.value = true;
   isLoadingPairing.value = true;
   pairingError.value = "";
   try {
-    pairing.value = await pairingInfo();
+    const info = await pairingInfo();
+    // closed while it loaded: don't keep the code
+    if (isPairingOpen.value) pairing.value = info;
   } catch (caught) {
     pairingError.value = messageOf(caught);
   } finally {
     isLoadingPairing.value = false;
   }
+}
+
+watch(isPairingOpen, (isOpen) => {
+  if (isOpen) return;
+  pairing.value = null;
+  pairingError.value = "";
+  clearTimeout(copiedTimeout);
+  isCodeCopied.value = false;
+});
+
+// The app's own clipboard write is skipped by the history (onClipboardChange
+// in the backend), so the key never lands in the history or gets synced.
+async function copyRecoveryCode(): Promise<void> {
+  if (!pairing.value) return;
+  try {
+    await tiny.clipboard.write({ text: pairing.value.recoveryCode });
+  } catch (caught) {
+    pairingError.value = messageOf(caught);
+    return;
+  }
+  isCodeCopied.value = true;
+  clearTimeout(copiedTimeout);
+  copiedTimeout = setTimeout(() => {
+    isCodeCopied.value = false;
+  }, copiedIconTimeout);
 }
 
 // scanners need dark on light, whatever the theme
@@ -81,7 +127,7 @@ const qrCode = computed(() =>
 watch(
   () => status.value?.enabled,
   (enabled) => {
-    if (!enabled) pairing.value = null;
+    if (!enabled) isPairingOpen.value = false;
   },
 );
 
@@ -93,7 +139,7 @@ const connectedCount = computed(
 
 const summary = computed(() => {
   if (!status.value?.running) return "Starting…";
-  if (connectedCount.value === 0) return "Looking for your other devices…";
+  if (connectedCount.value === 0) return "Looking for other devices…";
   return connectedCount.value === 1
     ? "Connected to 1 device"
     : `Connected to ${connectedCount.value} devices`;
@@ -143,9 +189,7 @@ const isTurnOffWarningOpen = ref(false);
         <SettingsField>
           <template #label>Sync with your other devices</template>
           <template #description>
-            Keep your clipboard history in step across your devices over your
-            Wi-Fi. It is encrypted between them, goes through no server, and
-            needs no account.
+            Over your Wi-Fi, encrypted, with no account or server
           </template>
           <Spinner v-if="isBusy" />
           <Button v-else size="sm" @click="turnOn()">Turn on</Button>
@@ -154,7 +198,7 @@ const isTurnOffWarningOpen = ref(false);
         <SettingsField>
           <template #label>Join your other devices</template>
           <template #description>
-            Enter the recovery code from a device that already syncs.
+            Use the recovery code from another device
           </template>
           <Button
             variant="outline"
@@ -197,9 +241,7 @@ const isTurnOffWarningOpen = ref(false);
             <span v-if="status.problem" class="text-destructive block">
               {{ status.problem }}
             </span>
-            <span class="block">
-              Shown to your other devices as “{{ status.deviceName }}”
-            </span>
+            <span class="block">Shown as “{{ status.deviceName }}”</span>
           </template>
           <Spinner v-if="isBusy" />
           <Button
@@ -218,7 +260,7 @@ const isTurnOffWarningOpen = ref(false);
         <p
           v-if="status.devices.length === 0"
           class="text-foreground/60 px-3 py-2.5 text-sm">
-          No other devices yet. Add one below.
+          No other devices yet
         </p>
         <SettingsField v-for="device in status.devices" :key="device.deviceId">
           <template #label>{{ device.name }}</template>
@@ -234,37 +276,10 @@ const isTurnOffWarningOpen = ref(false);
 
         <SettingsField>
           <template #label>Add a device</template>
-          <template #description>
-            Scan the QR code with Teneo on your phone, or type the recovery code
-            on another Mac. Anyone who has it can read your clipboard history.
-          </template>
-          <Spinner v-if="isLoadingPairing" />
-          <Button
-            v-else
-            variant="outline"
-            size="sm"
-            @click="pairing ? (pairing = null) : showPairing()">
-            {{ pairing ? "Hide" : "Show code" }}
+          <template #description> A QR code and a recovery code </template>
+          <Button variant="outline" size="sm" @click="showPairing()">
+            Show code
           </Button>
-          <template v-if="pairing || pairingError" #footer>
-            <p v-if="pairingError" class="text-destructive text-xs">
-              {{ pairingError }}
-            </p>
-            <div
-              v-else-if="pairing"
-              class="grid justify-items-center gap-3 pt-2">
-              <!-- the SVG is made here from the link, never from page input -->
-              <div
-                role="img"
-                aria-label="QR code for adding a device"
-                class="size-44 overflow-hidden rounded-lg bg-white p-1 [&>svg]:block [&>svg]:size-full"
-                v-html="qrCode" />
-              <code
-                class="text-foreground/80 text-center font-mono text-sm tracking-wide break-all select-all">
-                {{ pairing.recoveryCode }}
-              </code>
-            </div>
-          </template>
         </SettingsField>
       </SettingsSection>
 
@@ -274,8 +289,7 @@ const isTurnOffWarningOpen = ref(false);
         <SettingsField>
           <template #label>Sync items with secrets</template>
           <template #description>
-            API keys and other secrets Teneo finds in what you copy stay on this
-            Mac unless you turn this on.
+            Secrets like API keys stay on this Mac when off
           </template>
           <Spinner v-if="isBusy" />
           <Switch v-else v-model="syncSecrets" />
@@ -285,15 +299,63 @@ const isTurnOffWarningOpen = ref(false);
 
     <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
 
+    <AlertDialog v-model:open="isPairingOpen">
+      <AlertDialogContent size="sm" class="ring-0 data-[size=sm]:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Add a device</AlertDialogTitle>
+        </AlertDialogHeader>
+        <div class="grid min-h-44 content-center justify-items-center gap-4">
+          <Spinner v-if="isLoadingPairing" />
+          <template v-else-if="pairing">
+            <!-- the SVG is made here from the link, never from page input -->
+            <div
+              role="img"
+              aria-label="QR code for adding a device"
+              class="size-44 overflow-hidden rounded-lg bg-white p-1 [&>svg]:block [&>svg]:size-full"
+              v-html="qrCode" />
+            <div
+              class="bg-foreground/5 flex w-full items-center justify-center gap-3 rounded-lg px-3 py-3">
+              <code
+                class="text-foreground/80 font-mono text-xs leading-5 tracking-wide select-none">
+                <span v-for="line in codeLines" :key="line" class="block">
+                  {{ line }}
+                </span>
+              </code>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Copy recovery code"
+                @click="copyRecoveryCode">
+                <CheckIcon v-if="isCodeCopied" />
+                <CopyIcon v-else />
+              </Button>
+            </div>
+            <Alert
+              class="border-warning/30 bg-warning/10 dark:bg-warning/15 w-full">
+              <AlertCircleIcon class="text-warning!" />
+              <AlertTitle>Keep this code private</AlertTitle>
+              <AlertDescription class="text-foreground/60 text-xs">
+                Anyone with it can read your clipboard history.
+              </AlertDescription>
+            </Alert>
+          </template>
+          <p v-if="pairingError" class="text-destructive text-sm">
+            {{ pairingError }}
+          </p>
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel class="col-span-full">Done</AlertDialogCancel>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <AlertDialog v-model:open="isTurnOffWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Turn off sync?</AlertDialogTitle>
           <AlertDialogDescription>
-            This Mac stops syncing and forgets its sync key and the devices it
-            was paired with. Your history stays here, and so does whatever your
-            other devices already have. To sync again, join with a recovery code
-            from a device that still has sync on.
+            This Mac stops syncing but keeps your history. To sync again, use a
+            recovery code from another device.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -306,14 +368,13 @@ const isTurnOffWarningOpen = ref(false);
     </AlertDialog>
 
     <AlertDialog v-model:open="isSecretsWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Sync items with secrets?</AlertDialogTitle>
           <AlertDialogDescription>
-            The API keys and other secrets already in your history will be sent
-            to your other devices, and so will new ones. They are encrypted on
-            the way. Turning this off again stops new ones, but can't take back
-            what a device already has.
+            The secrets in your history, and new ones, will be sent to your
+            other devices, encrypted on the way. Turning this off stops new ones
+            but can't take back what a device already has.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
