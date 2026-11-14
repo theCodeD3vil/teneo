@@ -29,6 +29,15 @@ import {
   restrictToSavedEncryptionKey,
 } from "./secret-encryption";
 import { getSettings, isSettingSaved, updateSettings } from "./settings";
+import { all, exclusive, run } from "./sqlite";
+import { type SyncIdentity, loadSyncIdentity } from "./sync/identity";
+import { tombstoneLifetime } from "./sync/records";
+import {
+  backfillSyncColumns,
+  createSyncTables,
+  nextSyncSeq,
+  restampRows,
+} from "./sync/schema";
 import type {
   ClipboardHistoryItem,
   ClipboardItemColumn,
@@ -46,11 +55,20 @@ let databasePromise: Promise<Database> | null = null;
 // Secrets and links are found once, when a text is copied, and stored with
 // it. Bump this when findSecrets or findLink changes: at the next start every
 // older text is looked at again (see refreshDetectionMetadata).
-const detectionVersion = 1;
+export const detectionVersion = 1;
 
 export function initializeDatabase(app: TinyApp): Promise<Database> {
   databasePromise ??= openDatabase(app);
   return databasePromise;
+}
+
+let syncIdentity: SyncIdentity | null = null;
+
+/** This device's id and pin clock. Every function that writes has awaited
+ *  initializeDatabase first, which is when they are made. */
+export function getSyncIdentity(): SyncIdentity {
+  if (!syncIdentity) throw new Error("The database is not open yet");
+  return syncIdentity;
 }
 
 async function openDatabase(app: TinyApp): Promise<Database> {
@@ -82,6 +100,9 @@ async function openDatabase(app: TinyApp): Promise<Database> {
   `);
   addMissingColumns(database);
   createIndexes(database);
+  createSyncTables(database);
+  syncIdentity = await loadSyncIdentity(app, database);
+  backfillSyncColumns(database, syncIdentity.deviceId);
 
   return database;
 }
@@ -105,6 +126,8 @@ const indexes = {
     (dateCopied DESC, id DESC) WHERE pinnedAt IS NULL`,
   clipboard_items_kind_unpinned_index: `
     (kind, dateCopied DESC, id DESC) WHERE pinnedAt IS NULL`,
+  // the changes a peer has not read yet (changesAfter in sync/sync-store.ts)
+  clipboard_items_sync_seq_index: `(syncSeq)`,
 };
 
 function createIndexes(database: Database): void {
@@ -148,54 +171,62 @@ export async function saveClipboardItem(
     value !== null &&
     savedItem.secrets.length > 0;
   const database = await initializeDatabase(app);
-  const repeated = await findRepeatCopy(savedItem, database, app);
-  if (repeated) {
+  const { deviceId } = getSyncIdentity();
+  // one writer at a time: a sync batch in progress finishes first
+  return exclusive(async () => {
+    const repeated = await findRepeatCopy(savedItem, database, app);
+    if (repeated) {
+      run(
+        database,
+        `
+          UPDATE "CLIPBOARD_ITEMS"
+          SET dateCopied = ?, sourceAppName = ?, sourceAppBundleId = ?, syncSeq = ?
+          WHERE id = ?
+        `,
+        dateCopied,
+        savedItem.sourceApp?.name ?? null,
+        savedItem.sourceApp?.bundleId ?? null,
+        nextSyncSeq(database),
+        repeated.id,
+      );
+      notifyClipboardHistoryChanged(app);
+      return { ...savedItem, id: repeated.id };
+    }
+
+    const storedValue = isEncrypted ? await encryptText(value, app) : value;
+    const { data: dataDirectory } = await appPaths(app);
+
     run(
       database,
       `
-        UPDATE "CLIPBOARD_ITEMS"
-        SET dateCopied = ?, sourceAppName = ?, sourceAppBundleId = ?
-        WHERE id = ?
+        INSERT INTO "CLIPBOARD_ITEMS" (
+          id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted,
+          secrets, linkUrl, linkHost, detectorVersion, createdAt, originDevice, syncSeq
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      dateCopied,
+      savedItem.id,
+      savedItem.kind,
+      serializeImageSize(savedItem),
+      serializePath(savedItem, dataDirectory),
+      storedValue,
+      savedItem.dateCopied,
       savedItem.sourceApp?.name ?? null,
       savedItem.sourceApp?.bundleId ?? null,
-      repeated.id,
+      savedItem.pasteAsFile ? 1 : null,
+      isEncrypted ? 1 : null,
+      serializeSecrets(savedItem.secrets),
+      savedItem.link?.url ?? null,
+      savedItem.link?.host ?? null,
+      detectionVersion,
+      savedItem.dateCopied,
+      deviceId,
+      nextSyncSeq(database),
     );
     notifyClipboardHistoryChanged(app);
-    return { ...savedItem, id: repeated.id };
-  }
 
-  const storedValue = isEncrypted ? await encryptText(value, app) : value;
-  const { data: dataDirectory } = await appPaths(app);
-
-  run(
-    database,
-    `
-      INSERT INTO "CLIPBOARD_ITEMS" (
-        id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted,
-        secrets, linkUrl, linkHost, detectorVersion
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    savedItem.id,
-    savedItem.kind,
-    serializeImageSize(savedItem),
-    serializePath(savedItem, dataDirectory),
-    storedValue,
-    savedItem.dateCopied,
-    savedItem.sourceApp?.name ?? null,
-    savedItem.sourceApp?.bundleId ?? null,
-    savedItem.pasteAsFile ? 1 : null,
-    isEncrypted ? 1 : null,
-    serializeSecrets(savedItem.secrets),
-    savedItem.link?.url ?? null,
-    savedItem.link?.host ?? null,
-    detectionVersion,
-  );
-  notifyClipboardHistoryChanged(app);
-
-  return savedItem;
+    return savedItem;
+  });
 }
 
 /** The newest unpinned item when it holds what `item` holds: copying the
@@ -222,7 +253,7 @@ async function findRepeatCopy(
   return decrypted && isRepeatCopy(item, decrypted) ? decrypted : null;
 }
 
-function detectInText(text: string | null): {
+export function detectInText(text: string | null): {
   secrets: SecretSpan[];
   link: ClipboardLink | null;
 } {
@@ -230,7 +261,7 @@ function detectInText(text: string | null): {
   return { secrets: findSecrets(text), link: findLink(text) };
 }
 
-function serializeSecrets(secrets: SecretSpan[]): string | null {
+export function serializeSecrets(secrets: SecretSpan[]): string | null {
   return secrets.length ? JSON.stringify(secrets) : null;
 }
 
@@ -258,6 +289,13 @@ function parseSecrets(secrets: string | null): SecretSpan[] {
  *  rule added in an update covers older copies too. */
 export async function refreshDetectionMetadata(app: TinyApp): Promise<void> {
   const database = await initializeDatabase(app);
+  await exclusive(() => refreshDetection(database, app));
+}
+
+async function refreshDetection(
+  database: Database,
+  app: TinyApp,
+): Promise<void> {
   const rows = all<Pick<ClipboardItemRow, "id" | "value" | "encrypted">>(
     database,
     `
@@ -291,14 +329,27 @@ export async function refreshDetectionMetadata(app: TinyApp): Promise<void> {
   if (changed) notifyClipboardHistoryChanged(app);
 }
 
-// Matches unpinned items copied before ?1 (ms) or beyond the newest ?2
-// unpinned ones (-1 = no limit). Pinned items are never deleted or counted.
+// A deleted text whose text is gone: what sync keeps so peers hear of the
+// delete (see tombstones below). Deleted before sync, a text keeps its value.
+const tombstoneRow = `(kind = 'text' AND deletedAt IS NOT NULL AND value IS NULL)`;
+// ...and one still young enough that it must stay: ?  is its cutoff (ms)
+const youngTombstone = `(${tombstoneRow} AND deletedAt >= ?)`;
+
+// Matches unpinned items copied before ?2 (ms) or beyond the newest ?4
+// unpinned ones (-1 = no limit). Pinned items are never deleted or counted,
+// and neither are young tombstones: they are not history, they are news for
+// the other devices. Fill the four with deletionValues.
 const deletionCondition = `
-  pinnedAt IS NULL AND (dateCopied < ? OR id NOT IN (
-    SELECT id FROM "CLIPBOARD_ITEMS" WHERE pinnedAt IS NULL
+  pinnedAt IS NULL AND NOT ${youngTombstone} AND (dateCopied < ? OR id NOT IN (
+    SELECT id FROM "CLIPBOARD_ITEMS" WHERE pinnedAt IS NULL AND NOT ${youngTombstone}
     ORDER BY dateCopied DESC LIMIT ?
   ))
 `;
+
+function deletionValues(copiedBefore: number, keepNewest: number): number[] {
+  const cutoff = Date.now() - tombstoneLifetime;
+  return [cutoff, copiedBefore, cutoff, keepNewest];
+}
 
 /** Whether these limits can delete anything. With none set (the default)
  *  deletionCondition matches nothing, but checking it after every copy would
@@ -321,40 +372,72 @@ export async function countClipboardItemsToDelete(
       SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL AND (${deletionCondition})
     `,
-    copiedBefore,
-    keepNewest,
+    ...deletionValues(copiedBefore, keepNewest),
   );
   return result?.count ?? 0;
 }
 
+// What a tombstone no longer holds: the text and what was found in it
+const eraseText = ["value", "secrets", "linkUrl", "linkHost", "encrypted"]
+  .map(
+    (column) =>
+      `${column} = CASE WHEN kind = 'text' THEN NULL ELSE ${column} END`,
+  )
+  .join(", ");
+
 /** Delete items copied before `copiedBefore` (ms) or beyond the newest
- *  `keepNewest` (-1 = no limit), along with their saved images. */
+ *  `keepNewest` (-1 = no limit), along with their saved images. With sync on,
+ *  `leaveTombstones` keeps each deleted text as a tombstone, so the other
+ *  devices delete it too: for "Clear history", not for the limits, which are
+ *  each device's own. */
 export async function deleteClipboardItems(
   app: TinyApp,
   copiedBefore: number,
   keepNewest: number,
+  { leaveTombstones = false } = {},
 ): Promise<void> {
   if (!limitsHistory(copiedBefore, keepNewest)) return;
   const database = await initializeDatabase(app);
+  const { data: dataDirectory } = await appPaths(app);
+  const values = deletionValues(copiedBefore, keepNewest);
+
   // Read and delete with no await in between (sqlite is sync), so an item
   // saved meanwhile can't be deleted without its image path being read
-  const deletedRows = all<Pick<ClipboardItemRow, "kind" | "path">>(
-    database,
-    `SELECT kind, path FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
-    copiedBefore,
-    keepNewest,
-  );
-  if (deletedRows.length === 0) return;
-  run(
-    database,
-    `DELETE FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
-    copiedBefore,
-    keepNewest,
-  );
+  const { deletedRows, changed } = await exclusive(async () => {
+    let tombstoned = 0;
+    if (leaveTombstones && getSettings().syncEnabled) {
+      // The texts become tombstones, and drop out of the condition below
+      // while they are young. A tombstone already there stays as it is.
+      run(
+        database,
+        `
+          UPDATE "CLIPBOARD_ITEMS"
+          SET deletedAt = ifnull(deletedAt, ?), pinnedAt = NULL, syncSeq = NULL, ${eraseText}
+          WHERE kind = 'text' AND NOT ${tombstoneRow} AND ${deletionCondition}
+        `,
+        Date.now(),
+        ...values,
+      );
+      tombstoned = restampRows(database, `syncSeq IS NULL`);
+    }
+    const rows = all<Pick<ClipboardItemRow, "kind" | "path">>(
+      database,
+      `SELECT kind, path FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+      ...values,
+    );
+    if (rows.length > 0) {
+      run(
+        database,
+        `DELETE FROM "CLIPBOARD_ITEMS" WHERE ${deletionCondition}`,
+        ...values,
+      );
+    }
+    return { deletedRows: rows, changed: tombstoned > 0 || rows.length > 0 };
+  });
+  if (!changed) return;
   notifyClipboardHistoryChanged(app);
 
   // Images go after their rows, so history never points at a missing file
-  const { data: dataDirectory } = await appPaths(app);
   for (const row of deletedRows) {
     const imagePath =
       row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
@@ -368,22 +451,57 @@ export async function deleteClipboardItems(
   }
 }
 
-/** Hide an item from the history but keep its row and image, so it can be
- *  restored. It's unpinned too, so history limits count it and delete it in time. */
+/** Send the items that hold secrets again. They were left out while "sync
+ *  items with secrets" was off, and a device that has read past a row never
+ *  asks for it again. Returns how many there are. */
+export async function restampSecretItems(app: TinyApp): Promise<number> {
+  const database = await initializeDatabase(app);
+  return exclusive(async () =>
+    restampRows(
+      database,
+      `kind = 'text' AND deletedAt IS NULL AND (secrets IS NOT NULL OR encrypted = 1)`,
+    ),
+  );
+}
+
+/** Remove the tombstones that have been kept their 30 days: any device that
+ *  was away longer than that has to be paired again. */
+export async function purgeOldTombstones(app: TinyApp): Promise<void> {
+  const database = await initializeDatabase(app);
+  await exclusive(async () => {
+    run(
+      database,
+      `DELETE FROM "CLIPBOARD_ITEMS" WHERE ${tombstoneRow} AND deletedAt < ?`,
+      Date.now() - tombstoneLifetime,
+    );
+  });
+}
+
+/** Hide an item from the history. Its row stays, so history limits count it
+ *  and delete it in time. It's unpinned too. With sync on, a text also loses
+ *  its text and becomes a tombstone, which tells the other devices to delete
+ *  it; every other kind keeps its row and image as before. */
 export async function softDeleteClipboardItem(
   id: string,
   app: TinyApp,
 ): Promise<void> {
-  run(
-    await initializeDatabase(app),
-    `
-      UPDATE "CLIPBOARD_ITEMS" SET deletedAt = ?, pinnedAt = NULL
-      WHERE id = ? AND deletedAt IS NULL
-    `,
-    Date.now(),
-    id,
-  );
-  notifyClipboardHistoryChanged(app);
+  const database = await initializeDatabase(app);
+  await exclusive(async () => {
+    run(
+      database,
+      `
+        UPDATE "CLIPBOARD_ITEMS"
+        SET deletedAt = ?, pinnedAt = NULL, syncSeq = ?${
+          getSettings().syncEnabled ? `, ${eraseText}` : ""
+        }
+        WHERE id = ? AND deletedAt IS NULL
+      `,
+      Date.now(),
+      nextSyncSeq(database),
+      id,
+    );
+    notifyClipboardHistoryChanged(app);
+  });
 }
 
 /** Pinned items list first, newest pin first, and history
@@ -393,13 +511,23 @@ export async function setClipboardItemPinned(
   pinned: boolean,
   app: TinyApp,
 ): Promise<void> {
-  run(
-    await initializeDatabase(app),
-    `UPDATE "CLIPBOARD_ITEMS" SET pinnedAt = ? WHERE id = ? AND deletedAt IS NULL`,
-    pinned ? Date.now() : null,
-    id,
-  );
-  notifyClipboardHistoryChanged(app);
+  const database = await initializeDatabase(app);
+  const { clock } = getSyncIdentity();
+  await exclusive(async () => {
+    // an unpin gets a stamp too: it has to win over the pin it undoes
+    run(
+      database,
+      `
+        UPDATE "CLIPBOARD_ITEMS" SET pinnedAt = ?, pinnedStamp = ?, syncSeq = ?
+        WHERE id = ? AND deletedAt IS NULL
+      `,
+      pinned ? Date.now() : null,
+      clock.next(),
+      nextSyncSeq(database),
+      id,
+    );
+    notifyClipboardHistoryChanged(app);
+  });
 }
 
 // A saved image never changes, so it is measured once instead of on every
@@ -420,8 +548,10 @@ export async function listClipboardItemSizes(
         ifnull(length(CAST(value AS BLOB)), 0) +
         ifnull(length(CAST(path AS BLOB)), 0) AS rowBytes
       FROM "CLIPBOARD_ITEMS"
+      WHERE NOT ${youngTombstone}
       ORDER BY dateCopied DESC
     `,
+    Date.now() - tombstoneLifetime,
   );
   const { data: dataDirectory } = await appPaths(app);
   const measuredImages = new Map<string, number>();
@@ -473,9 +603,28 @@ export async function countClipboardMedia(
   };
 }
 
+// Besides the windows, the sync engine wants to hear that this device changed
+// its history, to send the change on
+const historyListeners = new Set<() => void>();
+
+/** `listener` runs after each change this device makes to its history. Returns
+ *  what takes it off again. */
+export function onHistoryChanged(listener: () => void): () => void {
+  historyListeners.add(listener);
+  return () => void historyListeners.delete(listener);
+}
+
 /** Call after every committed clipboard-history insert, update, or deletion. */
 export function notifyClipboardHistoryChanged(app: TinyApp): void {
   app.push(clipboardHistoryChangedEvent);
+  for (const listener of historyListeners) {
+    try {
+      listener();
+    } catch (error) {
+      // the change is made: a listener must not undo that by throwing
+      logError("a history listener failed:", error);
+    }
+  }
 }
 
 // The list reads only the start of a long text: the card shows two lines, and
@@ -690,7 +839,7 @@ async function countClipboardItems(
 /** The row with its text decrypted, or null while it can't be: the Keychain
  *  can't be read, or the key there isn't the one it was encrypted with. The
  *  row stays saved, in case the key comes back. */
-async function decryptRow<
+export async function decryptRow<
   Row extends Pick<ClipboardItemRow, "id" | "value" | "encrypted">,
 >(row: Row, app: TinyApp): Promise<Row | null> {
   if (row.encrypted !== 1 || row.value === null) return row;
@@ -707,6 +856,13 @@ async function decryptRow<
  *  a rule added since. Run at startup and when encryption is turned on. */
 export async function encryptSecretsInHistory(app: TinyApp): Promise<void> {
   const database = await initializeDatabase(app);
+  await exclusive(() => encryptPlainSecrets(database, app));
+}
+
+async function encryptPlainSecrets(
+  database: Database,
+  app: TinyApp,
+): Promise<void> {
   const rows = all<Pick<ClipboardItemRow, "id" | "value">>(
     database,
     `
@@ -753,6 +909,18 @@ export async function turnOffSecretEncryption(app: TinyApp): Promise<boolean> {
   }
 
   const database = await initializeDatabase(app);
+  await exclusive(() => decryptEncryptedRows(database, app, hasKey));
+
+  await updateSettings({ encryptSecrets: false }, app);
+  if (hasKey) await deleteEncryptionKey(app);
+  return true;
+}
+
+async function decryptEncryptedRows(
+  database: Database,
+  app: TinyApp,
+  hasKey: boolean,
+): Promise<void> {
   const rows = all<Pick<ClipboardItemRow, "id" | "value">>(
     database,
     `SELECT id, value FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1`,
@@ -774,10 +942,6 @@ export async function turnOffSecretEncryption(app: TinyApp): Promise<boolean> {
     }
   }
   if (rows.length) notifyClipboardHistoryChanged(app);
-
-  await updateSettings({ encryptSecrets: false }, app);
-  if (hasKey) await deleteEncryptionKey(app);
-  return true;
 }
 
 /** Earlier versions always encrypted keys. When this one first starts with
@@ -837,6 +1001,12 @@ const addedColumns = {
   linkUrl: "TEXT",
   linkHost: "TEXT",
   detectorVersion: "INTEGER",
+  // for sync: the row's place in this device's change counter, the stamp of
+  // its latest pin or unpin, the device that first copied it, and when
+  syncSeq: "INTEGER",
+  pinnedStamp: "TEXT",
+  originDevice: "TEXT",
+  createdAt: "INTEGER",
 };
 
 function addMissingColumns(database: Database): void {
@@ -962,23 +1132,5 @@ function parseImageSize(
       : null;
   } catch {
     return null;
-  }
-}
-
-function run(database: Database, query: string, ...values: unknown[]): void {
-  const statement = database.prepare(query);
-  try {
-    statement.run(...values);
-  } finally {
-    statement.finalize();
-  }
-}
-
-function all<T>(database: Database, query: string, ...values: unknown[]): T[] {
-  const statement = database.prepare(query);
-  try {
-    return statement.all(...values) as T[];
-  } finally {
-    statement.finalize();
   }
 }

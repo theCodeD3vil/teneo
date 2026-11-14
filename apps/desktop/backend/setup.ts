@@ -1,5 +1,6 @@
 // Until the user finishes the setup window, Teneo stays out of the menu bar:
 // no icon, and no shortcut to open the panel
+import { devName } from "./dev-run";
 import { syncOpenPanelShortcut } from "./global-shortcut";
 import { appPaths } from "./paths";
 import {
@@ -9,10 +10,11 @@ import {
   showPanel,
 } from "./windows";
 
-const setupCompleteStoreKey = "setupComplete";
+// a dev run keeps its own, so it shows setup on its first launch
+const setupCompleteStoreKey = () => devName("setupComplete");
 
 async function isSetupComplete(app: TinyApp): Promise<boolean> {
-  return Boolean(await app.store.get(setupCompleteStoreKey));
+  return Boolean(await app.store.get(setupCompleteStoreKey()));
 }
 
 async function showInMenuBar(app: TinyApp): Promise<void> {
@@ -30,7 +32,7 @@ export async function showMenuBarOrSetup(app: TinyApp): Promise<void> {
 export async function finishSetup(app: TinyApp): Promise<void> {
   // Setup reopened from Settings finds the menu bar icon already there
   const isInMenuBar = await isSetupComplete(app);
-  await app.store.set(setupCompleteStoreKey, true);
+  await app.store.set(setupCompleteStoreKey(), true);
   await closeSetupWindow(app);
   if (!isInMenuBar) await showInMenuBar(app);
   await showPanel(app);

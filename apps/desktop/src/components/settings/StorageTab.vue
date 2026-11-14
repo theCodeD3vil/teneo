@@ -369,7 +369,7 @@ const clearHistoryMutation = useMutation({
               Clear history
             </Button>
           </AlertDialogTrigger>
-          <AlertDialogContent class="bg-card/35 border-card/45">
+          <AlertDialogContent class="ring-0">
             <AlertDialogHeader>
               <AlertDialogTitle>Clear clipboard history?</AlertDialogTitle>
               <AlertDialogDescription>
@@ -391,7 +391,7 @@ const clearHistoryMutation = useMutation({
     </SettingsSection>
 
     <AlertDialog v-model:open="isLimitWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>{{ limitWarningTitle }}</AlertDialogTitle>
           <AlertDialogDescription>

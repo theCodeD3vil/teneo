@@ -7,12 +7,15 @@ import {
   settingsChangedEvent,
 } from "@teneo/shared/types/settings";
 
-const settingsStoreKey = "settings";
+import { devName } from "./dev-run";
+
+// a dev run keeps its own settings
+const settingsStoreKey = () => devName("settings");
 
 let currentSettings: AppSettings = { ...defaultSettings };
 
 export async function loadSettings(app: TinyApp): Promise<void> {
-  const storedSettings = await app.store.get(settingsStoreKey);
+  const storedSettings = await app.store.get(settingsStoreKey());
   currentSettings = { ...defaultSettings, ...pickSettings(storedSettings) };
 }
 
@@ -26,7 +29,7 @@ export async function updateSettings(
   app: TinyApp,
 ): Promise<AppSettings> {
   currentSettings = { ...currentSettings, ...pickSettings(changes) };
-  await app.store.set(settingsStoreKey, currentSettings);
+  await app.store.set(settingsStoreKey(), currentSettings);
   app.push(settingsChangedEvent, currentSettings);
   return currentSettings;
 }
@@ -36,5 +39,5 @@ export async function isSettingSaved(
   key: keyof AppSettings,
   app: TinyApp,
 ): Promise<boolean> {
-  return key in pickSettings(await app.store.get(settingsStoreKey));
+  return key in pickSettings(await app.store.get(settingsStoreKey()));
 }

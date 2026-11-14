@@ -223,7 +223,7 @@ const {
     </SettingsSection>
 
     <AlertDialog v-model:open="isDecryptWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Stop encrypting API keys?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -244,7 +244,7 @@ const {
     </AlertDialog>
 
     <AlertDialog v-model:open="isMaskSecretsWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Show API keys in history?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -265,7 +265,7 @@ const {
     </AlertDialog>
 
     <AlertDialog v-model:open="isPasswordWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Keep passwords in history?</AlertDialogTitle>
           <AlertDialogDescription>
