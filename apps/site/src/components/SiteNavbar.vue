@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import ExternalLinkIcon from "~icons/tabler/external-link";
-import MenuIcon from "~icons/tabler/menu-2";
-
-import { Button } from "@/components/ui/button";
+import { Button } from "@teneo/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@teneo/ui/components/dropdown-menu";
+import ExternalLinkIcon from "~icons/tabler/external-link";
+import MenuIcon from "~icons/tabler/menu-2";
+
 import { useActiveSection } from "@/composables/useActiveSection";
 import { useGithubStars } from "@/composables/useGithubStars";
 

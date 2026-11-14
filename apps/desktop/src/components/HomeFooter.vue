@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import Button from "@teneo/ui/components/button/Button.vue";
+import Kbd from "@teneo/ui/components/kbd/Kbd.vue";
 import TickIcon from "~icons/tabler/check";
 import CommandIcon from "~icons/tabler/command";
 import ShutDownIcon from "~icons/tabler/power";
@@ -8,8 +10,6 @@ import { useCopiedNotice } from "@/composables/useCopiedNotice";
 import { useHotkeyPreview } from "@/composables/useHotkeyPreview";
 
 import HotkeyPreview from "./HotkeyPreview.vue";
-import Button from "./ui/button/Button.vue";
-import Kbd from "./ui/kbd/Kbd.vue";
 
 defineProps<{
   clipboardItemsCount: number;

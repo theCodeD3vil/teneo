@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@teneo/ui/components/tabs";
 import { ref } from "vue";
 import HardDriveIcon from "~icons/tabler/database";
 import InformationCircleIcon from "~icons/tabler/info-circle";
 import KeyboardIcon from "~icons/tabler/keyboard";
 import SettingsIcon from "~icons/tabler/settings";
 import ShieldIcon from "~icons/tabler/shield";
-
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import AboutTab from "./AboutTab.vue";
 import GeneralTab from "./GeneralTab.vue";

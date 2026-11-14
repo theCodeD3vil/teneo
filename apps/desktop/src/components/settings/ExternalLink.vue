@@ -1,7 +1,6 @@
 <script lang="ts" setup>
+import { Button } from "@teneo/ui/components/button";
 import LinkIcon from "~icons/tabler/external-link";
-
-import { Button } from "@/components/ui/button";
 
 const props = defineProps<{ name: string; url: string }>();
 

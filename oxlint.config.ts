@@ -16,6 +16,6 @@ export default defineConfig({
     "coverage/**",
     "vendor/**",
     "test/snapshots/**",
-    "apps/*/src/components/ui/**",
+    "packages/ui/src/components/**",
   ], //will update later
 });
