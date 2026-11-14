@@ -1,12 +1,11 @@
 <script setup lang="ts">
+import { Button } from "@teneo/ui/components/button";
 import { ref } from "vue";
 import AppsIcon from "~icons/tabler/apps-filled";
 import AppleIcon from "~icons/tabler/brand-apple-filled";
 import DownloadIcon from "~icons/tabler/download-filled";
 import GearIcon from "~icons/tabler/settings-filled";
 import ShieldIcon from "~icons/tabler/shield-check-filled";
-
-import { Button } from "@/components/ui/button";
 
 const DOWNLOAD_URL = "https://github.com/theCodeD3vil/teneo/releases/latest";
 

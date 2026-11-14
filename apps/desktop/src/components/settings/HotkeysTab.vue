@@ -52,9 +52,9 @@
 </template>
 
 <script lang="ts" setup>
+import { Kbd } from "@teneo/ui/components/kbd";
 import { computed, ref } from "vue";
 
-import { Kbd } from "@/components/ui/kbd";
 import { useSettings } from "@/composables/useSettings";
 import {
   hotkeyDefinitions,

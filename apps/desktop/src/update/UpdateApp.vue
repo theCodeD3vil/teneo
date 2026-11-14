@@ -3,13 +3,13 @@ import {
   type UpdateProgress,
   updateProgressEvent,
 } from "@teneo/shared/types/windows";
+import { Button } from "@teneo/ui/components/button";
+import { ScrollArea } from "@teneo/ui/components/scroll-area";
+import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { onKeyStroke } from "@vueuse/core";
 import { computed, ref } from "vue";
 
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { showWindowWhenPainted } from "@/lib/window-ready";
-import { formatFileSize } from "@/utils/file-size";
 
 import ReleaseNotes from "./ReleaseNotes.vue";
 

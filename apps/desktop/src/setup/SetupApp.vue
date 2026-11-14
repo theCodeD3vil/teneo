@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import type { FolderAccess } from "@teneo/shared/types/storage";
+import { Button } from "@teneo/ui/components/button";
+import { Spinner } from "@teneo/ui/components/spinner";
+import { Switch } from "@teneo/ui/components/switch";
+import { cn } from "@teneo/ui/lib/utils";
 import { useIntervalFn } from "@vueuse/core";
 import { computed, ref, watch } from "vue";
 import TickIcon from "~icons/tabler/check";
@@ -11,14 +15,10 @@ import FileIcon from "~icons/tabler/file";
 
 import SettingsField from "@/components/settings/SettingsField.vue";
 import SettingsSection from "@/components/settings/SettingsSection.vue";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
 import { useLaunchAtLogin } from "@/composables/useLaunchAtLogin";
 import { useSecretEncryption } from "@/composables/useSecretEncryption";
 import { useSettings } from "@/composables/useSettings";
-import { cn } from "@/lib/utils";
 
 const steps = ["welcome", "permissions", "files", "keys", "ready"] as const;
 const currentStep = ref<(typeof steps)[number]>("welcome");

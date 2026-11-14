@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { useQuery } from "@tanstack/vue-query";
+import Button from "@teneo/ui/components/button/Button.vue";
+import { Skeleton } from "@teneo/ui/components/skeleton";
 import { computed } from "vue";
 import OpenIcon from "~icons/tabler/external-link";
 import LinkIcon from "~icons/tabler/link";
 
-import Button from "@/components/ui/button/Button.vue";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useSettings } from "@/composables/useSettings";
 import type { LinkPreviewImage } from "@/types/clipboard";
 import { hidePanel } from "@/utils/panel-reset";

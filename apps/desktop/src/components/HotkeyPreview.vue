@@ -1,12 +1,11 @@
 <script setup lang="ts">
+import Kbd from "@teneo/ui/components/kbd/Kbd.vue";
 import { computed } from "vue";
 import ArrowLeftIcon from "~icons/tabler/chevron-left";
 import CommandIcon from "~icons/tabler/command";
 import OptionIcon from "~icons/tabler/option";
 
 import type { HotkeyPreviewKey, HotkeyProgress } from "@/constants/hotkeys";
-
-import Kbd from "./ui/kbd/Kbd.vue";
 
 const props = defineProps<{
   progress: HotkeyProgress;

@@ -1,10 +1,4 @@
 <script lang="ts" setup>
-import { computed, ref } from "vue";
-import TickIcon from "~icons/tabler/check";
-import AddIcon from "~icons/tabler/plus";
-import CancelIcon from "~icons/tabler/x";
-
-import BetaBadge from "@/components/BetaBadge.vue";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,10 +8,16 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
+} from "@teneo/ui/components/alert-dialog";
+import { Button } from "@teneo/ui/components/button";
+import { Spinner } from "@teneo/ui/components/spinner";
+import { Switch } from "@teneo/ui/components/switch";
+import { computed, ref } from "vue";
+import TickIcon from "~icons/tabler/check";
+import AddIcon from "~icons/tabler/plus";
+import CancelIcon from "~icons/tabler/x";
+
+import BetaBadge from "@/components/BetaBadge.vue";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
 import { useExcludedApps } from "@/composables/useExcludedApps";
 import { useSecretEncryption } from "@/composables/useSecretEncryption";

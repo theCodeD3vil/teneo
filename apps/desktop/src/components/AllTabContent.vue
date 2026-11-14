@@ -1,6 +1,15 @@
 <script lang="ts" setup>
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@teneo/ui/components/empty";
+import { ScrollArea } from "@teneo/ui/components/scroll-area";
+import { currentTime } from "@teneo/ui/composables/useRelativeTimeAgo";
+import {
   computed,
   type ComponentPublicInstance,
   onMounted,
@@ -15,16 +24,7 @@ import FileIcon from "~icons/tabler/file";
 import PaletteIcon from "~icons/tabler/palette";
 import ImageIcon from "~icons/tabler/photo";
 
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { getPreviewPath, useItemPreviews } from "@/composables/useItemPreviews";
-import { currentTime } from "@/composables/useRelativeTimeAgo";
 import type { QuickCopyItemNumber } from "@/constants/hotkeys";
 import type { ClipboardHistoryItem, TabVariant } from "@/types/clipboard";
 import { getClipboardData } from "@/utils/clipboard-items";

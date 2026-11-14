@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import TickIcon from "~icons/tabler/check";
-import CopyIcon from "~icons/tabler/copy";
-
-import Button from "@/components/ui/button/Button.vue";
+import Button from "@teneo/ui/components/button/Button.vue";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@teneo/ui/components/dropdown-menu";
+import { computed } from "vue";
+import TickIcon from "~icons/tabler/check";
+import CopyIcon from "~icons/tabler/copy";
+
 import { usePreviewCopy } from "@/composables/usePreviewCopy";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
 import { getClipboardData } from "@/utils/clipboard-items";
