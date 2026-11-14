@@ -82,6 +82,12 @@
         "typescript": "catalog:",
       },
     },
+    "packages/sync": {
+      "name": "@teneo/sync",
+      "devDependencies": {
+        "typescript": "catalog:",
+      },
+    },
   },
   "catalog": {
     "@iconify-json/tabler": "^1.2.42",
@@ -413,6 +419,8 @@
     "@teneo/shared": ["@teneo/shared@workspace:packages/shared"],
 
     "@teneo/site": ["@teneo/site@workspace:apps/site"],
+
+    "@teneo/sync": ["@teneo/sync@workspace:packages/sync"],
 
     "@ts-morph/common": ["@ts-morph/common@0.29.0", "", { "dependencies": { "minimatch": "^10.0.1", "path-browserify": "^1.0.1", "tinyglobby": "^0.2.14" } }, "sha512-35oUmphHbJvQ/+UTwFNme/t2p3FoKiGJ5auTjjpNTop2dyREspirjMy82PLSC1pnDJ8ah1GU98hwpVt64YXQsg=="],
 
