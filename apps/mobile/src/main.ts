@@ -4,6 +4,8 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import { provideClient } from "./client";
 import { FakeClient } from "./client/fake-client";
+import { initNavigation } from "./composables/useNavigation";
+import { isSetupDone } from "./composables/useSetup";
 
 import "./style.css";
 
@@ -14,7 +16,8 @@ const applyColorScheme = () => {
 applyColorScheme();
 colorScheme.addEventListener("change", applyColorScheme);
 
+initNavigation(isSetupDone() ? "history" : "setup");
+
 const app = createApp(App);
-const fakeClient = new FakeClient();
-provideClient(app, fakeClient);
+provideClient(app, new FakeClient());
 app.mount("#app");

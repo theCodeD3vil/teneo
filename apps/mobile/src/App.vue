@@ -1,96 +1,100 @@
 <script setup lang="ts">
-import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
-import { onMounted } from "vue";
+import { SystemBars, SystemBarsStyle, SystemBarType } from "@capacitor/core";
+import { computed, watch } from "vue";
 
-import { useClient } from "./client";
-import ActionSheet from "./components/ActionSheet.vue";
-import HistoryScreen from "./components/HistoryScreen.vue";
-import ItemViewScreen from "./components/ItemViewScreen.vue";
-import SettingsScreen from "./components/SettingsScreen.vue";
-import ToastNotification from "./components/ToastNotification.vue";
-import WelcomePairingScreen from "./components/WelcomePairingScreen.vue";
+import HistoryScreen from "./components/history/HistoryScreen.vue";
+import ItemViewScreen from "./components/preview/ItemViewScreen.vue";
+import SettingsPageScreen from "./components/settings/SettingsPageScreen.vue";
+import SettingsScreen from "./components/settings/SettingsScreen.vue";
+import SetupScreen from "./components/setup/SetupScreen.vue";
 import { useNavigation } from "./composables/useNavigation";
-import { useToast } from "./composables/useToast";
+import { useSheetDepth } from "./composables/useSheetDepth";
 
-const client = useClient();
-const {
-  currentState,
-  activeSheetItem,
-  closeActionSheet,
-  openItemView,
-  initNavigation,
-} = useNavigation();
-const { showToast } = useToast();
+const { currentState, direction } = useNavigation();
 
-onMounted(() => {
-  initNavigation();
+// Behind an open sheet the page steps back, as on iOS: it shrinks a little,
+// drops below the status bar and rounds its corners over a black backdrop.
+// Dragging the sheet down brings it forward with the finger.
+const { depth, isDragging } = useSheetDepth();
+const pageDepthStyle = computed(() => {
+  const easing = "500ms cubic-bezier(0.32, 0.72, 0, 1)";
+  const value = depth.value;
+  return {
+    transition: isDragging.value
+      ? "none"
+      : `transform ${easing}, border-radius ${easing}`,
+    // none at rest, so position: fixed inside the page keeps working
+    transform: value
+      ? `translateY(calc((var(--safe-area-inset-top, env(safe-area-inset-top)) + 0.75rem) * ${value})) scale(${1 - 0.08 * value})`
+      : "none",
+    borderRadius: `${1.25 * value}rem`,
+  };
+});
+// the status bar sits on the black backdrop then: light icons, whatever the theme
+watch(
+  () => depth.value > 0,
+  (isSteppedBack) => {
+    void SystemBars.setStyle({
+      style: isSteppedBack ? SystemBarsStyle.Dark : SystemBarsStyle.Default,
+      bar: SystemBarType.StatusBar,
+    }).catch(() => undefined);
+  },
+);
+
+// A screen opened pushes in from the right while the one under it slides out
+// left, and back the other way, as the desktop preview does. The leaving
+// screen is lifted out of the flow so both share the window mid-swap.
+const screenTransition = computed(() => {
+  const isForward = direction.value === "forward";
+  return {
+    enterActiveClass:
+      "transition-all duration-200 ease-out motion-reduce:transition-none",
+    enterFromClass: `${isForward ? "translate-x-6" : "-translate-x-6"} opacity-0`,
+    leaveActiveClass:
+      "absolute inset-4 transition-all duration-150 ease-in motion-reduce:transition-none",
+    leaveToClass: `${isForward ? "-translate-x-6" : "translate-x-6"} opacity-0`,
+  };
 });
 
-async function handleSheetCopy(item: ClipboardHistoryItem) {
-  closeActionSheet();
-  await client.copyToClipboard(item.id);
-  showToast("Copied to clipboard");
-}
-
-function handleSheetView(item: ClipboardHistoryItem) {
-  closeActionSheet();
-  openItemView(item.id);
-}
-
-async function handleSheetTogglePin(item: ClipboardHistoryItem) {
-  closeActionSheet();
-  const nextPinned = !item.pinned;
-  await client.setPinned(item.id, nextPinned);
-  showToast(nextPinned ? "Item pinned" : "Item unpinned");
-}
-
-async function handleSheetShare(item: ClipboardHistoryItem) {
-  closeActionSheet();
-  if (item.text && typeof navigator !== "undefined" && navigator.share) {
-    try {
-      await navigator.share({ text: item.text });
-    } catch {
-      // User cancelled share
-    }
-  } else {
-    await handleSheetCopy(item);
-  }
-}
-
-async function handleSheetDelete(item: ClipboardHistoryItem) {
-  closeActionSheet();
-  await client.deleteItem(item.id);
-  showToast("Item deleted");
-}
+const screenKey = computed(() =>
+  [
+    currentState.value.screen,
+    currentState.value.itemId,
+    currentState.value.settingsPage,
+  ].join("-"),
+);
 </script>
 
 <template>
-  <div class="bg-background text-foreground relative min-h-dvh select-none">
-    <!-- Active screen -->
-    <HistoryScreen v-if="currentState.screen === 'history'" />
-
-    <ItemViewScreen
-      v-else-if="currentState.screen === 'item-view' && currentState.itemId"
-      :item-id="currentState.itemId" />
-
-    <SettingsScreen v-else-if="currentState.screen === 'settings'" />
-
-    <WelcomePairingScreen
-      v-else-if="currentState.screen === 'pairing'"
-      :initial-step="currentState.pairingStep ?? 'scan'" />
-
-    <!-- Action Sheet for items -->
-    <ActionSheet
-      :item="activeSheetItem"
-      :is-open="Boolean(activeSheetItem)"
-      @close="closeActionSheet"
-      @copy="handleSheetCopy"
-      @view="handleSheetView"
-      @toggle-pin="handleSheetTogglePin"
-      @share="handleSheetShare"
-      @delete="handleSheetDelete" />
-
-    <!-- Global Toast Confirmation -->
-    <ToastNotification />
+  <div class="h-dvh overflow-hidden bg-black">
+    <div
+      class="pt-safe pb-safe px-safe bg-background size-full origin-top overflow-hidden"
+      :style="pageDepthStyle">
+      <div class="relative flex size-full flex-col p-4">
+        <!-- hidden, not unmounted, so the list keeps its tab, search and scroll -->
+        <Transition v-bind="screenTransition">
+          <HistoryScreen v-show="currentState.screen === 'history'" />
+        </Transition>
+        <Transition v-bind="screenTransition">
+          <ItemViewScreen
+            v-if="currentState.screen === 'item-view' && currentState.itemId"
+            :key="screenKey"
+            :item-id="currentState.itemId" />
+          <SettingsScreen
+            v-else-if="currentState.screen === 'settings'"
+            key="settings" />
+          <SettingsPageScreen
+            v-else-if="
+              currentState.screen === 'settings-page' &&
+              currentState.settingsPage
+            "
+            :key="screenKey"
+            :page="currentState.settingsPage" />
+          <SetupScreen
+            v-else-if="currentState.screen === 'setup'"
+            key="setup" />
+        </Transition>
+      </div>
+    </div>
   </div>
 </template>

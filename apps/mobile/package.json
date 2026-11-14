@@ -8,7 +8,8 @@
     "typecheck": "vue-tsc -b",
     "test": "bun test",
     "android:build": "bun run build && CI=true cap sync android && mise exec -- ./android/gradlew -p android :app:assembleDebug",
-    "android:run": "bun run android:build && adb install -r android/app/build/outputs/apk/debug/app-debug.apk && adb shell am start -n com.michael.teneo/.MainActivity"
+    "android:run": "bun run android:build && adb install -r android/app/build/outputs/apk/debug/app-debug.apk && adb shell am start -n com.michael.teneo/.MainActivity",
+    "android:dev": "adb reverse tcp:5175 tcp:5175 && CI=true TENEO_LIVE_RELOAD_URL=http://localhost:5175 cap sync android && mise exec -- ./android/gradlew -p android :app:assembleDebug && adb install -r android/app/build/outputs/apk/debug/app-debug.apk && adb shell am start -n com.michael.teneo/.MainActivity"
   },
   "dependencies": {
     "@capacitor/android": "8.6.2",
@@ -18,6 +19,7 @@
     "@tanstack/vue-virtual": "^3.13.45",
     "@teneo/shared": "workspace:*",
     "@teneo/ui": "workspace:*",
+    "@vueuse/core": "catalog:",
     "tailwindcss": "catalog:",
     "vue": "catalog:"
   },
@@ -27,6 +29,7 @@
     "@types/node": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "@vue/tsconfig": "catalog:",
+    "shadcn-vue": "^2.8.2",
     "tw-animate-css": "catalog:",
     "typescript": "catalog:",
     "unplugin-icons": "catalog:",

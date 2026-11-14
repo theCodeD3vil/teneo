@@ -1,43 +1,137 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "shadcn-vue/tailwind.css";
+
 @import "@teneo/ui/theme.css";
 
 @source "../../../packages/ui/src";
 
+/* Google Sans ships with Android on Pixel phones: use the system copy, so
+   nothing is bundled. Phones without it fall back to Figtree, the desktop
+   font. The system file is variable, hence the weight range. */
+@font-face {
+  font-family: "Google Sans";
+  src: local("Google Sans"), local("GoogleSans-Regular");
+  font-weight: 100 900;
+  font-style: normal;
+}
+
 @theme inline {
-  --font-sans: "Figtree Variable", sans-serif;
+  --font-sans: "Google Sans", "Figtree Variable", sans-serif;
+}
+
+/* The desktop classes are sized for a mouse on a laptop screen. On a phone
+   the same classes map to a mobile scale: body text (text-sm) at 17px,
+   secondary text (text-xs) at 15px, and spacing, icons and touch targets
+   12.5% larger than Tailwind's default. */
+@theme {
+  --spacing: 0.28125rem;
+  --text-xs: 0.9375rem;
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 1.0625rem;
+  --text-sm--line-height: 1.5rem;
+  --text-base: 1.125rem;
+  --text-base--line-height: 1.625rem;
+  --text-lg: 1.3125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 2rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.25rem;
+  /* thin strokes blur on a phone screen: normal is the lightest weight */
+  --font-weight-thin: 400;
+  --font-weight-extralight: 400;
+  --font-weight-light: 400;
+}
+
+/* Android's status and navigation bars. Capacitor's SystemBars plugin sets
+   these (insetsHandling: "css"); env() covers the browser. */
+@utility pt-safe {
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top));
+}
+@utility pb-safe {
+  padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
+}
+@utility px-safe {
+  padding-left: var(--safe-area-inset-left, env(safe-area-inset-left));
+  padding-right: var(--safe-area-inset-right, env(safe-area-inset-right));
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-
   html {
     color-scheme: light dark;
   }
-
+  /* Native-app feel: a long press doesn't select the page, and taps don't
+     flash a highlight. Fields stay selectable so typing still works. */
   body {
-    @apply bg-background text-foreground font-sans;
-    min-width: 0;
+    @apply bg-background text-foreground font-sans select-none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  input,
+  textarea,
+  [contenteditable="true"] {
+    @apply select-text;
   }
 }
 
-.safe-area {
-  padding-top: max(
-    1.5rem,
-    var(--safe-area-inset-top, env(safe-area-inset-top))
+/* Code in the text preview, as on desktop. Each token colour is mixed toward
+   the text colour, which darkens it on light and softens it on dark. */
+.hljs {
+  --code-mix: 70%;
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-tag,
+.hljs-name {
+  color: color-mix(in oklch, var(--primary) var(--code-mix), var(--foreground));
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-template-tag {
+  color: color-mix(in oklch, var(--success) var(--code-mix), var(--foreground));
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+  color: color-mix(in oklch, var(--warning) var(--code-mix), var(--foreground));
+}
+.hljs-title,
+.hljs-built_in,
+.hljs-type,
+.hljs-section {
+  color: color-mix(in oklch, var(--info) var(--code-mix), var(--foreground));
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: color-mix(
+    in oklch,
+    var(--tertiary) var(--code-mix),
+    var(--foreground)
   );
-  padding-right: max(
-    1.5rem,
-    var(--safe-area-inset-right, env(safe-area-inset-right))
-  );
-  padding-bottom: max(
-    1.5rem,
-    var(--safe-area-inset-bottom, env(safe-area-inset-bottom))
-  );
-  padding-left: max(
-    1.5rem,
-    var(--safe-area-inset-left, env(safe-area-inset-left))
-  );
+}
+.hljs-deletion {
+  color: var(--destructive);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
 }
