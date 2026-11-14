@@ -16,6 +16,7 @@ import {
   parseBrowseLine,
   parseGateway,
 } from "./dns-sd-output";
+import type { ChildRegistry } from "./dns-sd-registry";
 import { LineSplitter } from "./lines";
 
 export const serviceType = "_teneo-sync._tcp";
@@ -44,9 +45,20 @@ export class MacDiscovery implements Discovery {
   private readonly handled = new Set<string>();
   // bumped by every start, restart and stop, so work of an earlier one is let go
   private generation = 0;
+  // where the children are noted, so a Teneo that is killed outright doesn't
+  // leave them running for good
+  private readonly registry: ChildRegistry | null;
+
+  constructor(options: { registry?: ChildRegistry } = {}) {
+    this.registry = options.registry ?? null;
+  }
 
   start(options: DiscoveryOptions): void {
     this.options = options;
+    // the children of an earlier Teneo that was killed outright
+    void this.registry
+      ?.reapLeftovers()
+      .catch((error) => options.onError?.(error));
     this.begin();
   }
 
@@ -232,6 +244,7 @@ export class MacDiscovery implements Discovery {
       stdin: "ignore",
     });
     this.children.add(child);
+    this.registry?.add(child.pid);
     const decoder = new TextDecoder();
     const reader = child.stdout!.getReader();
     const pump = (async () => {
@@ -247,6 +260,7 @@ export class MacDiscovery implements Discovery {
     })();
     const exited = Promise.all([child.wait(), pump]).then(() => {
       this.children.delete(child);
+      this.registry?.remove(child.pid);
     });
     return { stop: () => kill(child), exited };
   }

@@ -10,10 +10,12 @@ import {
 import {
   getSyncIdentity,
   initializeDatabase,
-  notifyClipboardHistoryChanged,
+  onHistoryChanged,
 } from "../database";
+import { clipboardHistoryChangedEvent } from "../types/clipboard";
 import type { Discovery } from "./discovery";
 import { MacDiscovery } from "./discovery-macos";
+import { ChildRegistry } from "./dns-sd-registry";
 import { LanTransport } from "./lan-transport";
 import { SqliteSyncStore } from "./sync-store";
 
@@ -58,19 +60,28 @@ export async function startSyncService(
     store,
     syncSecrets: options.syncSecrets,
     clock,
-    onItemsChanged: () => notifyClipboardHistoryChanged(app),
+    // what came from another device is for the windows only: it is not a
+    // change of this device's to send on
+    onItemsChanged: () => app.push(clipboardHistoryChangedEvent),
     onPeersChanged: options.onPeersChanged,
     onError: options.onError,
   });
+  const discovery =
+    options.discovery ??
+    new MacDiscovery({
+      registry: new ChildRegistry({ folder: (await app.paths()).cache }),
+    });
   const transport = new LanTransport({
     engine,
     deviceId,
-    discovery: options.discovery ?? new MacDiscovery(),
+    discovery,
     knownPeers: () => store.listPeers(),
     ports: options.ports,
     onError: options.onError,
   });
   await transport.start();
+  // every copy, pin, delete and clear made here goes out as it happens
+  const stopListening = onHistoryChanged(() => engine.localChanged());
 
   return {
     deviceId,
@@ -79,6 +90,7 @@ export async function startSyncService(
     knownPeers: () => store.listPeers(),
     localChanged: () => engine.localChanged(),
     async stop() {
+      stopListening();
       engine.stop();
       await transport.stop();
     },

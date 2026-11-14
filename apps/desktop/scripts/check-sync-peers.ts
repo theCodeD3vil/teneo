@@ -1,11 +1,13 @@
 // `bun run sync:check`: two headless peers on this Mac, on the real runtime,
 // find each other through Bonjour and have to end up with the same history:
 // copies, pins, deletes, a clear, and a peer that was off while things changed.
-// It uses no Teneo data (each peer has a temp folder) and leaves nothing running.
-// Exit code 0 only when everything held.
+// A last part runs one peer the way the app does (through SyncManager: turned on
+// and off, joined by recovery code, the secrets switch, quit by SIGTERM) against
+// a plain peer. It uses no Teneo data (each peer has a temp folder) and leaves
+// nothing running. Exit code 0 only when everything held.
 /* oxlint-disable no-console -- a command-line script reports on the console */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +18,7 @@ import { bundleForTjs, tjsBinary } from "./tjs-tools.ts";
 
 const connectTimeout = 60_000; // Bonjour can take a while to notice a new peer
 const syncTimeout = 20_000;
-const wholeRunTimeout = 240_000;
+const wholeRunTimeout = 480_000;
 
 interface Item {
   id: string;
@@ -37,11 +39,17 @@ class Peer {
   private child: ChildProcess;
   readonly exited: Promise<void>;
 
-  private constructor(name: string, bundle: string, code: string, dir: string) {
+  // `code` null runs the peer the way the app does (--app)
+  private constructor(
+    name: string,
+    bundle: string,
+    code: string | null,
+    dir: string,
+  ) {
     this.name = name;
     this.child = spawn(
       tjsBinary,
-      ["run", bundle, code, "--name", name, "--dir", dir],
+      ["run", bundle, code ?? "--app", "--name", name, "--dir", dir],
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     const onLine = (line: string) => {
@@ -62,7 +70,7 @@ class Peer {
   static async start(
     name: string,
     bundle: string,
-    code: string,
+    code: string | null,
     dir: string,
   ): Promise<Peer> {
     const peer = new Peer(name, bundle, code, dir);
@@ -124,6 +132,25 @@ class Peer {
     });
   }
 
+  /** How sync is going, as an app-mode peer says. */
+  async status() {
+    return this.ask("status", (line) => {
+      const found =
+        /^status enabled=(\w+) running=(\w+) problem=(.*) devices=(\d+) connected=(\d+)$/.exec(
+          line,
+        );
+      return found
+        ? {
+            enabled: found[1] === "true",
+            running: found[2] === "true",
+            problem: found[3]!,
+            devices: Number(found[4]),
+            connected: Number(found[5]),
+          }
+        : undefined;
+    });
+  }
+
   /** Ask politely, then insist, so nothing is left running. */
   async stop(signal: "quit" | "SIGTERM" = "quit"): Promise<void> {
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
@@ -144,6 +171,10 @@ class Peer {
 
   kill(): void {
     this.child.kill("SIGKILL");
+  }
+
+  get pid(): number {
+    return this.child.pid!;
   }
 }
 
@@ -218,6 +249,12 @@ function bonjourChildren(): Set<string> {
   });
   return new Set(found.stdout.split("\n").filter(Boolean));
 }
+
+/** The Bonjour children that started during this run and still run. */
+const newBonjourChildren = (): string[] =>
+  [...bonjourChildren()].filter((pid) => !bonjourBefore.has(pid));
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // --- the run
 
@@ -373,6 +410,224 @@ try {
   if (left.length > 0)
     throw new Error(`Bonjour processes left running: ${left.join(", ")}`);
   pass("stopping the peers left no Bonjour process behind");
+
+  // a peer that is killed outright can't end its Bonjour children, and they
+  // announce a port nobody listens on: the next peer of that folder ends them
+  const pidFileOf = (peer: Peer) =>
+    join(dirA, "cache", `bonjour-${peer.pid}.pids`);
+  const c = await Peer.start("Peer C", bundle, code, dirA);
+  peers.push(c);
+  await eventually(
+    "C's Bonjour processes to be noted down",
+    async () => newBonjourChildren().length >= 2 && existsSync(pidFileOf(c)),
+  );
+  c.kill();
+  await c.exited;
+  await pause(500);
+  const orphans = newBonjourChildren();
+  if (orphans.length < 2) {
+    throw new Error(
+      "a killed peer left no Bonjour process, so this check proves nothing",
+    );
+  }
+  // D is C after a crash. A leftover can end on its own (it dies when it next
+  // writes to the pipe of a parent that is gone), so the proof that D cleaned
+  // up is C's pid file: only a Teneo that reaps removes another's.
+  const d = await Peer.start("Peer D", bundle, code, dirA);
+  peers.push(d);
+  await eventually("D to end what C left running", async () => {
+    const running = bonjourChildren();
+    return (
+      !existsSync(pidFileOf(c)) && orphans.every((pid) => !running.has(pid))
+    );
+  });
+  await d.stop();
+  await pause(500);
+  if (newBonjourChildren().length > 0) {
+    throw new Error("Bonjour processes left running after D stopped");
+  }
+  pass(
+    "a peer killed outright left Bonjour processes and a pid file; the next one cleaned up",
+  );
+
+  // --- the app's way of running sync: the SyncManager the Sync tab uses
+  const secretOne = "postgres://user:s3cretA@db.example.com/app";
+  const secretTwo = "postgres://user:s3cretB@db.example.com/app";
+  const secretThree = "postgres://user:s3cretC@db.example.com/app";
+  const dirM = join(folder, "m");
+  const dirP = join(folder, "p");
+
+  let m = await Peer.start("App M", bundle, null, dirM);
+  peers.push(m);
+  let status = await m.status();
+  if (status.enabled || status.running) {
+    throw new Error("the app-mode peer had sync on before it was turned on");
+  }
+  // history that exists before sync is turned on, one item of it with a secret
+  await m.copy("before-sync");
+  await m.copy(secretOne);
+  await m.command("turnon", "ok turnon");
+  status = await m.status();
+  if (!status.enabled || !status.running) {
+    throw new Error(
+      `turning sync on did not start it: ${JSON.stringify(status)}`,
+    );
+  }
+  const mCode = await m.ask("code", (line) => /^code (\S+)/.exec(line)?.[1]);
+  const p = await Peer.start("Peer P", bundle, mCode, dirP);
+  peers.push(p);
+  await eventually(
+    "M and P to connect",
+    async () => m.connected >= 1 && p.connected >= 1,
+    connectTimeout,
+  );
+  await eventually(
+    "P to get the history M had before sync was on",
+    async () => !!find(await p.list(), "before-sync"),
+  );
+  if (find(await p.list(), secretOne)) {
+    throw new Error("an item with a secret was sent while that is off");
+  }
+  pass(
+    "the app turned sync on, a peer joined with its recovery code, and the existing history arrived, but not the secret",
+  );
+
+  // changes made on the app side reach the peer with nothing but the app's wiring
+  const mOne = await m.copy("m-one");
+  await eventually(
+    "P to get m-one",
+    async () => !!find(await p.list(), "m-one"),
+  );
+  const pOne = await p.copy("p-one");
+  await eventually(
+    "M to get p-one",
+    async () => !!find(await m.list(), "p-one"),
+  );
+  await m.command(`pin ${mOne}`, "ok pin");
+  await eventually(
+    "P to see m-one pinned",
+    async () => find(await p.list(), "m-one")?.pinned === true,
+  );
+  await p.command(`delete ${pOne}`, "ok delete");
+  await eventually(
+    "M to drop p-one",
+    async () => !find(await m.list(), "p-one"),
+  );
+  pass("a copy, a pin and a delete went both ways through the app's wiring");
+
+  // the secrets switch: held back, sent when turned on, held back when turned off
+  await m.command("secrets on", "ok secrets on");
+  await eventually(
+    "P to get the secret that was held back",
+    async () => !!find(await p.list(), secretOne),
+  );
+  await m.copy(secretTwo);
+  await eventually(
+    "P to get a secret copied while the switch is on",
+    async () => !!find(await p.list(), secretTwo),
+  );
+  await m.command("secrets off", "ok secrets off");
+  await m.copy(secretThree);
+  await m.copy("after-secrets-off");
+  await eventually(
+    "P to get what was copied after the secret",
+    async () => !!find(await p.list(), "after-secrets-off"),
+  );
+  if (find(await p.list(), secretThree)) {
+    throw new Error("a secret was sent after the switch was turned off");
+  }
+  pass("secrets were held back, sent when the switch went on, held back again");
+
+  await m.command("clear", "ok clear");
+  await eventually("P to be cleared but for the pinned item", async () => {
+    const items = await p.list();
+    return items.length === 1 && items[0]?.text === "m-one" && items[0].pinned;
+  });
+  const [listM, listP] = [await m.list(), await p.list()];
+  if (summary(listM) !== summary(listP)) {
+    throw new Error(
+      `the histories differ:\nM:\n${summary(listM)}\nP:\n${summary(listP)}`,
+    );
+  }
+  pass("a clear on the app side left only the pinned item, on both");
+
+  // quit with a plain SIGTERM, as the system does: Bonjour ends, and the next
+  // launch turns sync on by itself, as the same device, and catches up
+  const mDeviceId = m.deviceId;
+  await pause(1000);
+  const runningBefore = newBonjourChildren().length;
+  await m.stop("SIGTERM");
+  await pause(500);
+  if (newBonjourChildren().length > runningBefore - 2) {
+    throw new Error(
+      "the app-mode peer left its Bonjour processes after SIGTERM",
+    );
+  }
+  await eventually(
+    "P to notice M is gone",
+    async () => p.connected === 0,
+    connectTimeout,
+  );
+  await p.copy("while-m-was-off");
+  m = await Peer.start("App M", bundle, null, dirM);
+  peers.push(m);
+  if (m.deviceId !== mDeviceId)
+    throw new Error("M came back as another device");
+  status = await m.status();
+  if (!status.enabled || !status.running) {
+    throw new Error(
+      `sync did not come back at launch: ${JSON.stringify(status)}`,
+    );
+  }
+  await eventually(
+    "M to catch up after its restart",
+    async () => !!find(await m.list(), "while-m-was-off"),
+    connectTimeout,
+  );
+  pass(
+    "SIGTERM ended Bonjour; the next launch turned sync on by itself and caught up",
+  );
+
+  // turned off, nothing announces or listens, and it stays off after a restart
+  await m.command("off", "ok off");
+  status = await m.status();
+  if (status.enabled || status.running) {
+    throw new Error(
+      `turning sync off did not stop it: ${JSON.stringify(status)}`,
+    );
+  }
+  await eventually(
+    "P to see M go",
+    async () => p.connected === 0,
+    connectTimeout,
+  );
+  await p.stop();
+  await pause(500);
+  const keptItems = (await m.list()).length;
+  if (keptItems === 0) throw new Error("turning sync off removed the history");
+  await m.stop();
+  m = await Peer.start("App M", bundle, null, dirM);
+  peers.push(m);
+  await pause(1500);
+  status = await m.status();
+  if (status.enabled || status.running) {
+    throw new Error("sync came back on after it was turned off");
+  }
+  if (newBonjourChildren().length > 0) {
+    throw new Error("Bonjour processes are running with sync off");
+  }
+  for (const port of syncPorts) {
+    if (!(await portIsFree(port))) {
+      throw new Error(`port ${port} is taken with sync off`);
+    }
+  }
+  if ((await m.list()).length !== keptItems) {
+    throw new Error("the history changed across the restart");
+  }
+  await m.stop();
+  pass(
+    "turned off: nothing announces or listens, the history is kept, and it stays off after a restart",
+  );
 
   console.log("\nthe peers stayed in sync");
 } catch (error) {

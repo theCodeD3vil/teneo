@@ -603,9 +603,28 @@ export async function countClipboardMedia(
   };
 }
 
+// Besides the windows, the sync engine wants to hear that this device changed
+// its history, to send the change on
+const historyListeners = new Set<() => void>();
+
+/** `listener` runs after each change this device makes to its history. Returns
+ *  what takes it off again. */
+export function onHistoryChanged(listener: () => void): () => void {
+  historyListeners.add(listener);
+  return () => void historyListeners.delete(listener);
+}
+
 /** Call after every committed clipboard-history insert, update, or deletion. */
 export function notifyClipboardHistoryChanged(app: TinyApp): void {
   app.push(clipboardHistoryChangedEvent);
+  for (const listener of historyListeners) {
+    try {
+      listener();
+    } catch (error) {
+      // the change is made: a listener must not undo that by throwing
+      logError("a history listener failed:", error);
+    }
+  }
 }
 
 // The list reads only the start of a long text: the card shows two lines, and

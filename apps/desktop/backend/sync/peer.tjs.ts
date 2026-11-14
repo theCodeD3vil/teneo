@@ -1,15 +1,26 @@
 // `bun run sync:peer <recovery code>`: a second Teneo device with no window, on
 // the real runtime, to sync with the app or with another peer. It has its own
-// folder and a store that is only a file, so it never touches Teneo's data or
+// folder and stores that are only files, so it never touches Teneo's data or
 // Keychain. It prints what it does and what it receives (this is a test tool,
 // so item text is shown), and reads commands on stdin:
 //   copy <text>   pin <id>   unpin <id>   delete <id>   clear
 //   list          peers      quit
 // Options: --name <device name>  --dir <folder, kept between runs>
+//
+// `bun run sync:peer --app` runs sync the way the app does, through the same
+// SyncManager, feature switch and signal handling, and sync starts off: it takes
+// these commands as well, and the vault is a throwaway one of its own.
+//   turnon   join <recovery code>   code   secrets on|off   off   status
 /* oxlint-disable no-console -- the peer talks on the console */
+import {
+  type SyncStatus,
+  syncStatusChangedEvent,
+} from "@teneo/shared/types/sync";
 import { parseRecoveryCode } from "@teneo/sync";
 
 import {
+  getSyncIdentity,
+  initializeDatabase,
   listClipboardItems,
   saveClipboardItem,
   setClipboardItemPinned,
@@ -18,25 +29,30 @@ import {
 import { clearClipboardHistory } from "../history-limits";
 import { loadSettings, updateSettings } from "../settings";
 import { clipboardHistoryChangedEvent } from "../types/clipboard";
+import { createSyncManager, stopSyncWhenTold } from "./app-sync";
 import { LineSplitter } from "./lines";
-import { startSyncService } from "./service";
+import { type SyncService, startSyncService } from "./service";
+import type { SyncManager } from "./sync-manager";
 
 const usage =
-  "usage: bun run sync:peer <recovery code> [--name <device name>] [--dir <folder>]";
+  "usage: bun run sync:peer <recovery code> | --app [--name <device name>] [--dir <folder>]";
 
 // --- arguments: tjs.args is [tjs, "run", script, ...ours]
 
-const [code, ...flags] = tjs.args.slice(3);
+const args = tjs.args.slice(3);
+const appMode = args[0] === "--app";
+const code = appMode ? undefined : args[0];
+const flags = appMode ? args : args.slice(1);
 const option = (name: string): string | undefined => {
   const at = flags.indexOf(name);
   return at >= 0 ? flags[at + 1] : undefined;
 };
-if (!code || code.startsWith("--")) {
+if (!appMode && (!code || code.startsWith("--"))) {
   console.log(usage);
   tjs.exit(2);
 }
-const vaultKey = await parseRecoveryCode(code);
-if (!vaultKey) {
+const vaultKey = code ? await parseRecoveryCode(code) : null;
+if (!appMode && !vaultKey) {
   console.log("That is not a valid recovery code");
   tjs.exit(2);
 }
@@ -58,7 +74,23 @@ try {
   // the first run
 }
 const saveStore = () => tjs.writeFile(storePath, JSON.stringify(stored));
+
+// the "Keychain": a file here, so a restarted app-mode peer still has its key
+const secretsPath = `${folder}/secrets.json`;
 const secrets = new Map<string, string>();
+try {
+  const saved = JSON.parse(
+    new TextDecoder().decode(await tjs.readFile(secretsPath)),
+  ) as Record<string, string>;
+  for (const [name, value] of Object.entries(saved)) secrets.set(name, value);
+} catch {
+  // the first run
+}
+const saveSecrets = () =>
+  tjs.writeFile(secretsPath, JSON.stringify(Object.fromEntries(secrets)));
+
+const connectedCount = (status: SyncStatus) =>
+  status.devices.filter((device) => device.connected).length;
 
 const app = {
   paths: async () => ({ data: `${folder}/data`, cache: `${folder}/cache` }),
@@ -74,43 +106,76 @@ const app = {
     get: async (key: string) => secrets.get(key) ?? null,
     set: async (key: string, value: string) => {
       secrets.set(key, value);
+      await saveSecrets();
       return true;
     },
-    delete: async (key: string) => secrets.delete(key),
+    delete: async (key: string) => {
+      const had = secrets.delete(key);
+      await saveSecrets();
+      return had;
+    },
   },
-  push: (event: string) => {
+  push: (event: string, payload?: unknown) => {
     if (event === clipboardHistoryChangedEvent) console.log("changed");
+    if (event === syncStatusChangedEvent) {
+      console.log(`peers ${connectedCount(payload as SyncStatus)}`);
+    }
   },
 } as unknown as TinyApp;
 
 await loadSettings(app);
-await updateSettings({ syncEnabled: true }, app); // deletes leave tombstones
 
 // --- start
 
-const service = await startSyncService(app, {
-  vaultKey,
-  name: option("--name") ?? "Dev peer",
-  platform: "dev",
-  onPeersChanged: () => console.log(`peers ${peerNames().length}`),
-  onError: (error) =>
-    console.log(`error ${error instanceof Error ? error.message : error}`),
-});
-const peerNames = () => service.peers().map((peer) => peer.name);
-console.log(`ready ${service.deviceId} ${service.port ?? "none"}`);
+let service: SyncService | null = null;
+let manager: SyncManager | null = null;
+if (appMode) {
+  tjs.env.TENEO_SYNC = "1"; // the app's feature switch
+  manager = createSyncManager(app);
+  await initializeDatabase(app); // the app does this before it starts sync
+  await manager.startIfEnabled();
+  stopSyncWhenTold(manager);
+  console.log(`ready ${getSyncIdentity().deviceId} app`);
+} else {
+  await updateSettings({ syncEnabled: true }, app); // deletes leave tombstones
+  service = await startSyncService(app, {
+    vaultKey: vaultKey!,
+    name: option("--name") ?? "Dev peer",
+    platform: "dev",
+    onPeersChanged: () => console.log(`peers ${service?.peers().length ?? 0}`),
+    onError: (error) =>
+      console.log(`error ${error instanceof Error ? error.message : error}`),
+  });
+  console.log(`ready ${service.deviceId} ${service.port ?? "none"}`);
+}
+
+const connectedNames = async (): Promise<string[]> =>
+  manager
+    ? (await manager.status()).devices
+        .filter((device) => device.connected)
+        .map((device) => device.name)
+    : service!.peers().map((peer) => peer.name);
+
+const needManager = (): SyncManager => {
+  if (!manager) throw new Error("that command needs --app");
+  return manager;
+};
 
 let quitting: Promise<never> | null = null;
 function quit(): Promise<never> {
   // a signal and a command can both ask: stop once
   quitting ??= (async () => {
-    await service.stop();
+    await (manager ?? service)!.stop();
     if (!keepFolder) await tjs.remove(folder).catch(() => {});
     return tjs.exit(0);
   })();
   return quitting;
 }
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  tjs.addSignalListener(signal, () => void quit());
+// in app mode the app's own handler takes the signals
+if (!appMode) {
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    tjs.addSignalListener(signal, () => void quit());
+  }
 }
 
 // --- commands
@@ -135,24 +200,20 @@ async function handle(line: string): Promise<void> {
   switch (command) {
     case "copy": {
       const item = await saveClipboardItem(textItem(argument), app);
-      service.localChanged();
       console.log(`ok copy ${item.id}`);
       break;
     }
     case "pin":
     case "unpin":
       await setClipboardItemPinned(argument, command === "pin", app);
-      service.localChanged();
       console.log(`ok ${command}`);
       break;
     case "delete":
       await softDeleteClipboardItem(argument, app);
-      service.localChanged();
       console.log("ok delete");
       break;
     case "clear":
       await clearClipboardHistory(app);
-      service.localChanged();
       console.log("ok clear");
       break;
     case "list": {
@@ -169,9 +230,39 @@ async function handle(line: string): Promise<void> {
       console.log("end list");
       break;
     }
-    case "peers":
-      console.log(`peers ${peerNames().length} ${peerNames().join(", ")}`);
+    case "peers": {
+      const names = await connectedNames();
+      console.log(`peers ${names.length} ${names.join(", ")}`);
       break;
+    }
+    // app mode: what the Sync tab does
+    case "turnon":
+      await needManager().turnOn();
+      console.log("ok turnon");
+      break;
+    case "join":
+      await needManager().join(argument);
+      console.log("ok join");
+      break;
+    case "off":
+      await needManager().turnOff();
+      console.log("ok off");
+      break;
+    case "secrets":
+      await needManager().setSyncSecrets(argument === "on");
+      console.log(`ok secrets ${argument}`);
+      break;
+    case "code":
+      // the throwaway vault of this peer: showing its code is the point
+      console.log(`code ${(await needManager().pairingInfo()).recoveryCode}`);
+      break;
+    case "status": {
+      const status = await needManager().status();
+      console.log(
+        `status enabled=${status.enabled} running=${status.running} problem=${status.problem ?? "none"} devices=${status.devices.length} connected=${connectedCount(status)}`,
+      );
+      break;
+    }
     case "quit":
       await quit();
       break;

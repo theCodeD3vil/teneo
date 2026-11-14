@@ -18,6 +18,7 @@ import {
   initializeDatabase,
   listClipboardItemSizes,
   listClipboardItems,
+  onHistoryChanged,
   purgeOldTombstones,
   restampSecretItems,
   saveClipboardItem,
@@ -953,6 +954,46 @@ await test("forgetPeers forgets the paired devices and nothing else", async () =
   same(await store.listPeers(), [], "no device is left");
   same(await store.getPeer(peerId), null, "and its cursor went with it");
   same(rowOf("t-forget").value, "kept", "the history stays");
+});
+
+await test("a change made here tells the history listeners, until they are removed", async () => {
+  reset();
+  let heard = 0;
+  const stop = onHistoryChanged(() => {
+    heard += 1;
+  });
+  /** Run a change; it must have been heard. */
+  async function heardWhen(what: string, change: () => Promise<unknown>) {
+    const before = heard;
+    await change();
+    check(heard > before, `${what} was not heard`);
+  }
+
+  const item = await saveClipboardItem(textItem("heard-1"), app);
+  await heardWhen("a repeat copy", () =>
+    saveClipboardItem(textItem("heard-1"), app),
+  );
+  await heardWhen("a pin", () => setClipboardItemPinned(item.id, true, app));
+  await heardWhen("an unpin", () =>
+    setClipboardItemPinned(item.id, false, app),
+  );
+  await heardWhen("a delete", () => softDeleteClipboardItem(item.id, app));
+  check(heard > 0, "a new copy was not heard");
+  await saveClipboardItem(textItem("heard-2"), app);
+  await heardWhen("a clear", () => clearClipboardHistory(app));
+
+  // a listener that throws must not fail a change that is already made
+  const failing = onHistoryChanged(() => {
+    throw new Error("listener failure");
+  });
+  const kept = await saveClipboardItem(textItem("heard-3"), app);
+  same(rowOf(kept.id).value, "heard-3", "the copy was kept");
+  failing();
+
+  stop();
+  const after = heard;
+  await saveClipboardItem(textItem("heard-4"), app);
+  same(heard, after, "a removed listener heard another change");
 });
 
 await tjs.remove(folder).catch(() => {});
