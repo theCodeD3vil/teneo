@@ -208,10 +208,8 @@ export class FakeClient implements TeneoClient {
         // Ignore clipboard write error if denied in environment
       }
     }
-
-    item.dateCopied = Date.now();
-    this.sortItems();
-    this.notifyHistoryChanged();
+    // like the desktop app, putting an item back on the clipboard leaves the
+    // history as it was: the copy isn't recorded again or moved to the top
   }
 
   onHistoryChanged(listener: () => void): () => void {

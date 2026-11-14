@@ -2,13 +2,6 @@
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@teneo/ui/components/context-menu";
-import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -20,22 +13,13 @@ import { computed, type ComponentPublicInstance, ref, watch } from "vue";
 import AlertCircleIcon from "~icons/tabler/alert-circle";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
 import ClipboardListIcon from "~icons/tabler/clipboard-list";
-import CopyIcon from "~icons/tabler/copy";
-import OpenIcon from "~icons/tabler/eye";
 import FileIcon from "~icons/tabler/file";
 import PaletteIcon from "~icons/tabler/palette";
 import ImageIcon from "~icons/tabler/photo";
-import PinIcon from "~icons/tabler/pin";
-import PinOffIcon from "~icons/tabler/pinned-off";
-import ShareIcon from "~icons/tabler/share";
-import DeleteIcon from "~icons/tabler/trash";
 
-import { useClient } from "../../client";
-import { showCopiedNotice } from "../../composables/useCopiedNotice";
-import { useBackToClose } from "../../composables/useNavigation";
 import type { TabVariant } from "../../types/tabs";
-import { shareItem } from "../../utils/share";
 import ClipboardItemCard from "./ClipboardItemCard.vue";
+import ItemActionSheet from "./ItemActionSheet.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -56,8 +40,6 @@ const emit = defineEmits<{
   /** the list is near its end: load the next page */
   (e: "load-more"): void;
 }>();
-
-const client = useClient();
 
 interface ClipboardItemGroup {
   key: number | "pinned";
@@ -202,43 +184,81 @@ function getDayLabel(dayStart: number): string {
   return `${daysAgo} days ago`;
 }
 
-// --- the menu a long press on a card opens. One menu serves the whole list:
-// the press picks which card it's for.
+// --- the action sheet a long press on a card opens. One sheet serves the
+// whole list: the press picks which card it's for. It keeps its item after
+// closing, so the sheet still has content while it slides away.
 
 const menuItem = ref<ClipboardHistoryItem | null>(null);
-const isMenuOpenState = ref(false);
-const isMenuOpen = computed({
-  get: () => isMenuOpenState.value,
-  // a press between cards opens nothing
-  set: (open) => (isMenuOpenState.value = open && menuItem.value !== null),
-});
-useBackToClose(isMenuOpenState);
+const isMenuOpen = ref(false);
 
-function pickMenuItem(event: Event): void {
-  if (isMenuOpenState.value) return;
-  const card = (event.target as Element | null)?.closest("[data-item-id]");
+function openMenu(target: EventTarget | null): void {
+  const card = (target as Element | null)?.closest("[data-item-id]");
   const id = card?.getAttribute("data-item-id");
-  menuItem.value = props.items.find((item) => item.id === id) ?? null;
+  const item = props.items.find((listed) => listed.id === id);
+  if (!item) return;
+  menuItem.value = item;
+  isMenuOpen.value = true;
 }
 
-function copyMenuItem(item: ClipboardHistoryItem): void {
-  void client
-    .copyToClipboard(item.id)
-    .then(showCopiedNotice)
-    .catch(() => undefined);
+const longPressDelay = 450; // ms
+// how far the finger may drift during the press; further is a scroll
+const longPressSlop = 8; // px, under the tab swipe's axis lock
+let press: {
+  x: number;
+  y: number;
+  timer: ReturnType<typeof setTimeout>;
+} | null = null;
+let lastPointerType = "";
+// the finger lifting after a long press isn't a tap: it mustn't copy
+let isLongPressRelease = false;
+
+function startPress(event: PointerEvent): void {
+  lastPointerType = event.pointerType;
+  isLongPressRelease = false;
+  cancelPress();
+  // a mouse opens the sheet with a right-click instead
+  if (event.pointerType === "mouse") return;
+  const target = event.target;
+  press = {
+    x: event.clientX,
+    y: event.clientY,
+    timer: setTimeout(() => {
+      press = null;
+      isLongPressRelease = true;
+      openMenu(target);
+    }, longPressDelay),
+  };
 }
 
-function pinMenuItem(item: ClipboardHistoryItem): void {
-  void client.setPinned(item.id, !item.pinned).catch(() => undefined);
+function movePress(event: PointerEvent): void {
+  if (!press) return;
+  const distance = Math.hypot(event.clientX - press.x, event.clientY - press.y);
+  if (distance > longPressSlop) cancelPress();
 }
 
-function deleteMenuItem(item: ClipboardHistoryItem): void {
-  void client.deleteItem(item.id).catch(() => undefined);
+function cancelPress(): void {
+  if (press) clearTimeout(press.timer);
+  press = null;
+}
+
+function swallowLongPressClick(event: MouseEvent): void {
+  if (!isLongPressRelease) return;
+  isLongPressRelease = false;
+  event.stopPropagation();
+  event.preventDefault();
+}
+
+// Android fires this on a long press too; the timer above handles touch
+function handleContextMenu(event: MouseEvent): void {
+  event.preventDefault();
+  if (lastPointerType === "mouse") openMenu(event.target);
 }
 </script>
 
 <template>
-  <div ref="viewport" class="size-full overflow-y-auto overscroll-contain">
+  <div
+    ref="viewport"
+    class="size-full touch-pan-y overflow-y-auto overscroll-contain">
     <p v-if="props.loading" class="text-foreground/50 p-3 text-sm">
       Loading clipboard history…
     </p>
@@ -255,58 +275,43 @@ function deleteMenuItem(item: ClipboardHistoryItem): void {
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
-    <ContextMenu v-else-if="props.items.length" v-model:open="isMenuOpen">
-      <ContextMenuTrigger as-child>
+    <template v-else-if="props.items.length">
+      <div
+        class="relative w-full"
+        :style="{ height: `${virtualizer.getTotalSize()}px` }"
+        @pointerdown="startPress"
+        @pointermove="movePress"
+        @pointerup="cancelPress"
+        @pointercancel="cancelPress"
+        @click.capture="swallowLongPressClick"
+        @contextmenu="handleContextMenu">
         <div
-          class="relative w-full"
-          :style="{ height: `${virtualizer.getTotalSize()}px` }"
-          @pointerdown="pickMenuItem"
-          @contextmenu="pickMenuItem">
-          <div
-            v-for="{ virtualRow, row } in visibleRows"
-            :key="row.key"
-            :ref="measureRow"
-            :data-index="virtualRow.index"
-            class="absolute inset-x-0 top-0"
-            :style="{
-              transform: `translateY(${virtualRow.start}px)`,
-              paddingTop: `${rowGap(row)}rem`,
-            }">
-            <h2
-              v-if="row.type === 'header'"
-              class="text-foreground/50 px-1 text-xs font-medium">
-              {{ row.label }}
-            </h2>
-            <ClipboardItemCard
-              v-else
-              :item-details="row.item"
-              :is-active="isMenuOpen && menuItem?.id === row.item.id"
-              @preview="emit('preview', $event)" />
-          </div>
+          v-for="{ virtualRow, row } in visibleRows"
+          :key="row.key"
+          :ref="measureRow"
+          :data-index="virtualRow.index"
+          class="absolute inset-x-0 top-0"
+          :style="{
+            transform: `translateY(${virtualRow.start}px)`,
+            paddingTop: `${rowGap(row)}rem`,
+          }">
+          <h2
+            v-if="row.type === 'header'"
+            class="text-foreground/50 px-1 text-xs font-medium">
+            {{ row.label }}
+          </h2>
+          <ClipboardItemCard
+            v-else
+            :item-details="row.item"
+            :is-active="isMenuOpen && menuItem?.id === row.item.id"
+            @preview="emit('preview', $event)" />
         </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent v-if="menuItem" class="min-w-44">
-        <ContextMenuItem @select="copyMenuItem(menuItem)">
-          <CopyIcon /> Copy
-        </ContextMenuItem>
-        <ContextMenuItem @select="emit('preview', menuItem)">
-          <OpenIcon /> Preview
-        </ContextMenuItem>
-        <ContextMenuItem @select="pinMenuItem(menuItem)">
-          <template v-if="menuItem.pinned"><PinOffIcon /> Unpin</template>
-          <template v-else><PinIcon /> Pin</template>
-        </ContextMenuItem>
-        <ContextMenuItem @select="shareItem(menuItem)">
-          <ShareIcon /> Share
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          variant="destructive"
-          @select="deleteMenuItem(menuItem)">
-          <DeleteIcon /> Delete
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      </div>
+      <ItemActionSheet
+        v-model:open="isMenuOpen"
+        :item="menuItem"
+        @preview="emit('preview', $event)" />
+    </template>
     <Empty v-else>
       <EmptyHeader>
         <EmptyMedia variant="icon" class="bg-foreground/5 text-foreground/70">

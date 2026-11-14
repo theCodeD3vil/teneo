@@ -1,24 +1,14 @@
 <script lang="ts" setup>
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@teneo/ui/components/alert-dialog";
 import { Button } from "@teneo/ui/components/button";
 import { Input } from "@teneo/ui/components/input";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { computed, ref } from "vue";
 
-import { useBackToClose } from "../../composables/useNavigation";
 import { useSettings } from "../../composables/useSettings";
 import { useSyncStatus } from "../../composables/useSyncStatus";
 import type { PairedDevice } from "../../types/sync";
+import ConfirmSheet from "../ConfirmSheet.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
@@ -76,7 +66,6 @@ const backgroundReceive = computed({
 // so it asks first.
 
 const isSecretsWarningOpen = ref(false);
-useBackToClose(isSecretsWarningOpen);
 const syncSecrets = computed({
   get: () => settings.value.syncSecrets,
   set: (enabled) => {
@@ -88,7 +77,6 @@ const syncSecrets = computed({
 // --- turning sync off forgets this phone's key, so it asks first
 
 const isTurnOffWarningOpen = ref(false);
-useBackToClose(isTurnOffWarningOpen);
 </script>
 
 <template>
@@ -204,43 +192,18 @@ useBackToClose(isTurnOffWarningOpen);
 
     <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
 
-    <AlertDialog v-model:open="isTurnOffWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Turn off sync?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This phone stops syncing but keeps your history. To sync again, use
-            a recovery code from another device.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="turnOff()">
-            Turn off sync
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmSheet
+      v-model:open="isTurnOffWarningOpen"
+      title="Turn off sync?"
+      description="This phone stops syncing but keeps your history. To sync again, use a recovery code from another device."
+      confirm-label="Turn off sync"
+      @confirm="turnOff()" />
 
-    <AlertDialog v-model:open="isSecretsWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Sync items with secrets?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The secrets in your history, and new ones, will be sent to your
-            other devices, encrypted on the way. Turning this off stops new ones
-            but can't take back what a device already has.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            @click="updateSettings({ syncSecrets: true })">
-            Sync secrets
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmSheet
+      v-model:open="isSecretsWarningOpen"
+      title="Sync items with secrets?"
+      description="The secrets in your history, and new ones, will be sent to your other devices, encrypted on the way. Turning this off stops new ones but can't take back what a device already has."
+      confirm-label="Sync secrets"
+      @confirm="updateSettings({ syncSecrets: true })" />
   </div>
 </template>

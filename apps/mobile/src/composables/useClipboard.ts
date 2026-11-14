@@ -22,7 +22,7 @@ export type ClipboardListFilter = Pick<ClipboardListRequest, "kind" | "search">;
 
 /**
  * The history for one tab and search, a page at a time. A change to the
- * history reloads what's loaded, so a copy, pin or delete shows at once.
+ * history reloads what's loaded, so a pin or delete shows at once.
  */
 export function useClipboardList(
   filter: MaybeRefOrGetter<ClipboardListFilter>,

@@ -63,6 +63,16 @@ function handlePopState(event: PopStateEvent): void {
   currentState.value = state;
 }
 
+// A screen opened from a menu or sheet closes it first and drops its history
+// entries, so back from the new screen doesn't land on a closed menu
+function closeOverlays(): void {
+  const count = openOverlays.length;
+  if (count === 0) return;
+  for (const close of openOverlays.splice(0).reverse()) close();
+  pendingBacks += 1;
+  window.history.go(-count);
+}
+
 /** Start on `screen` and follow the back gesture (MainActivity sends it to
  *  the WebView's history). */
 export function initNavigation(screen: ScreenName): void {
@@ -80,6 +90,7 @@ export function useNavigation() {
     details: Pick<NavigationState, "itemId" | "settingsPage"> = {},
   ): void {
     const state = { screen, ...details, index: currentState.value.index + 1 };
+    closeOverlays();
     if (pendingBacks > 0) queuedPush = state;
     else pushEntry(state);
   }

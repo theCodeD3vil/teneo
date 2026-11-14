@@ -64,7 +64,6 @@ const imageName = computed(() =>
     : "Image",
 );
 
-// follows the item: copying it again moves it to now
 const dateCopied = computed(() =>
   formatTimeAgo(
     new Date(props.itemDetails.dateCopied),

@@ -247,6 +247,34 @@ describe("FakeClient", () => {
     });
   });
 
+  describe("Copying", () => {
+    test("copyToClipboard leaves the history as it was", async () => {
+      const items = [
+        makeItem("item-1", "first", 3000),
+        makeItem("item-2", "second", 2000),
+      ];
+      const client = new FakeClient(items);
+
+      let historyChanged = false;
+      client.onHistoryChanged(() => {
+        historyChanged = true;
+      });
+
+      await client.copyToClipboard("item-2");
+
+      expect(historyChanged).toBe(false);
+      const page = await client.listItems({
+        kind: "all",
+        search: "",
+        limit: 10,
+      });
+      expect(page.items.map((i) => [i.id, i.dateCopied])).toEqual([
+        ["item-1", 3000],
+        ["item-2", 2000],
+      ]);
+    });
+  });
+
   describe("Settings", () => {
     test("reads and updates mobile settings", async () => {
       const client = new FakeClient([]);
