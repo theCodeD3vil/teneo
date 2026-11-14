@@ -1,4 +1,3 @@
-import "@fontsource-variable/figtree";
 import { createApp } from "vue";
 
 import App from "./App.vue";

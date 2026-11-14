@@ -6,18 +6,18 @@
 
 @source "../../../packages/ui/src";
 
-/* Google Sans ships with Android on Pixel phones: use the system copy, so
-   nothing is bundled. Phones without it fall back to Figtree, the desktop
-   font. The system file is variable, hence the weight range. */
+/* Google Sans is bundled, so every phone shows it, not only Pixels. The file
+   is variable from regular (400) to bold (700). */
 @font-face {
   font-family: "Google Sans";
-  src: local("Google Sans"), local("GoogleSans-Regular");
-  font-weight: 100 900;
+  src: url("./assets/fonts/GoogleSans.ttf") format("truetype");
+  font-weight: 400 700;
   font-style: normal;
+  font-display: block;
 }
 
 @theme inline {
-  --font-sans: "Google Sans", "Figtree Variable", sans-serif;
+  --font-sans: "Google Sans", sans-serif;
 }
 
 /* The desktop classes are sized for a mouse on a laptop screen. On a phone

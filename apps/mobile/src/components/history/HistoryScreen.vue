@@ -20,7 +20,10 @@ function openPreview(item: ClipboardHistoryItem): void {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3">
-    <SearchInput ref="searchInput" v-model="searchQuery" />
+    <header class="flex items-center gap-2">
+      <img class="size-9 shrink-0" src="/icon.png" alt="Teneo" />
+      <SearchInput ref="searchInput" v-model="searchQuery" />
+    </header>
     <TabManager
       :search-query="searchQuery"
       @tab-change="(count: number) => (clipboardItemsCount = count)"

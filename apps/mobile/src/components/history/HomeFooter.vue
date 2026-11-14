@@ -33,18 +33,15 @@ const { openSettings } = useNavigation();
         <TickIcon />
         Copied
       </Kbd>
-      <span v-else class="text-foreground/70 text-xs">
-        Tap to copy · hold for more
-      </span>
     </Transition>
 
     <Button
       variant="ghost"
-      size="icon"
+      size="icon-lg"
       aria-label="Settings"
-      class="hover:bg-foreground/5! dark:hover:bg-foreground/10! text-foreground/70 hover:text-foreground"
+      class="hover:bg-foreground/5! dark:hover:bg-foreground/10! text-foreground/70 hover:text-foreground -my-1 -mr-1 rounded-full"
       @click="openSettings">
-      <SettingsIcon />
+      <SettingsIcon class="size-6" />
     </Button>
   </div>
 </template>
