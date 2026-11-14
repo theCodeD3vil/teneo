@@ -1,6 +1,6 @@
 {
   "name": "@teneo/desktop",
-  "version": "0.3.7",
+  "version": "0.4.0-beta.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,13 +8,18 @@
     "build": "vue-tsc -b && vite build --base=./",
     "preview": "vite preview",
     "test": "bun test backend",
-    "typecheck": "vue-tsc -b && tsc -p backend/tsconfig.json --noEmit"
+    "typecheck": "vue-tsc -b && tsc -p backend/tsconfig.json --noEmit",
+    "test:runtime": "bun scripts/run-on-tjs.ts backend/sync/storage.tjs.ts && bun scripts/run-on-tjs.ts backend/sync/transport.tjs.ts && bun scripts/run-on-tjs.ts backend/sync/dns-sd-registry.tjs.ts",
+    "sync:peer": "bun scripts/run-on-tjs.ts backend/sync/peer.tjs.ts",
+    "sync:check": "bun scripts/check-sync-peers.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "catalog:",
     "@tanstack/vue-query": "^5.104.3",
     "@tanstack/vue-virtual": "^3.13.45",
     "@teneo/shared": "workspace:*",
+    "@teneo/sync": "workspace:*",
+    "@teneo/ui": "workspace:*",
     "@vueuse/core": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
@@ -24,6 +29,7 @@
     "reka-ui": "catalog:",
     "tailwind-merge": "catalog:",
     "tailwindcss": "catalog:",
+    "uqr": "^0.1.3",
     "vue": "catalog:",
     "vue-sonner": "catalog:"
   },
@@ -35,6 +41,7 @@
     "@types/node": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "@vue/tsconfig": "catalog:",
+    "esbuild": "^0.28.2",
     "shadcn-vue": "^2.8.2",
     "tw-animate-css": "catalog:",
     "typescript": "catalog:",

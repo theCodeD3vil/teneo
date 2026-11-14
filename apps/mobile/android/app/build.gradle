@@ -1,0 +1,78 @@
+import groovy.json.JsonSlurper
+
+apply plugin: 'com.android.application'
+
+// The version lives in apps/mobile/package.json: the release workflow reads
+// it there, and a bump of it is what makes a release
+def appVersion = new JsonSlurper().parse(file('../../package.json')).version
+def (major, minor, patch) = appVersion.tokenize('.-').take(3).collect { it as int }
+// Android only updates to a larger code, so a beta's must be under its full
+// release's: 1.2.3-beta.4 is 1020304, and 1.2.3 itself is 1020399
+def beta = (appVersion =~ /-beta\.(\d+)$/)
+def appVersionCode = major * 1000000 + minor * 10000 + patch * 100 + (beta ? (beta[0][1] as int) : 99)
+
+// The release key comes from the environment, so it is never in the repo.
+// Without it a release build is left unsigned, which a phone won't install.
+def releaseKeystore = System.getenv('TENEO_ANDROID_KEYSTORE')
+
+android {
+    namespace = "com.michael.teneo"
+    compileSdk {
+        version = release(36) {
+            minorApiLevel = 1
+        }
+    }
+    defaultConfig {
+        applicationId "com.michael.teneo"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode appVersionCode
+        versionName appVersion
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        release {
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storeType 'pkcs12'
+                storePassword System.getenv('TENEO_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'teneo'
+                // a PKCS12 key has the keystore's password
+                keyPassword System.getenv('TENEO_ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig releaseKeystore ? signingConfigs.release : null
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'

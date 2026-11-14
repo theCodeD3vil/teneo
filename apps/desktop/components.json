@@ -15,10 +15,10 @@
   "pointer": true,
   "aliases": {
     "components": "@/components",
-    "utils": "@/lib/utils",
-    "ui": "@/components/ui",
-    "lib": "@/lib",
-    "composables": "@/composables"
+    "utils": "@teneo/ui/lib/utils",
+    "ui": "@teneo/ui/components",
+    "lib": "@teneo/ui/lib",
+    "composables": "@teneo/ui/composables"
   },
   "menuColor": "default-translucent",
   "menuAccent": "subtle",

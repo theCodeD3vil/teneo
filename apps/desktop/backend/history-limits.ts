@@ -10,6 +10,7 @@ import {
   countClipboardItemsToDelete,
   deleteClipboardItems,
   listClipboardItemSizes,
+  purgeOldTombstones,
 } from "./database";
 import { logError } from "./files";
 import { clearLinkPreviews } from "./link-previews";
@@ -83,16 +84,19 @@ async function countItemsWithinStorage(
 }
 
 export async function clearClipboardHistory(app: TinyApp): Promise<void> {
-  await deleteClipboardItems(app, 0, 0);
+  // with sync on, the other devices clear what was cleared here
+  await deleteClipboardItems(app, 0, 0, { leaveTombstones: true });
   // pinned links fetch theirs again
   await clearLinkPreviews(app);
 }
 
 export function startTrimmingClipboardHistory(app: TinyApp): void {
   const trim = () =>
-    trimClipboardHistory(app).catch((error: unknown) =>
-      logError("trimming clipboard history failed:", error),
-    );
+    trimClipboardHistory(app)
+      .then(() => purgeOldTombstones(app))
+      .catch((error: unknown) =>
+        logError("trimming clipboard history failed:", error),
+      );
   void trim();
   setInterval(trim, trimInterval);
 }

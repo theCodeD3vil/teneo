@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import Button from "@teneo/ui/components/button/Button.vue";
+import Kbd from "@teneo/ui/components/kbd/Kbd.vue";
 import { onKeyStroke } from "@vueuse/core";
 import { defineAsyncComponent } from "vue";
 import TickIcon from "~icons/tabler/check";
@@ -18,8 +20,6 @@ import HotkeyPreview from "./HotkeyPreview.vue";
 import LinkPreview from "./LinkPreview.vue";
 import MediaPreview from "./MediaPreview.vue";
 import TextPreview from "./TextPreview.vue";
-import Button from "./ui/button/Button.vue";
-import Kbd from "./ui/kbd/Kbd.vue";
 
 // Loaded on the first color preview: the color library stays out of the panel's startup
 const ColorPreview = defineAsyncComponent(() => import("./ColorPreview.vue"));

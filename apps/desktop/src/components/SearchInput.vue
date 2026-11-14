@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import SearchIcon from "~icons/tabler/search";
-
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@teneo/ui/components/input-group";
+import { ref } from "vue";
+import SearchIcon from "~icons/tabler/search";
 
 const searchInputContainer = ref<HTMLElement | null>(null);
 const searchQuery = defineModel<string>({ default: "" });

@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { useQueries } from "@tanstack/vue-query";
+import Button from "@teneo/ui/components/button/Button.vue";
+import ScrollArea from "@teneo/ui/components/scroll-area/ScrollArea.vue";
+import { Skeleton } from "@teneo/ui/components/skeleton";
+import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { computed } from "vue";
 import TickIcon from "~icons/tabler/check";
 import CopyIcon from "~icons/tabler/copy";
@@ -7,13 +11,9 @@ import OpenIcon from "~icons/tabler/external-link";
 import FileIcon from "~icons/tabler/file";
 import FinderIcon from "~icons/tabler/folder-search";
 
-import Button from "@/components/ui/button/Button.vue";
-import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import { Skeleton } from "@/components/ui/skeleton";
 import { usePreviewCopy } from "@/composables/usePreviewCopy";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { getClipboardData, getImageName } from "@/utils/clipboard-items";
-import { formatFileSize } from "@/utils/file-size";
 import { hidePanel } from "@/utils/panel-reset";
 
 const props = defineProps<{

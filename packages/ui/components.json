@@ -1,0 +1,26 @@
+{
+  "$schema": "https://shadcn-vue.com/schema.json",
+  "style": "reka-vega",
+  "font": "figtree",
+  "typescript": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/theme.css",
+    "baseColor": "olive",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "tabler",
+  "rtl": false,
+  "pointer": true,
+  "aliases": {
+    "components": "@teneo/ui/components",
+    "utils": "@teneo/ui/lib/utils",
+    "ui": "@teneo/ui/components",
+    "lib": "@teneo/ui/lib",
+    "composables": "@teneo/ui/composables"
+  },
+  "menuColor": "default-translucent",
+  "menuAccent": "subtle",
+  "registries": {}
+}

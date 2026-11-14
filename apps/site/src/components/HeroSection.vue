@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Button } from "@teneo/ui/components/button";
 import AppleIcon from "~icons/tabler/brand-apple-filled";
 import CircleCheckIcon from "~icons/tabler/circle-check";
 import KeyboardIcon from "~icons/tabler/keyboard";
@@ -9,7 +10,6 @@ import appPanel from "@/assets/app-panel.webp";
 import appSettings from "@/assets/app-settings.webp";
 // Photo: engin akyurt on Unsplash (https://unsplash.com/photos/zlGobrmAuyE)
 import heroImage from "@/assets/hero-clouds.jpg";
-import { Button } from "@/components/ui/button";
 
 const REPO_URL = "https://github.com/theCodeD3vil/teneo";
 const DOWNLOAD_URL = `${REPO_URL}/releases/latest`;

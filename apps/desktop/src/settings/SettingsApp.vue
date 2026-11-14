@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import AlertCircleIcon from "~icons/tabler/alert-circle";
-
-import SettingsTabManager from "@/components/settings/SettingsTabManager.vue";
 import {
   Alert,
   AlertAction,
   AlertDescription,
   AlertTitle,
-} from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+} from "@teneo/ui/components/alert";
+import { Button } from "@teneo/ui/components/button";
+import { computed } from "vue";
+import AlertCircleIcon from "~icons/tabler/alert-circle";
+
+import SettingsTabManager from "@/components/settings/SettingsTabManager.vue";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
 import { showWindowWhenPainted } from "@/lib/window-ready";
 

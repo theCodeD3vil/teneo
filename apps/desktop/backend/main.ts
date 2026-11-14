@@ -18,6 +18,7 @@ import {
   turnOffSecretEncryption,
   turnOnSecretEncryption,
 } from "./database";
+import { warnIfDevRunUsesRealData } from "./dev-run";
 import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
 import { getFilePreview } from "./file-previews";
 import { logError } from "./files";
@@ -44,6 +45,8 @@ import {
   quitIfSetupClosedEarly,
   showMenuBarOrSetup,
 } from "./setup";
+import { createSyncManager, stopSyncWhenTold } from "./sync/app-sync";
+import type { SyncManager } from "./sync/sync-manager";
 import {
   checkForUpdatesInBackground,
   installUpdate,
@@ -58,6 +61,10 @@ import {
   openSetupWindow,
   openUpdateWindow,
 } from "./windows";
+
+// made when first needed: it needs the app
+let syncManager: SyncManager | undefined;
+const sync = (app: TinyApp) => (syncManager ??= createSyncManager(app));
 
 export const api: Record<string, TinyApiHandler> = {
   appIcon: ({ bundleId }, app) => getAppIconUrl(bundleId, app),
@@ -88,8 +95,15 @@ export const api: Record<string, TinyApiHandler> = {
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
     const wasCheckingForUpdates = getSettings().checkForUpdates;
-    // encryption moves saved keys too, so it only changes through setSecretEncryption
-    const { encryptSecrets: _, ...otherChanges } = pickSettings(changes);
+    // encryption moves saved keys too, so it only changes through
+    // setSecretEncryption; sync starts and stops an engine and sends held-back
+    // items, so it has its own api
+    const {
+      encryptSecrets: _encryptSecrets,
+      syncEnabled: _syncEnabled,
+      syncSecrets: _syncSecrets,
+      ...otherChanges
+    } = pickSettings(changes);
     const settings = await updateSettings(otherChanges, app);
     await syncOpenPanelShortcut(app);
     await trimClipboardHistory(app); // a tighter history limit applies now
@@ -106,6 +120,14 @@ export const api: Record<string, TinyApiHandler> = {
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
   countItemsDeletedBy: ({ changes }, app) => countItemsDeletedBy(changes, app),
   dataFolderUsage: (_parameters, app) => getDataFolderUsage(app),
+  syncStatus: (_parameters, app) => sync(app).status(),
+  syncTurnOn: (_parameters, app) => sync(app).turnOn(),
+  syncJoin: ({ code }, app) =>
+    sync(app).join(typeof code === "string" ? code : ""),
+  syncTurnOff: (_parameters, app) => sync(app).turnOff(),
+  syncPairingInfo: (_parameters, app) => sync(app).pairingInfo(),
+  setSyncSecrets: ({ enabled }, app) =>
+    sync(app).setSyncSecrets(enabled === true),
 };
 
 // Defining this handler makes tinyjs start watching the clipboard.
@@ -128,6 +150,9 @@ export function onWindowClosed(windowId: string, app: TinyApp) {
 }
 
 export async function init(app: TinyApp) {
+  // first, before anything is awaited: see stopSyncWhenTold
+  stopSyncWhenTold(sync(app), app);
+  warnIfDevRunUsesRealData();
   await loadSettings(app);
   await initializeDatabase(app);
   // not awaited: the menu bar icon shouldn't wait on a Keychain prompt
@@ -137,10 +162,19 @@ export async function init(app: TinyApp) {
       logError("encrypting secrets in history failed:", error),
     );
   }
-  // not awaited either: older copies catch up on new rules in the background
-  void refreshDetectionMetadata(app).catch((error) =>
-    logError("refreshing secret and link detection failed:", error),
-  );
+  // not awaited either: older copies catch up on new rules in the background.
+  // Sync waits for that, so no item holding a secret goes out unmarked.
+  void refreshDetectionMetadata(app)
+    .then(
+      () => sync(app).startIfEnabled(),
+      (error: unknown) => {
+        logError("refreshing secret and link detection failed:", error);
+        return sync(app).hold(
+          "Teneo couldn't check your history for secrets, so sync is paused until the next launch.",
+        );
+      },
+    )
+    .catch((error: unknown) => logError("starting sync failed:", error));
   startTrimmingClipboardHistory(app);
   void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);

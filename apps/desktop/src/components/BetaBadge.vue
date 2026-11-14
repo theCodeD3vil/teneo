@@ -1,7 +1,6 @@
 <script setup lang="ts">
+import { Badge } from "@teneo/ui/components/badge";
 import TestTubeIcon from "~icons/tabler/test-pipe";
-
-import { Badge } from "@/components/ui/badge";
 </script>
 
 <template>

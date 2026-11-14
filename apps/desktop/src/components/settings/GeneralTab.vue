@@ -1,7 +1,7 @@
 <script lang="ts" setup>
+import { Switch } from "@teneo/ui/components/switch";
 import { computed, ref } from "vue";
 
-import { Switch } from "@/components/ui/switch";
 import { useLaunchAtLogin } from "@/composables/useLaunchAtLogin";
 import { useSettings } from "@/composables/useSettings";
 

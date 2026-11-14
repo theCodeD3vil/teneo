@@ -5,5 +5,9 @@ export default defineConfig({
   sortImports: true,
   sortTailwindcss: true,
   bracketSameLine: true,
-  ignorePatterns: ["**/dist/**", "**/.build/**", "apps/*/src/components/ui/**"],
+  ignorePatterns: [
+    "**/dist/**",
+    "**/.build/**",
+    "packages/ui/src/components/**",
+  ],
 });

@@ -1,4 +1,9 @@
 <script lang="ts" setup>
+import Button from "@teneo/ui/components/button/Button.vue";
+import { useRelativeTimeAgo } from "@teneo/ui/composables/useRelativeTimeAgo";
+import { cn } from "@teneo/ui/lib/utils";
+import { formatFileSize } from "@teneo/ui/utils/file-size";
+import { maskSecrets, type TextPart } from "@teneo/ui/utils/secrets";
 import { computed, onUnmounted, ref } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
 import ClipboardIcon from "~icons/tabler/clipboard";
@@ -11,16 +16,11 @@ import PinOffIcon from "~icons/tabler/pinned-off";
 import DeleteIcon from "~icons/tabler/trash";
 
 import BetaBadge from "@/components/BetaBadge.vue";
-import Button from "@/components/ui/button/Button.vue";
 import { getPreviewPath } from "@/composables/useItemPreviews";
-import { useRelativeTimeAgo } from "@/composables/useRelativeTimeAgo";
 import { useSettings } from "@/composables/useSettings";
-import { cn } from "@/lib/utils";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { getClipboardData, getImageName } from "@/utils/clipboard-items";
 import { copyItemToClipboard } from "@/utils/copy-item";
-import { formatFileSize } from "@/utils/file-size";
-import { maskSecrets, type TextPart } from "@/utils/secrets";
 
 const props = defineProps<{
   itemDetails: ClipboardHistoryItem;

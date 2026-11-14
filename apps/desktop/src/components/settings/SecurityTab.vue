@@ -1,10 +1,4 @@
 <script lang="ts" setup>
-import { computed, ref } from "vue";
-import TickIcon from "~icons/tabler/check";
-import AddIcon from "~icons/tabler/plus";
-import CancelIcon from "~icons/tabler/x";
-
-import BetaBadge from "@/components/BetaBadge.vue";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,10 +8,16 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
+} from "@teneo/ui/components/alert-dialog";
+import { Button } from "@teneo/ui/components/button";
+import { Spinner } from "@teneo/ui/components/spinner";
+import { Switch } from "@teneo/ui/components/switch";
+import { computed, ref } from "vue";
+import TickIcon from "~icons/tabler/check";
+import AddIcon from "~icons/tabler/plus";
+import CancelIcon from "~icons/tabler/x";
+
+import BetaBadge from "@/components/BetaBadge.vue";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
 import { useExcludedApps } from "@/composables/useExcludedApps";
 import { useSecretEncryption } from "@/composables/useSecretEncryption";
@@ -223,7 +223,7 @@ const {
     </SettingsSection>
 
     <AlertDialog v-model:open="isDecryptWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Stop encrypting API keys?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -244,7 +244,7 @@ const {
     </AlertDialog>
 
     <AlertDialog v-model:open="isMaskSecretsWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Show API keys in history?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -265,7 +265,7 @@ const {
     </AlertDialog>
 
     <AlertDialog v-model:open="isPasswordWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Keep passwords in history?</AlertDialogTitle>
           <AlertDialogDescription>

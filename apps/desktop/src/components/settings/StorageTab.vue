@@ -5,8 +5,6 @@ import type {
   AppSettings,
   HistoryDuration,
 } from "@teneo/shared/types/settings";
-import { computed, ref } from "vue";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,22 +15,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@teneo/ui/components/alert-dialog";
+import { Button } from "@teneo/ui/components/button";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@/components/ui/native-select";
-import { Spinner } from "@/components/ui/spinner";
+} from "@teneo/ui/components/native-select";
+import { Spinner } from "@teneo/ui/components/spinner";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@teneo/ui/components/tooltip";
+import { formatFileSize } from "@teneo/ui/utils/file-size";
+import { computed, ref } from "vue";
+
 import { useDataFolderUsage } from "@/composables/useDataFolderUsage";
 import { useSettings } from "@/composables/useSettings";
-import { formatFileSize } from "@/utils/file-size";
 
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
@@ -369,7 +369,7 @@ const clearHistoryMutation = useMutation({
               Clear history
             </Button>
           </AlertDialogTrigger>
-          <AlertDialogContent class="bg-card/35 border-card/45">
+          <AlertDialogContent class="ring-0">
             <AlertDialogHeader>
               <AlertDialogTitle>Clear clipboard history?</AlertDialogTitle>
               <AlertDialogDescription>
@@ -391,7 +391,7 @@ const clearHistoryMutation = useMutation({
     </SettingsSection>
 
     <AlertDialog v-model:open="isLimitWarningOpen">
-      <AlertDialogContent class="bg-card/35 border-card/45">
+      <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>{{ limitWarningTitle }}</AlertDialogTitle>
           <AlertDialogDescription>
