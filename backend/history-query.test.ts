@@ -3,8 +3,11 @@ import { expect, test } from "bun:test";
 import {
   afterCursor,
   likePattern,
+  listOrder,
   matchesSearch,
+  pageOrder,
   truncateTextPreview,
+  unpinnedOrder,
 } from "./history-query";
 
 test("a short text is passed through whole", () => {
@@ -51,8 +54,10 @@ test("the cursor after a pinned item keeps unpinned items", () => {
     dateCopied: 3,
     id: "b",
   });
-  expect(condition).toContain("pinnedAt IS NULL OR pinnedAt < ?");
-  expect(values).toEqual([5, 5, 3, 3, "b"]);
+  expect(condition).toBe(
+    "(pinnedAt IS NULL OR (pinnedAt, dateCopied, id) < (?, ?, ?))",
+  );
+  expect(values).toEqual([5, 3, "b"]);
 });
 
 test("the cursor after an unpinned item skips the pinned ones", () => {
@@ -61,8 +66,17 @@ test("the cursor after an unpinned item skips the pinned ones", () => {
     dateCopied: 3,
     id: "b",
   });
-  expect(condition).toStartWith("(pinnedAt IS NULL AND");
-  expect(values).toEqual([3, 3, "b"]);
+  expect(condition).toBe("(pinnedAt IS NULL AND (dateCopied, id) < (?, ?))");
+  expect(values).toEqual([3, "b"]);
+});
+
+test("a page past the pinned items drops the constant order terms", () => {
+  expect(pageOrder(undefined)).toBe(listOrder);
+  expect(pageOrder({ pinnedAt: 5, dateCopied: 3, id: "b" })).toBe(listOrder);
+  expect(pageOrder({ pinnedAt: null, dateCopied: 3, id: "b" })).toBe(
+    unpinnedOrder,
+  );
+  expect(listOrder.endsWith(unpinnedOrder)).toBe(true);
 });
 
 const keyText = "token=ghp_abcdefghijklmnopqrstuvwxyz1234 for ci";

@@ -280,5 +280,102 @@ receives visible items now, from the list.
   with the same history, for a like-for-like page number.
 - Shorter preview cache lifetime, or a cap on cached thumbnails, to lower
   the scrolling peak.
-- An index on `(pinnedAt, dateCopied DESC, id DESC)` if a history grows into
-  the tens of thousands. At a thousand rows SQLite does not need one.
+- ~~An index on `(pinnedAt, dateCopied DESC, id DESC)` if a history grows into
+  the tens of thousands.~~ Done, see below.
+
+## Round two: indexes, WAL and repeat copies
+
+A review of the follow-up plan (WAL, indexes, duplicate suppression, query
+invalidation, statement reuse) against generated 5,000 and 100,000 row
+histories. What went in, what changed from the plan, and what was dropped.
+
+### Indexes (`backend/database.ts`, `backend/history-query.ts`)
+
+The plan's index, `(pinnedAt DESC, dateCopied DESC, id DESC) WHERE deletedAt
+IS NULL`, does not remove the sort: the list's ORDER BY starts with the
+expression `pinnedAt IS NULL`, which a column index cannot serve. Four
+indexes replace the old `clipboard_items_date_copied_index`:
+
+| Index                                                                                                                         | Serves                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `clipboard_items_list_order_index` on `((pinnedAt IS NULL), pinnedAt DESC, dateCopied DESC, id DESC) WHERE deletedAt IS NULL` | the first page, pages still among pinned items                                               |
+| `clipboard_items_kind_list_order_index`, the same led by `kind`                                                               | those pages on the Text, Images, Files, Colors tabs                                          |
+| `clipboard_items_unpinned_index` on `(dateCopied DESC, id DESC) WHERE pinnedAt IS NULL`                                       | pages past the pinned items, the repeat-copy check, the newest-N subquery of "Maximum items" |
+| `clipboard_items_kind_unpinned_index`, the same led by `kind`                                                                 | those pages per tab                                                                          |
+
+Two query changes were needed for the cursor pages to use them:
+
+- `afterCursor` compares row values, `(dateCopied, id) < (?, ?)` and
+  `(pinnedAt, dateCopied, id) < (?, ?, ?)`, instead of a chain of ORs.
+  SQLite seeks an index to a row value but not to the OR form.
+- `pageOrder(cursor)` drops the two leading ORDER BY terms once the cursor
+  is past the pinned items. The WHERE fixes `pinnedAt` to NULL there, so
+  the terms are constant, but the planner cannot see that and sorts.
+
+Measured on 100,000 rows with the sqlite CLI (per query, warm):
+
+| Query                             | Before      | After   |
+| --------------------------------- | ----------- | ------- |
+| first page                        | 29 ms       | 0.2 ms  |
+| first page, one tab               | 14 ms       | 0.2 ms  |
+| page deep in the scroll           | 25 to 60 ms | 0.15 ms |
+| footer count                      | 11 ms       | 4 ms    |
+| "Maximum items" newest-N subquery | 50 to 70 ms | 0.3 ms  |
+
+Dropping the old `dateCopied` index matters as much as adding the new
+ones: while it exists the planner picks it for a deep page and sorts the
+result. The old index is dropped on the next start (`DROP INDEX IF
+EXISTS`), and the new ones are created with `IF NOT EXISTS`, so the
+migration is idempotent and reversible.
+
+### Trim after every copy (`deleteClipboardItems`)
+
+The newest-N subquery deliberately keeps `WHERE pinnedAt IS NULL` without
+`deletedAt IS NULL`: soft-deleted rows still count toward "Maximum items"
+(decided with the soft-delete work; excluding them would purge every
+deleted item at once). The unpinned index matches that query as written.
+The one new shortcut is `limitsHistory`: with no limit set, the default,
+`deleteClipboardItems` and `countClipboardItemsToDelete` return at once
+instead of running a NOT IN over the whole history for nothing.
+
+### WAL (`openDatabase`)
+
+`journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout = 5000`, via
+`Database.exec`. WAL is stored in the file, so it stays on after a
+downgrade; `PRAGMA journal_mode = DELETE` turns it back. The backend is one
+process, so the win is cheaper saves (no fsync per copy), not concurrency.
+
+### Repeat copies (`findRepeatCopy`, `backend/duplicate-copy.ts`)
+
+Copying the same text, color or file list as the newest unpinned item
+bumps that item (`dateCopied`, source app) instead of adding a row. The
+comparison is against the newest unpinned row by `dateCopied`, not the
+list's head, which is a pinned item whenever one exists; a pinned item is
+never bumped. Images are never treated as repeats: the picture is already
+saved under a new name when `saveClipboardItem` runs, and telling two
+screenshots apart would need a content hash column. An encrypted text that
+cannot be decrypted right now is not a repeat and is saved anew.
+
+### Dropped from the plan
+
+- **Query invalidation.** The plan named `refetchPage`, which TanStack
+  Query v5 removed; infinite queries refetch every loaded page on
+  invalidation by design. The v5 answer is `maxPages`, but dropping pages
+  from the top shifts every virtualizer index and needs
+  `fetchPreviousPage` plus scroll anchoring in `AllTabContent.vue`. With
+  the indexes a page costs 0.2 ms, so the refetch cascade is now IPC-bound
+  and tolerable. Left as a UI follow-up.
+- **Prepared statement reuse.** Microseconds per call against an IPC round
+  trip, with statement lifetimes to manage. Not worth it.
+
+### Manual checks
+
+- First start after the update: `sqlite3 <data>/teneo.sqlite "PRAGMA
+  journal_mode;"` prints `wal`, and `-wal` and `-shm` files appear beside
+  the database.
+- Copy the same text three times. One card, at the top, with the time of
+  the last copy. Copy it from another app: the card shows that app.
+- Pin an item, copy its text again. The pinned card stays put and a new
+  card appears at the top of the unpinned items.
+- Scroll past the pinned items and keep going. Pages append with no seam,
+  no repeated and no missing items.
