@@ -23,10 +23,18 @@ export function createSyncManager(app: TinyApp): SyncManager {
 }
 
 /** The engine ends what announces this Mac when it stops, so stop it when the
- *  process is told to. Only with sync switched on: otherwise a quit is as it
- *  was. */
-export function stopSyncWhenTold(manager: SyncManager): void {
+ *  process is told to, and when the app quits. Only with sync switched on:
+ *  otherwise a quit is as it was. */
+export function stopSyncWhenTold(manager: SyncManager, app: TinyApp): void {
   if (!isSyncAvailable()) return;
+  // A quit sends no signal: the window process ends, and the runtime exits
+  // this one as soon as `done` settles. So nothing here may wait, and this
+  // must be asked for before `init` first awaits: the runtime waits on `done`
+  // right after calling `init`, and whoever waited first is told first.
+  void app.done.then(
+    () => manager.stopAnnouncing(),
+    () => manager.stopAnnouncing(),
+  );
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     tjs.addSignalListener(signal, () => {
       setTimeout(() => tjs.exit(0), 2000); // never hang on the way out

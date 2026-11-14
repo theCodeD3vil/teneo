@@ -61,6 +61,7 @@ async function setup(options: Options = {}) {
   const calls = {
     started: [] as SyncServiceOptions[],
     stopped: 0,
+    stoppedAnnouncing: 0,
     changed: 0,
     restamped: 0,
     forgotten: 0,
@@ -76,6 +77,9 @@ async function setup(options: Options = {}) {
     },
     stop: async () => {
       calls.stopped += 1;
+    },
+    stopAnnouncing: () => {
+      calls.stoppedAnnouncing += 1;
     },
   } as SyncService;
   const deps: SyncManagerDeps = {
@@ -334,6 +338,16 @@ test("devices are the connected ones first, then the others by name", async () =
     ["Anna's phone", false],
     ["Zed", false],
   ]);
+});
+
+test("a quit ends what announces this Mac without waiting", async () => {
+  const { manager, calls } = await setup();
+  manager.stopAnnouncing(); // sync is off: nothing to end
+  expect(calls.stoppedAnnouncing).toBe(0);
+  await manager.turnOn();
+  manager.stopAnnouncing();
+  expect(calls.stoppedAnnouncing).toBe(1);
+  expect(getSettings().syncEnabled).toBe(true);
 });
 
 test("stopping at quit ends the engine and leaves sync on", async () => {

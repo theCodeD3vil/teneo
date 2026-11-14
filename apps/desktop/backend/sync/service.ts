@@ -43,6 +43,9 @@ export interface SyncService {
   /** The history was changed here: send it on. */
   localChanged(): void;
   stop(): Promise<void>;
+  /** End what announces this Mac, at once and without waiting: for a quit,
+   *  where the process is gone before `stop` would get that far. */
+  stopAnnouncing(): void;
 }
 
 export async function startSyncService(
@@ -94,5 +97,6 @@ export async function startSyncService(
       engine.stop();
       await transport.stop();
     },
+    stopAnnouncing: () => discovery.stop(),
   };
 }

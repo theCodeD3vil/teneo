@@ -150,6 +150,8 @@ export function onWindowClosed(windowId: string, app: TinyApp) {
 }
 
 export async function init(app: TinyApp) {
+  // first, before anything is awaited: see stopSyncWhenTold
+  stopSyncWhenTold(sync(app), app);
   warnIfDevRunUsesRealData();
   await loadSettings(app);
   await initializeDatabase(app);
@@ -173,7 +175,6 @@ export async function init(app: TinyApp) {
       },
     )
     .catch((error: unknown) => logError("starting sync failed:", error));
-  stopSyncWhenTold(sync(app));
   startTrimmingClipboardHistory(app);
   void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);

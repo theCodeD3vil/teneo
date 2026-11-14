@@ -121,6 +121,8 @@ const app = {
       console.log(`peers ${connectedCount(payload as SyncStatus)}`);
     }
   },
+  // no window process here: this peer ends by a signal, never by a quit
+  done: new Promise<never>(() => {}),
 } as unknown as TinyApp;
 
 await loadSettings(app);
@@ -134,7 +136,7 @@ if (appMode) {
   manager = createSyncManager(app);
   await initializeDatabase(app); // the app does this before it starts sync
   await manager.startIfEnabled();
-  stopSyncWhenTold(manager);
+  stopSyncWhenTold(manager, app);
   console.log(`ready ${getSyncIdentity().deviceId} app`);
 } else {
   await updateSettings({ syncEnabled: true }, app); // deletes leave tombstones

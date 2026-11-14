@@ -171,6 +171,13 @@ export class SyncManager {
     return this.serial(() => this.stopService());
   }
 
+  /** The window process is gone and this one exits next, with no time to
+   *  wait for `stop`: end what announces this Mac right now. The rest ends
+   *  with the process. */
+  stopAnnouncing(): void {
+    this.service?.stopAnnouncing();
+  }
+
   // --- the parts
 
   private requireAvailable(): void {
