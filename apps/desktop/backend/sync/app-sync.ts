@@ -1,13 +1,16 @@
 // The real parts behind the sync manager: the engine, the database, the Mac.
+import { version as appVersion } from "../../tinyjs.json";
 import { restampSecretItems } from "../database";
 import { logError } from "../files";
 import { runCommand } from "../run-command";
+import { isSyncAvailableIn } from "./availability";
 import { startSyncService } from "./service";
 import { SyncManager } from "./sync-manager";
 import { SqliteSyncStore } from "./sync-store";
 
-// Sync stays behind this switch until the owner decides to ship it
-const isSyncAvailable = () => tjs.env.TENEO_SYNC === "1";
+// Sync stays behind this switch until the owner decides to ship it: on in
+// beta builds and with TENEO_SYNC=1, off in full releases
+const isSyncAvailable = () => isSyncAvailableIn(tjs.env, appVersion);
 
 export function createSyncManager(app: TinyApp): SyncManager {
   return new SyncManager(app, {

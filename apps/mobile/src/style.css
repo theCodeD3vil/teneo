@@ -1,0 +1,239 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn-vue/tailwind.css";
+
+@import "@teneo/ui/theme.css";
+
+@source "../../../packages/ui/src";
+
+/* Google Sans is bundled, so every phone shows it, not only Pixels. The file
+   is variable from regular (400) to bold (700). */
+@font-face {
+  font-family: "Google Sans";
+  src: url("./assets/fonts/GoogleSans.ttf") format("truetype");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: block;
+}
+
+@theme inline {
+  --font-sans: "Google Sans", sans-serif;
+}
+
+/* The desktop classes are sized for a mouse on a laptop screen. On a phone
+   the same classes map to a mobile scale: body text (text-sm) at 17px,
+   secondary text (text-xs) at 15px, and spacing, icons and touch targets
+   12.5% larger than Tailwind's default. */
+@theme {
+  --spacing: 0.28125rem;
+  --text-xs: 0.9375rem;
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 1.0625rem;
+  --text-sm--line-height: 1.5rem;
+  --text-base: 1.125rem;
+  --text-base--line-height: 1.625rem;
+  --text-lg: 1.3125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 2rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.25rem;
+  /* thin strokes blur on a phone screen: normal is the lightest weight */
+  --font-weight-thin: 400;
+  --font-weight-extralight: 400;
+  --font-weight-light: 400;
+
+  /* dashes travelling along a line, for the sync link in setup */
+  --animate-dash-flow: dash-flow 1s linear infinite;
+  @keyframes dash-flow {
+    to {
+      stroke-dashoffset: -16;
+    }
+  }
+}
+
+/* Android's status and navigation bars. Capacitor's SystemBars plugin sets
+   these (insetsHandling: "css"); env() covers the browser. */
+@utility pt-safe {
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top));
+}
+@utility pb-safe {
+  padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom));
+}
+@utility px-safe {
+  padding-left: var(--safe-area-inset-left, env(safe-area-inset-left));
+  padding-right: var(--safe-area-inset-right, env(safe-area-inset-right));
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light dark;
+  }
+  /* Native-app feel: a long press doesn't select the page, and taps don't
+     flash a highlight. Fields stay selectable so typing still works. */
+  body {
+    @apply bg-background text-foreground font-sans select-none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  input,
+  textarea,
+  [contenteditable="true"] {
+    @apply select-text;
+  }
+}
+
+/* Illustrations draw themselves in: the backdrop swells, the subject rises,
+   then the details pop. --illus-delay staggers the parts. CSS transforms
+   would replace an SVG element's own transform attribute, so these go on
+   groups that have none. */
+@keyframes illus-swell {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+@keyframes illus-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+}
+@keyframes illus-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+/* swatches fan out from a stack, turning about the rivet they share */
+@keyframes illus-fan {
+  from {
+    opacity: 0;
+    transform: rotate(var(--fan-from, 0deg));
+  }
+  30% {
+    opacity: 1;
+  }
+}
+/* the search glass swings in from the right and settles */
+@keyframes illus-search {
+  from {
+    opacity: 0;
+    transform: translate(16px, 6px) rotate(18deg);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-2px, 0) rotate(-4deg);
+  }
+}
+@layer components {
+  .illus-fan {
+    transform-box: view-box;
+    transform-origin: 80px 98px;
+    animation: illus-fan 650ms cubic-bezier(0.32, 0.72, 0, 1) both;
+    animation-delay: var(--illus-delay, 0ms);
+  }
+  .illus-search {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: illus-search 650ms cubic-bezier(0.32, 0.72, 0, 1) both;
+    animation-delay: var(--illus-delay, 0ms);
+  }
+  .illus-swell,
+  .illus-rise,
+  .illus-pop {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation-delay: var(--illus-delay, 0ms);
+    animation-fill-mode: both;
+  }
+  .illus-swell {
+    animation-name: illus-swell;
+    animation-duration: 600ms;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .illus-rise {
+    animation-name: illus-rise;
+    animation-duration: 550ms;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .illus-pop {
+    animation-name: illus-pop;
+    animation-duration: 450ms;
+    animation-timing-function: ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .illus-swell,
+    .illus-rise,
+    .illus-pop,
+    .illus-fan,
+    .illus-search {
+      animation: none;
+    }
+  }
+}
+
+/* Code in the text preview, as on desktop. Each token colour is mixed toward
+   the text colour, which darkens it on light and softens it on dark. */
+.hljs {
+  --code-mix: 70%;
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-tag,
+.hljs-name {
+  color: color-mix(in oklch, var(--primary) var(--code-mix), var(--foreground));
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-template-tag {
+  color: color-mix(in oklch, var(--success) var(--code-mix), var(--foreground));
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+  color: color-mix(in oklch, var(--warning) var(--code-mix), var(--foreground));
+}
+.hljs-title,
+.hljs-built_in,
+.hljs-type,
+.hljs-section {
+  color: color-mix(in oklch, var(--info) var(--code-mix), var(--foreground));
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: color-mix(
+    in oklch,
+    var(--tertiary) var(--code-mix),
+    var(--foreground)
+  );
+}
+.hljs-deletion {
+  color: var(--destructive);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}

@@ -130,7 +130,7 @@ Here's what's planned next. More will be added over time.
 - **Previews (in progress, beta).** Open any item in your history to see it in full, and do more with it than copy and paste. A first version is out to try; see [Features](#features).
 - **Landing page (done).** A proper home for Teneo, where you can explore what it does and download it.
 - **Sync engine.** Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).
-- **Android app.** Sync your clipboard history between your Android phone and your Mac.
+- **Android app (in progress).** Sync your clipboard history between your Android phone and your Mac. Its screens are built and running on sample data; saving your history on the phone and syncing it come next.
 
 ## Development
 
@@ -140,6 +140,8 @@ Teneo is a [Bun](https://bun.sh) workspaces monorepo, with [Turborepo](https://t
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/desktop`    | The Mac app: Vue frontend in `src/`, TinyJS backend in `backend/`.                                                                                  |
 | `apps/site`       | The landing page.                                                                                                                                   |
+| `apps/mobile`     | The Android app (see [Android app](#android-app)).                                                                                                  |
+| `packages/ui`     | `@teneo/ui`: the UI components, theme and helpers that the Mac app, the site and the Android app share.                                             |
 | `packages/shared` | `@teneo/shared`: the types and constants the app's frontend and backend share. It ships TypeScript source, with no build step.                      |
 | `packages/sync`   | `@teneo/sync`: the clipboard sync core (merge rules, protocol, engine), with no runtime of its own. Not turned on yet; its README has the protocol. |
 
@@ -151,6 +153,7 @@ Run these from the repo root:
 | `bun run desktop`                                    | Runs the app with `tinyjs dev`, on its own data.  |
 | `bun run desktop:reset-dev-data`                     | Wipes that dev data (see below).                  |
 | `bun run site`                                       | Serves the landing page.                          |
+| `bun run mobile`                                     | Serves the Android app in a browser.              |
 | `bun run build` \| `typecheck` \| `test`             | Runs that task in every workspace (Turbo caches). |
 | `bun run lint` \| `lint:fix` \| `fmt` \| `fmt:check` | Lints and formats the whole repo, once.           |
 
@@ -162,8 +165,42 @@ Run these from the repo root:
 - `bun run test:runtime`, from `apps/desktop`, runs the sync tests that need the real TinyJS runtime (`tjs:sqlite` and its network server; `bun test` has neither): the storage tests, the transport tests and the tests of the pid files that clean up after a killed Teneo. It bundles each test with esbuild and runs it with `~/.tinyjs/bin/tjs` on a temp folder, never on your history. Turbo's `test` leaves it out, since it needs that runtime installed.
 - `bun run sync:peer <recovery code>` starts a second Teneo device with no window, on the real runtime and in a temp folder of its own, to try syncing against the app or another peer. `--name <name>` names it; `--dir <folder>` keeps its history between runs. It prints what it receives (this is a test tool: item text is shown) and reads commands on stdin: `copy <text>`, `pin <id>`, `unpin <id>`, `delete <id>`, `clear`, `list`, `peers`, `quit`. `bun backend/sync/new-recovery-code.ts`, from `apps/desktop`, prints the recovery code of a new, empty vault to start two peers with. `bun run sync:peer --app` instead runs the peer the way the app runs sync, through the same `SyncManager` and signal handling, with sync off to begin with and a throwaway vault of its own; it also takes `turnon`, `join <recovery code>`, `code`, `secrets on|off`, `off` and `status`, which are what the Sync tab does.
 - `bun run sync:check` starts two such peers and checks that they find each other over Bonjour and end up with the same history: a copy, a pin, a delete and a clear, one peer restarted while the other changed things, a client that doesn't speak Teneo refused, no Bonjour process left running afterwards, and a peer that is killed outright (its Bonjour processes outlive it, so a Teneo notes their pids in `bonjour-<pid>.pids` in its cache folder, and the next one ends those, and only those). It ends with a peer run the app's way (`--app`) against a plain one: sync turned on, joined by recovery code, the existing history arriving, changes both ways, the secrets switch, a quit by SIGTERM and a launch that turns sync on by itself, and turning sync off. The first connection can take up to a minute. It needs ports 47823 to 47827 free, so stop any other syncing Teneo or peer first. macOS may ask to let `tjs` find devices on the local network the first time.
-- `TENEO_SYNC=1 bun run desktop` shows the Sync tab in Settings. Without it sync is hidden and does nothing: no listener, no Bonjour, nothing sent. In the tab, _Turn on_ makes a vault key (kept in the Keychain), _Add a device_ shows the recovery code and a QR code, and _Join_ takes a recovery code from another device. To try it without a second Mac, turn sync on, show the code, and start `bun run sync:peer <recovery code>`.
+- Sync is on in beta builds: while the version in `apps/desktop/tinyjs.json` has a `-beta` suffix, the Sync tab shows in Settings, in `bun run desktop` and in the released app. With a full version it needs `TENEO_SYNC=1 bun run desktop`; without that, sync is hidden and does nothing: no listener, no Bonjour, nothing sent. In the tab, _Turn on_ makes a vault key (kept in the Keychain), _Add a device_ shows the recovery code and a QR code, and _Join_ takes a recovery code from another device. To try it without a second Mac, turn sync on, show the code, and start `bun run sync:peer <recovery code>`.
 
 TinyJS reads everything from the current folder, so run any `tinyjs` command (`dev`, `build`, `publish`) from `apps/desktop`. The release version lives in `apps/desktop/tinyjs.json`.
 
 `tinyjs dev` restarts the backend when a file in `apps/desktop/backend` changes, but not when one in `packages/shared` does (TinyJS only watches a `shared/` folder beside `backend/`). After editing `packages/shared`, restart `bun run desktop` to pick the change up in the backend. The frontend still reloads on its own.
+
+### Android app
+
+`apps/mobile` is the Android app: Vue and Tailwind on the shared `@teneo/ui` components, wrapped with [Capacitor](https://capacitorjs.com). The native project in `apps/mobile/android` is committed.
+
+For now the app runs on sample data. `FakeClient` (`apps/mobile/src/client`) keeps a seeded history in memory and pretends to sync and pair. Screens only talk to the `TeneoClient` interface, so a real client can take its place without changing them.
+
+To build it for a phone you need:
+
+- **Java 21.** `apps/mobile/mise.toml` pins it, and the Android scripts run Gradle through [mise](https://mise.jdx.dev), so run `mise install` in `apps/mobile` once. Newer Java versions break the Android build tools.
+- **The Android SDK**, with platform 36.1 and its build tools. Android Studio installs it. Gradle finds it through `ANDROID_HOME`, or `sdk.dir` in `apps/mobile/android/local.properties` (not committed).
+- **An Android phone** running Android 10 or later, with USB debugging on, that `adb devices` lists. Scanning the Mac's QR code uses Google's code scanner, so the phone needs Google Play services. Teneo never asks for the camera permission.
+
+Then, from the repo root:
+
+| Command                      | What it does                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run mobile`             | Serves the app at `http://127.0.0.1:5175`. Open it in a phone-sized browser window. The browser can't scan, so it offers the typed recovery code. |
+| `bun run mobile:android`     | Builds the app, installs it on the phone and opens it.                                                                                            |
+| `bun run mobile:android:dev` | Installs a build that loads the app from `bun run mobile` over USB, so edits show on the phone as you save. Keep `bun run mobile` running.        |
+
+`mobile:android:dev` points the phone at your Mac through `adb reverse`, so it only works while the phone is plugged in. Run `bun run mobile:android` to go back to a build that works on its own. The debug APK lands in `apps/mobile/android/app/build/outputs/apk/debug`.
+
+The Android scripts aren't part of Turbo's `build`, so CI and the Mac release workflow don't need Java or the Android SDK.
+
+#### Releasing the Android app
+
+The Android app releases the way the Mac app does, from its own version: `"version"` in `apps/mobile/package.json`. When a PR is merged into `main` and that version has no `android-v<version>` tag yet, `.github/workflows/release-android.yml` builds a signed APK and publishes it as the GitHub release "Teneo for Android `<version>`", with the PR's title and description as the notes. So bump the version in the PR to ship a release. A PR can bump the Mac version, the Android version or both.
+
+- **The version** is three numbers such as `1.2.3`, the last two under 100, or a beta of one such as `1.2.3-beta.4` (beta numbers 1 to 98). Gradle reads it from `package.json` and makes Android's version code from it (`1.2.3-beta.4` is `1020304`, and `1.2.3` is `1020399`). Android only updates to a larger one, so the version only goes up, and a beta comes before its full release.
+- **A beta is a pre-release.** A version with a suffix is published as a GitHub pre-release, for the Mac app too (`0.4.0-beta.1` in `apps/desktop/tinyjs.json`). A pre-release is never "latest", so Macs running a full release are not updated to it; a Mac running a beta updates to the next full release.
+- **The signing key** is one PKCS12 keystore holding a key named `teneo`. The workflow reads it from two repo secrets, `ANDROID_KEYSTORE_P12` (the keystore file, base64) and `ANDROID_KEYSTORE_PASSWORD`, which come from Doppler's `prd` config like the Mac certificate. Android only installs an update signed with the key of the app it replaces, so keep a copy of the keystore and its password somewhere safe: without them, nobody who has the app can update it.
+- **The release is never marked "latest".** The Mac app updates from `releases/latest`, which has to stay a Mac release.
+- `bun run mobile:android:release` makes the same build on your Mac, in `apps/mobile/android/app/build/outputs/apk/release`. It is signed if `TENEO_ANDROID_KEYSTORE` (the keystore's path) and `TENEO_ANDROID_KEYSTORE_PASSWORD` are set, and unsigned, which a phone won't install, if not.

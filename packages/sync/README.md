@@ -6,7 +6,7 @@ WebCrypto, timers and a few interfaces the app provides, with no `tjs`, no Node
 APIs and no dependencies. That is so the Mac app (txiki), a mobile web view and
 `bun test` can all run it. Nothing in here touches the network or a database.
 
-Protocol version: **1**. Sync is still behind `TENEO_SYNC=1` in the Mac app;
+Protocol version: **1**. Sync is on in beta builds of the Mac app and otherwise behind `TENEO_SYNC=1`;
 shipping it freezes this version, so read the rules at the end before changing
 anything on the wire.
 
