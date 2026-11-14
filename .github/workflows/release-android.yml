@@ -1,0 +1,127 @@
+name: Release Android
+
+# A PR merged into main releases the "version" in apps/mobile/package.json,
+# unless that version is already tagged (android-v<version>) — so bump it in
+# the PR to ship an Android release. The Mac app releases the same way from
+# its own version (release.yml); a PR can bump either or both.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-android
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is-new: ${{ steps.version.outputs.is-new }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          sparse-checkout: apps/mobile/package.json
+          sparse-checkout-cone-mode: false
+
+      - id: version
+        run: |
+          version=$(jq -r .version apps/mobile/package.json)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}$ ]]; then
+            echo "::error::\"version\" in apps/mobile/package.json is \"$version\". It must be three numbers like 1.2.3, the last two under 100: Android's version code is made from them."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/android-v$version" > /dev/null; then
+            echo "::notice::android-v$version is already released. Bump \"version\" in apps/mobile/package.json to publish a new Android release."
+            echo "is-new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is-new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: version
+    if: needs.version.outputs.is-new == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      # The version apps/mobile/mise.toml pins: newer ones break the Android
+      # build tools
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: bun install --frozen-lockfile
+
+      # Android only installs an update signed with the key of the app it
+      # replaces, so every release must be signed with this one key
+      - name: Write signing key
+        env:
+          KEYSTORE_P12: ${{ secrets.ANDROID_KEYSTORE_P12 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_P12" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::ANDROID_KEYSTORE_P12 or ANDROID_KEYSTORE_PASSWORD is missing: add them in Doppler and sync the prd config to GitHub (see README › Releasing the Android app)."
+            exit 1
+          fi
+          echo "$KEYSTORE_P12" | base64 --decode > "$RUNNER_TEMP/release.p12"
+          echo "TENEO_ANDROID_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+
+      - name: Build the app
+        working-directory: apps/mobile
+        env:
+          TENEO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          bun run build
+          CI=true bunx cap sync android
+          ./android/gradlew -p android :app:assembleRelease
+          mv android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Teneo-$VERSION.apk"
+          rm "$RUNNER_TEMP/release.p12"
+
+      # An unsigned or wrongly versioned APK is one nobody can install or
+      # update to
+      - name: Verify the APK
+        run: |
+          build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$build_tools/apksigner" verify --verbose "$RUNNER_TEMP/Teneo-$VERSION.apk"
+          "$build_tools/aapt2" dump badging "$RUNNER_TEMP/Teneo-$VERSION.apk" \
+            | grep -q "versionName='$VERSION'"
+
+      - name: Write release notes
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/notes.md"
+
+      # Never "latest": the Mac app updates from releases/latest, which must
+      # stay a Mac release
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          gh release create "android-v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$MERGE_COMMIT" \
+            --title "Teneo for Android $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --latest=false \
+            "$RUNNER_TEMP/Teneo-$VERSION.apk"

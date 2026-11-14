@@ -1,4 +1,15 @@
+import groovy.json.JsonSlurper
+
 apply plugin: 'com.android.application'
+
+// The version lives in apps/mobile/package.json: the release workflow reads
+// it there, and a bump of it is what makes a release
+def appVersion = new JsonSlurper().parse(file('../../package.json')).version
+def (major, minor, patch) = appVersion.tokenize('.-').take(3).collect { it as int }
+
+// The release key comes from the environment, so it is never in the repo.
+// Without it a release build is left unsigned, which a phone won't install.
+def releaseKeystore = System.getenv('TENEO_ANDROID_KEYSTORE')
 
 android {
     namespace = "com.michael.teneo"
@@ -11,8 +22,9 @@ android {
         applicationId "com.michael.teneo"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Android only updates to a larger code: 1.2.3 is 10203
+        versionCode major * 10000 + minor * 100 + patch
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -20,8 +32,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storeType 'pkcs12'
+                storePassword System.getenv('TENEO_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'teneo'
+                // a PKCS12 key has the keystore's password
+                keyPassword System.getenv('TENEO_ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig releaseKeystore ? signingConfigs.release : null
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

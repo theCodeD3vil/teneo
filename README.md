@@ -193,4 +193,13 @@ Then, from the repo root:
 
 `mobile:android:dev` points the phone at your Mac through `adb reverse`, so it only works while the phone is plugged in. Run `bun run mobile:android` to go back to a build that works on its own. The debug APK lands in `apps/mobile/android/app/build/outputs/apk/debug`.
 
-The Android scripts aren't part of Turbo's `build`, so CI and the release workflow don't need Java or the Android SDK.
+The Android scripts aren't part of Turbo's `build`, so CI and the Mac release workflow don't need Java or the Android SDK.
+
+#### Releasing the Android app
+
+The Android app releases the way the Mac app does, from its own version: `"version"` in `apps/mobile/package.json`. When a PR is merged into `main` and that version has no `android-v<version>` tag yet, `.github/workflows/release-android.yml` builds a signed APK and publishes it as the GitHub release "Teneo for Android `<version>`", with the PR's title and description as the notes. So bump the version in the PR to ship a release. A PR can bump the Mac version, the Android version or both.
+
+- **The version** is three numbers such as `1.2.3`, the last two under 100. Gradle reads it from `package.json` and makes Android's version code from it (`1.2.3` is `10203`). Android only updates to a larger one, so the version only goes up.
+- **The signing key** is one PKCS12 keystore holding a key named `teneo`. The workflow reads it from two repo secrets, `ANDROID_KEYSTORE_P12` (the keystore file, base64) and `ANDROID_KEYSTORE_PASSWORD`, which come from Doppler's `prd` config like the Mac certificate. Android only installs an update signed with the key of the app it replaces, so keep a copy of the keystore and its password somewhere safe: without them, nobody who has the app can update it.
+- **The release is never marked "latest".** The Mac app updates from `releases/latest`, which has to stay a Mac release.
+- `bun run mobile:android:release` makes the same build on your Mac, in `apps/mobile/android/app/build/outputs/apk/release`. It is signed if `TENEO_ANDROID_KEYSTORE` (the keystore's path) and `TENEO_ANDROID_KEYSTORE_PASSWORD` are set, and unsigned, which a phone won't install, if not.
