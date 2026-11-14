@@ -253,7 +253,7 @@ describe("FakeClient", () => {
         makeItem("item-1", "first", 3000),
         makeItem("item-2", "second", 2000),
       ];
-      const client = new FakeClient(items);
+      const client = new FakeClient(items, async () => {});
 
       let historyChanged = false;
       client.onHistoryChanged(() => {
@@ -272,6 +272,51 @@ describe("FakeClient", () => {
         ["item-1", 3000],
         ["item-2", 2000],
       ]);
+    });
+
+    test("copyToClipboard writes the whole text of the item", async () => {
+      const written: string[] = [];
+      const long = "x".repeat(5000);
+      const client = new FakeClient(
+        [makeItem("item-1", long, 1000)],
+        async (text) => void written.push(text),
+      );
+      await client.copyToClipboard("item-1");
+      expect(written).toEqual([long]);
+    });
+
+    test("copyToClipboard rejects when the clipboard can't be written", async () => {
+      const client = new FakeClient([makeItem("item-1", "a", 1000)], () =>
+        Promise.reject(new Error("denied")),
+      );
+      await expect(client.copyToClipboard("item-1")).rejects.toThrow("denied");
+    });
+
+    test("copyToClipboard rejects when there is nothing to copy", async () => {
+      const written: string[] = [];
+      const noText = { ...makeItem("item-1", "", 1000), text: null };
+      const client = new FakeClient(
+        [noText],
+        async (text) => void written.push(text),
+      );
+      await expect(client.copyToClipboard("item-1")).rejects.toThrow();
+      await expect(client.copyToClipboard("missing")).rejects.toThrow();
+      expect(written).toEqual([]);
+    });
+
+    test("copyText writes the text given and rejects when it can't", async () => {
+      const written: string[] = [];
+      const client = new FakeClient(
+        [],
+        async (text) => void written.push(text),
+      );
+      await client.copyText("SHOUTED");
+      expect(written).toEqual(["SHOUTED"]);
+
+      const denied = new FakeClient([], () =>
+        Promise.reject(new Error("denied")),
+      );
+      await expect(denied.copyText("a")).rejects.toThrow("denied");
     });
   });
 

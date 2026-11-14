@@ -18,6 +18,9 @@ import { useClient } from "../client";
 /** Items per page: a screen's worth and some to scroll into before the next loads */
 export const clipboardPageSize = 50;
 
+/** After a page fails to load, how long before it is asked for again */
+const loadMoreRetryAfterMs = 2000;
+
 export type ClipboardListFilter = Pick<ClipboardListRequest, "kind" | "search">;
 
 /**
@@ -36,6 +39,7 @@ export function useClipboardList(
   const error = shallowRef<Error | null>(null);
   // a newer load makes an older one's answer stale
   let loadId = 0;
+  let loadMoreFailedAt = 0;
 
   async function load(limit = clipboardPageSize): Promise<void> {
     const id = ++loadId;
@@ -57,6 +61,7 @@ export function useClipboardList(
   async function loadMore(): Promise<void> {
     const cursor = nextCursor.value;
     if (!cursor || loadingMore.value) return;
+    if (Date.now() - loadMoreFailedAt < loadMoreRetryAfterMs) return;
     loadingMore.value = true;
     const id = loadId;
     const { kind, search } = toValue(filter);
@@ -74,8 +79,10 @@ export function useClipboardList(
         ...page.items.filter((item) => !seen.has(item.id)),
       ];
       nextCursor.value = page.nextCursor;
-    } catch (caught) {
-      if (id === loadId) error.value = toError(caught);
+    } catch {
+      // What's loaded stays up: `error` is for a list that couldn't load at
+      // all. The list asks again as it's scrolled, after a short wait.
+      loadMoreFailedAt = Date.now();
     } finally {
       loadingMore.value = false;
     }

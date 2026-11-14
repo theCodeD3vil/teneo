@@ -11,14 +11,29 @@ import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
 import { createSeedItems } from "./seed-data";
 
+/** Puts text on the clipboard, rejecting if it can't */
+export type WriteText = (text: string) => Promise<void>;
+
+const writeToBrowserClipboard: WriteText = async (text) => {
+  if (typeof navigator === "undefined" || !navigator.clipboard) {
+    throw new Error("There is no clipboard to copy to");
+  }
+  await navigator.clipboard.writeText(text);
+};
+
 export class FakeClient implements TeneoClient {
   private items: ClipboardHistoryItem[];
   private settings: MobileSettings;
   private syncStatus: SyncStatus;
   private historyListeners = new Set<() => void>();
   private syncListeners = new Set<(status: SyncStatus) => void>();
+  private readonly writeText: WriteText;
 
-  constructor(initialItems?: ClipboardHistoryItem[]) {
+  constructor(
+    initialItems?: ClipboardHistoryItem[],
+    writeText: WriteText = writeToBrowserClipboard,
+  ) {
+    this.writeText = writeText;
     this.items = initialItems ? [...initialItems] : createSeedItems();
     this.sortItems();
     this.settings = { ...defaultSettings };
@@ -192,24 +207,17 @@ export class FakeClient implements TeneoClient {
   }
 
   async copyToClipboard(id: string): Promise<void> {
-    const item = this.items.find((i) => i.id === id);
-    if (!item) {
-      return;
+    const text = this.items.find((i) => i.id === id)?.text;
+    if (text === undefined || text === null) {
+      throw new Error("This item has no text to copy");
     }
-
-    if (
-      item.text !== null &&
-      typeof navigator !== "undefined" &&
-      navigator.clipboard
-    ) {
-      try {
-        await navigator.clipboard.writeText(item.text);
-      } catch {
-        // Ignore clipboard write error if denied in environment
-      }
-    }
+    await this.writeText(text);
     // like the desktop app, putting an item back on the clipboard leaves the
     // history as it was: the copy isn't recorded again or moved to the top
+  }
+
+  async copyText(text: string): Promise<void> {
+    await this.writeText(text);
   }
 
   onHistoryChanged(listener: () => void): () => void {

@@ -71,6 +71,9 @@ const copy = (item: ClipboardHistoryItem) =>
 const togglePin = (item: ClipboardHistoryItem) =>
   client.setPinned(item.id, !item.pinned);
 const remove = (item: ClipboardHistoryItem) => client.deleteItem(item.id);
+// the list carries only the start of a long text: share all of it
+const share = async (item: ClipboardHistoryItem) =>
+  shareItem((item.isTruncated ? await client.getItem(item.id) : null) ?? item);
 
 const rowClass =
   "active:bg-foreground/5 flex h-12 w-full items-center gap-x-3 px-4 text-left text-sm transition-colors [&_svg]:size-5";
@@ -97,7 +100,7 @@ const rowClass =
             <PinIcon class="text-foreground/70" /> Pin
           </template>
         </button>
-        <button type="button" :class="rowClass" @click="run(shareItem)">
+        <button type="button" :class="rowClass" @click="run(share)">
           <ShareIcon class="text-foreground/70" /> Share
         </button>
       </SheetGroup>

@@ -4,13 +4,17 @@ import { useClient } from "../client";
 import type { SyncStatus } from "../types/sync";
 
 const status = ref<SyncStatus | null>(null);
-const isBusy = ref(false);
-const error = ref("");
 let isSubscribed = false;
 
-/** This phone's sync with the user's other devices, kept current. */
+/**
+ * This phone's sync with the user's other devices, kept current. The status
+ * is one for the whole app; `isBusy` and `error` belong to the screen that
+ * asked, so what went wrong on one screen doesn't show on another.
+ */
 export function useSyncStatus() {
   const client = useClient();
+  const isBusy = ref(false);
+  const error = ref("");
   if (!isSubscribed) {
     isSubscribed = true;
     void client.getSyncStatus().then((loaded) => (status.value = loaded));
@@ -30,8 +34,10 @@ export function useSyncStatus() {
     }
   }
 
-  /** Join the devices whose recovery code or QR link this is. */
+  /** Join the devices whose recovery code or QR link this is. Does nothing
+   *  with no code, or while this screen is already joining or turning off. */
   async function join(code: string): Promise<string | null> {
+    if (isBusy.value || !code.trim()) return null;
     const result = await run(() => client.pair(code));
     if (!result) return null;
     if (!result.ok) {
@@ -42,6 +48,7 @@ export function useSyncStatus() {
   }
 
   async function turnOff(): Promise<void> {
+    if (isBusy.value) return;
     await run(() => client.unpair());
   }
 

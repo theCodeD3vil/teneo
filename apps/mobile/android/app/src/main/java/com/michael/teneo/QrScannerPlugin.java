@@ -4,6 +4,8 @@ import static com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpd
 import static com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED;
 import static com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate.InstallState.STATE_FAILED;
 
+import android.os.Handler;
+import android.os.Looper;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -27,6 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @CapacitorPlugin(name = "QrScanner")
 public class QrScannerPlugin extends Plugin {
+
+    /** How long `prepare` waits on a download that neither ends nor fails */
+    private static final long PREPARE_TIMEOUT_MS = 60_000;
 
     private GmsBarcodeScanner scanner() {
         GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
@@ -54,6 +59,7 @@ public class QrScannerPlugin extends Plugin {
         ModuleInstallClient client = ModuleInstall.getClient(getContext());
         // the request and the listener can both report the end
         AtomicBoolean isSettled = new AtomicBoolean(false);
+        Handler timeout = new Handler(Looper.getMainLooper());
 
         InstallStatusListener listener = new InstallStatusListener() {
             @Override
@@ -61,11 +67,22 @@ public class QrScannerPlugin extends Plugin {
                 int state = update.getInstallState();
                 if (state != STATE_COMPLETED && state != STATE_FAILED && state != STATE_CANCELED) return;
                 client.unregisterListener(this);
+                timeout.removeCallbacksAndMessages(null);
                 if (isSettled.getAndSet(true)) return;
                 if (state == STATE_COMPLETED) call.resolve();
                 else call.reject("The scanner couldn't be downloaded");
             }
         };
+
+        // Offline, or with the download put off, Play services reports no end
+        // at all. It goes on downloading, so a later scan can find it ready.
+        timeout.postDelayed(
+            () -> {
+                client.unregisterListener(listener);
+                if (!isSettled.getAndSet(true)) call.reject("The scanner is taking too long to download");
+            },
+            PREPARE_TIMEOUT_MS
+        );
 
         ModuleInstallRequest request = ModuleInstallRequest.newBuilder().addApi(scanner()).setListener(listener).build();
         client
@@ -73,10 +90,12 @@ public class QrScannerPlugin extends Plugin {
             .addOnSuccessListener(response -> {
                 if (!response.areModulesAlreadyInstalled()) return;
                 client.unregisterListener(listener);
+                timeout.removeCallbacksAndMessages(null);
                 if (!isSettled.getAndSet(true)) call.resolve();
             })
             .addOnFailureListener(error -> {
                 client.unregisterListener(listener);
+                timeout.removeCallbacksAndMessages(null);
                 if (!isSettled.getAndSet(true)) call.reject(error.getMessage(), error);
             });
     }

@@ -41,7 +41,7 @@ let copiedTimeout: ReturnType<typeof setTimeout> | undefined;
 async function copy(): Promise<void> {
   try {
     if (convertedText.value !== null) {
-      await navigator.clipboard.writeText(convertedText.value);
+      await client.copyText(convertedText.value);
     } else {
       await client.copyToClipboard(props.item.id);
     }
@@ -52,6 +52,10 @@ async function copy(): Promise<void> {
   isCopied.value = true;
   clearTimeout(copiedTimeout);
   copiedTimeout = setTimeout(() => (isCopied.value = false), 1500);
+}
+
+function share(): void {
+  void shareItem(props.item).catch(() => undefined);
 }
 
 function togglePin(): void {
@@ -97,7 +101,7 @@ onUnmounted(() => clearTimeout(copiedTimeout));
           size="icon"
           class="text-foreground/70"
           aria-label="Share"
-          @click="shareItem(item)">
+          @click="share">
           <ShareIcon />
         </Button>
         <Button
