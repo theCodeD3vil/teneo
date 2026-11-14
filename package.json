@@ -34,6 +34,8 @@
     "test": "turbo run test",
     "desktop": "cd apps/desktop && tinyjs dev",
     "site": "turbo run dev --filter=@teneo/site",
+    "mobile": "turbo run dev --filter=@teneo/mobile",
+    "mobile:android": "bun run --cwd apps/mobile android:run",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
