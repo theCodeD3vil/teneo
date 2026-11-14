@@ -11,13 +11,11 @@ export default defineConfig({
   },
   plugins: ["vue", "unicorn", "typescript", "oxc"],
   ignorePatterns: [
-    "dist/**",
+    "**/dist/**",
+    "**/.build/**",
     "coverage/**",
     "vendor/**",
     "test/snapshots/**",
-    "src/components/ui/**",
-    "site/src/components/ui/**",
-    "site/dist/**",
-    ".build/**",
+    "apps/*/src/components/ui/**",
   ], //will update later
 });

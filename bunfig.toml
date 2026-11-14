@@ -1,0 +1,4 @@
+[install]
+# hoisted keeps one flat node_modules at the root, which is what the TinyJS
+# CLI finds when it walks up from apps/desktop looking for esbuild
+linker = "hoisted"
