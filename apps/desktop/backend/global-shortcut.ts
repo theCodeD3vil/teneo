@@ -1,7 +1,8 @@
 // The system-wide shortcut that opens the panel. The panel window toggles
 // itself when the press arrives (App.vue); this only keeps the registration
 // in step with the setting.
-import { openPanelHotkeyId } from "../shared/types/settings";
+import { openPanelHotkeyId } from "@teneo/shared/types/settings";
+
 import { logError } from "./files";
 import { getSettings } from "./settings";
 

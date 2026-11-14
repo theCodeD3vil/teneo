@@ -2,7 +2,7 @@
 // nothing is sent anywhere, and keys are never checked with their provider.
 // Rules follow gitleaks (MIT, github.com/gitleaks/gitleaks) and stick to keys
 // with a known shape, so ordinary text is rarely mistaken for one.
-import type { SecretSpan } from "../shared/types/clipboard";
+import type { SecretSpan } from "@teneo/shared/types/clipboard";
 
 interface SecretRule {
   label: string;

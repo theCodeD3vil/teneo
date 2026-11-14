@@ -4,7 +4,8 @@ import {
   type AppSettings,
   type HistoryDuration,
   pickSettings,
-} from "../shared/types/settings";
+} from "@teneo/shared/types/settings";
+
 import {
   countClipboardItemsToDelete,
   deleteClipboardItems,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FolderAccess } from "@teneo/shared/types/storage";
 import { useIntervalFn } from "@vueuse/core";
 import { computed, ref, watch } from "vue";
 import TickIcon from "~icons/tabler/check";
@@ -18,8 +19,6 @@ import { useLaunchAtLogin } from "@/composables/useLaunchAtLogin";
 import { useSecretEncryption } from "@/composables/useSecretEncryption";
 import { useSettings } from "@/composables/useSettings";
 import { cn } from "@/lib/utils";
-
-import type { FolderAccess } from "../../shared/types/storage";
 
 const steps = ["welcome", "permissions", "files", "keys", "ready"] as const;
 const currentStep = ref<(typeof steps)[number]>("welcome");

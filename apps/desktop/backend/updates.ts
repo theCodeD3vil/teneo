@@ -1,7 +1,8 @@
 import {
   type UpdateProgress,
   updateProgressEvent,
-} from "../shared/types/windows";
+} from "@teneo/shared/types/windows";
+
 import { getSettings } from "./settings";
 import { openUpdateWindow, updateWindowId } from "./windows";
 

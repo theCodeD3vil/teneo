@@ -1,8 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
+import { clipboardHistoryChangedEvent } from "@teneo/shared/types/clipboard";
+import type { DataFolderUsage } from "@teneo/shared/types/storage";
 import { onUnmounted } from "vue";
-
-import { clipboardHistoryChangedEvent } from "../../shared/types/clipboard";
-import type { DataFolderUsage } from "../../shared/types/storage";
 
 const dataFolderUsageQueryKey = ["data-folder-usage"] as const;
 

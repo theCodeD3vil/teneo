@@ -1,6 +1,7 @@
 // Apps whose copies are kept out of clipboard history while "Ignore password
 // managers" is on: known password managers, plus apps the user adds.
-import type { ExcludedApp } from "../shared/types/settings";
+import type { ExcludedApp } from "@teneo/shared/types/settings";
+
 import { getAppIconUrl } from "./app-icons";
 import { findAppPath, isValidBundleId, readBundleId } from "./find-app";
 import { runCommand } from "./run-command";

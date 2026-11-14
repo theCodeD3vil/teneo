@@ -1,8 +1,8 @@
-export { clipboardHistoryChangedEvent } from "../../shared/types/clipboard";
+export { clipboardHistoryChangedEvent } from "@teneo/shared/types/clipboard";
 import type {
   ClipboardHistoryItem,
   ClipboardItemKind,
-} from "../../shared/types/clipboard";
+} from "@teneo/shared/types/clipboard";
 
 export type { ClipboardHistoryItem, ClipboardItemKind };
 

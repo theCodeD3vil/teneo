@@ -9,7 +9,8 @@
 import type {
   ClipboardLink,
   LinkPreviewImage,
-} from "../shared/types/clipboard";
+} from "@teneo/shared/types/clipboard";
+
 import { logError, pngDataUrl } from "./files";
 import {
   canOpenPage,

@@ -1,13 +1,13 @@
-import { Database } from "tjs:sqlite";
-
-import { textPreviewLength } from "../shared/types/clipboard";
+import { textPreviewLength } from "@teneo/shared/types/clipboard";
 import type {
   ClipboardLink,
   ClipboardListCursor,
   ClipboardListPage,
   ClipboardListRequest,
   SecretSpan,
-} from "../shared/types/clipboard";
+} from "@teneo/shared/types/clipboard";
+import { Database } from "tjs:sqlite";
+
 import { type LatestCopy, isRepeatCopy } from "./duplicate-copy";
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";

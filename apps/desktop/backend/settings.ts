@@ -5,7 +5,7 @@ import {
   defaultSettings,
   pickSettings,
   settingsChangedEvent,
-} from "../shared/types/settings";
+} from "@teneo/shared/types/settings";
 
 const settingsStoreKey = "settings";
 

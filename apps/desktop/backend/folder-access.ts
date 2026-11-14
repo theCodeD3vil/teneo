@@ -3,7 +3,7 @@
 // so setup asks up front, where a prompt is expected, rather than the first
 // time the panel lists such a file. There's no way to check without asking:
 // opening the folder is what makes macOS show its prompt.
-import type { FolderAccess } from "../shared/types/storage";
+import type { FolderAccess } from "@teneo/shared/types/storage";
 
 const protectedFolders = ["Desktop", "Documents", "Downloads"] as const;
 

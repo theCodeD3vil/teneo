@@ -1,11 +1,10 @@
-import { readonly, ref } from "vue";
-
 import {
   type AppSettings,
   defaultSettings,
   pickSettings,
   settingsChangedEvent,
-} from "../../shared/types/settings";
+} from "@teneo/shared/types/settings";
+import { readonly, ref } from "vue";
 
 // One copy per window, kept in sync by the backend's settings-changed push
 const settings = ref<AppSettings>({ ...defaultSettings });

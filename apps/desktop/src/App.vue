@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import { openPanelHotkeyId } from "@teneo/shared/types/settings";
+import { showPanelEvent } from "@teneo/shared/types/windows";
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
-import { openPanelHotkeyId } from "../shared/types/settings";
-import { showPanelEvent } from "../shared/types/windows";
 import HomeFooter from "./components/HomeFooter.vue";
 import ItemPreview from "./components/ItemPreview.vue";
 import SearchInput from "./components/SearchInput.vue";

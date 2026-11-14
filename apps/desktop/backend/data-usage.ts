@@ -1,4 +1,5 @@
-import type { DataFolderUsage } from "../shared/types/storage";
+import type { DataFolderUsage } from "@teneo/shared/types/storage";
+
 import { countClipboardMedia, listClipboardItemSizes } from "./database";
 import { appPaths } from "./paths";
 

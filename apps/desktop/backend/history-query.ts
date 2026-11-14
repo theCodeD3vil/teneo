@@ -5,8 +5,8 @@ import type {
   ClipboardListCursor,
   ClipboardListRequest,
   SecretSpan,
-} from "../shared/types/clipboard";
-import { textPreviewLength } from "../shared/types/clipboard";
+} from "@teneo/shared/types/clipboard";
+import { textPreviewLength } from "@teneo/shared/types/clipboard";
 
 /** The list's order: pinned items first, newest pin first, then newest copy
  *  first. The id breaks ties so paging never skips or repeats an item. */

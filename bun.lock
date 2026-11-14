@@ -20,6 +20,7 @@
         "@tailwindcss/vite": "catalog:",
         "@tanstack/vue-query": "^5.104.3",
         "@tanstack/vue-virtual": "^3.13.45",
+        "@teneo/shared": "workspace:*",
         "@vueuse/core": "catalog:",
         "class-variance-authority": "catalog:",
         "clsx": "catalog:",
@@ -73,6 +74,12 @@
         "unplugin-icons": "catalog:",
         "vite": "catalog:",
         "vue-tsc": "catalog:",
+      },
+    },
+    "packages/shared": {
+      "name": "@teneo/shared",
+      "devDependencies": {
+        "typescript": "catalog:",
       },
     },
   },
@@ -402,6 +409,8 @@
     "@tanstack/vue-virtual": ["@tanstack/vue-virtual@3.13.45", "", { "dependencies": { "@tanstack/virtual-core": "3.19.4" }, "peerDependencies": { "vue": "^2.7.0 || ^3.0.0" } }, "sha512-AnYTTgpps/HyHJ9jgBW6dAPVTOY9UVb1AY8Gi2Th1dTDDUiUqalbq5W2hBrW0q8/DI8V5bt9HUgTvatbvZIukQ=="],
 
     "@teneo/desktop": ["@teneo/desktop@workspace:apps/desktop"],
+
+    "@teneo/shared": ["@teneo/shared@workspace:packages/shared"],
 
     "@teneo/site": ["@teneo/site@workspace:apps/site"],
 

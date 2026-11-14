@@ -1,4 +1,4 @@
-export { clipboardHistoryChangedEvent } from "../../shared/types/clipboard";
+export { clipboardHistoryChangedEvent } from "@teneo/shared/types/clipboard";
 export type {
   ClipboardHistoryItem,
   ClipboardItemKind,
@@ -8,7 +8,7 @@ export type {
   FilePreview,
   LinkPreviewImage,
   SecretSpan,
-} from "../../shared/types/clipboard";
+} from "@teneo/shared/types/clipboard";
 
 export const clipboardItemVariants = [
   "all",

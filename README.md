@@ -136,10 +136,11 @@ Here's what's planned next. More will be added over time.
 
 Teneo is a [Bun](https://bun.sh) workspaces monorepo, with [Turborepo](https://turborepo.dev) running its builds and checks.
 
-| Folder         | What it holds                                                      |
-| -------------- | ------------------------------------------------------------------ |
-| `apps/desktop` | The Mac app: Vue frontend in `src/`, TinyJS backend in `backend/`. |
-| `apps/site`    | The landing page.                                                  |
+| Folder            | What it holds                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/desktop`    | The Mac app: Vue frontend in `src/`, TinyJS backend in `backend/`.                                                             |
+| `apps/site`       | The landing page.                                                                                                              |
+| `packages/shared` | `@teneo/shared`: the types and constants the app's frontend and backend share. It ships TypeScript source, with no build step. |
 
 Run these from the repo root:
 
@@ -152,3 +153,5 @@ Run these from the repo root:
 | `bun run lint` \| `lint:fix` \| `fmt` \| `fmt:check` | Lints and formats the whole repo, once.           |
 
 TinyJS reads everything from the current folder, so run any `tinyjs` command (`dev`, `build`, `publish`) from `apps/desktop`. The release version lives in `apps/desktop/tinyjs.json`.
+
+`tinyjs dev` restarts the backend when a file in `apps/desktop/backend` changes, but not when one in `packages/shared` does (TinyJS only watches a `shared/` folder beside `backend/`). After editing `packages/shared`, restart `bun run desktop` to pick the change up in the backend. The frontend still reloads on its own.

@@ -1,6 +1,7 @@
 // tinyjs backend — full system access via txiki.js (the 'tjs' global).
 // Every api method is callable from the page: await tiny.api.call('hello', {...})
-import { pickSettings } from "../shared/types/settings";
+import { pickSettings } from "@teneo/shared/types/settings";
+
 import { getAppIconUrl } from "./app-icons";
 import { readClipboardItem } from "./clipboard-history";
 import { getDataFolderUsage } from "./data-usage";

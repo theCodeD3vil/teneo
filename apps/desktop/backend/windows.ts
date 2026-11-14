@@ -1,4 +1,4 @@
-import { showPanelEvent } from "../shared/types/windows";
+import { showPanelEvent } from "@teneo/shared/types/windows";
 
 const settingsWindowId = "settings";
 export const setupWindowId = "setup";

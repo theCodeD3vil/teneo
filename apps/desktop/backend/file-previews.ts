@@ -1,4 +1,5 @@
-import type { FilePreview } from "../shared/types/clipboard";
+import type { FilePreview } from "@teneo/shared/types/clipboard";
+
 import { logError, pngDataUrl } from "./files";
 
 const PREVIEW_SIZE = 64;

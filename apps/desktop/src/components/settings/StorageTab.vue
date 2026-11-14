@@ -1,5 +1,10 @@
 <script lang="ts" setup>
 import { useMutation } from "@tanstack/vue-query";
+import type { ClipboardItemKind } from "@teneo/shared/types/clipboard";
+import type {
+  AppSettings,
+  HistoryDuration,
+} from "@teneo/shared/types/settings";
 import { computed, ref } from "vue";
 
 import {
@@ -29,11 +34,6 @@ import { useDataFolderUsage } from "@/composables/useDataFolderUsage";
 import { useSettings } from "@/composables/useSettings";
 import { formatFileSize } from "@/utils/file-size";
 
-import type { ClipboardItemKind } from "../../../shared/types/clipboard";
-import type {
-  AppSettings,
-  HistoryDuration,
-} from "../../../shared/types/settings";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 

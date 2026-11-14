@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/vue-query";
+import type { ExcludedApp } from "@teneo/shared/types/settings";
 import { computed } from "vue";
 
-import type { ExcludedApp } from "../../shared/types/settings";
 import { useSettings } from "./useSettings";
 
 // Installed apps rarely change, so a cached list is reused when the tab reopens
