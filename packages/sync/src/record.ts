@@ -29,6 +29,12 @@ export interface ItemRecord {
   deletedAt: number | null;
 }
 
+// A deleted item is never pinned: its pin keeps only the stamp, so two devices
+// that hold the same stamp cannot disagree about when it was pinned.
+function withoutPinTime(pin: Pin | null): Pin | null {
+  return pin && pin.at !== null ? { at: null, stamp: pin.stamp } : pin;
+}
+
 export const isTombstone = (record: ItemRecord): boolean =>
   record.deletedAt !== null;
 
@@ -93,6 +99,7 @@ export function parseRecord(input: unknown): ItemRecord | null {
     if (!isStamp(pin.stamp)) return null;
     if (pin.at !== null && !isTime(pin.at)) return null;
     pinned = { at: pin.at, stamp: pin.stamp };
+    if (r.deletedAt !== null) pinned = withoutPinTime(pinned);
   }
 
   return {
@@ -163,7 +170,10 @@ export function mergeRecords(a: ItemRecord, b: ItemRecord): ItemRecord {
     origin: a.origin,
     dateCopied: copy.dateCopied,
     sourceApp: copy.sourceApp,
-    pinned: newerPin(a.pinned, b.pinned),
+    pinned:
+      deletedAt === null
+        ? newerPin(a.pinned, b.pinned)
+        : withoutPinTime(newerPin(a.pinned, b.pinned)),
     deletedAt,
   };
 }

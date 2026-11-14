@@ -39,6 +39,7 @@ const apps = [null, "Safari", "Notes", "Xcode"];
 function randomVersion(random: () => number): ItemRecord {
   const pick = <T>(list: T[]): T => list[Math.floor(random() * list.length)]!;
   const deleted = random() < 0.3;
+  const pin = pick(pins);
   return {
     id: "item-1",
     kind: "text",
@@ -47,7 +48,7 @@ function randomVersion(random: () => number): ItemRecord {
     origin: device,
     dateCopied: 1000 + Math.floor(random() * 4),
     sourceApp: pick(apps),
-    pinned: pick(pins),
+    pinned: deleted && pin ? { at: null, stamp: pin.stamp } : pin,
     deletedAt: deleted ? 2000 + Math.floor(random() * 4) : null,
   };
 }
@@ -87,6 +88,33 @@ test("a merge never loses a delete, a later copy or a newer pin", () => {
       .at(-1);
     expect(merged.pinned?.stamp).toBe(newestStamp);
   }
+});
+
+test("a deleted item keeps its pin stamp but not its pin time", () => {
+  const pinned = { at: 500, stamp: stamp(2) };
+  const live = {
+    ...randomVersion(seeded(9)),
+    text: "x",
+    deletedAt: null,
+    pinned,
+  };
+  const deleted = {
+    ...live,
+    text: null,
+    deletedAt: 3000,
+    pinned: { at: null, stamp: stamp(1) },
+  };
+  for (const merged of [
+    mergeRecords(live, deleted),
+    mergeRecords(deleted, live),
+  ]) {
+    expect(merged.pinned).toEqual({ at: null, stamp: stamp(2) });
+  }
+  // and a deleted record from a peer is read the same way
+  expect(parseRecord({ ...deleted, pinned })?.pinned).toEqual({
+    at: null,
+    stamp: stamp(2),
+  });
 });
 
 test("the later copy brings its own source app", () => {

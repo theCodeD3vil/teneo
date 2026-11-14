@@ -141,6 +141,7 @@ Teneo is a [Bun](https://bun.sh) workspaces monorepo, with [Turborepo](https://t
 | `apps/desktop`    | The Mac app: Vue frontend in `src/`, TinyJS backend in `backend/`.                                                             |
 | `apps/site`       | The landing page.                                                                                                              |
 | `packages/shared` | `@teneo/shared`: the types and constants the app's frontend and backend share. It ships TypeScript source, with no build step. |
+| `packages/sync`   | `@teneo/sync`: the clipboard sync core (merge rules, protocol, engine), with no runtime of its own. Not turned on yet.         |
 
 Run these from the repo root:
 
@@ -158,6 +159,7 @@ Run these from the repo root:
 - `bun run desktop:reset-dev-data` deletes the dev folders and the dev keys and Keychain entry. It leaves the installed app's data alone.
 - `TENEO_REAL_DATA=1 bun run desktop` runs on the real data instead, to check a change against a real history. Teneo logs a warning at startup when it does. Back up `~/Library/Application Support/com.michael.teneo` first.
 - Teneo allows one instance per app id, so quit the installed Teneo before `bun run desktop`.
+- `bun run test:runtime`, from `apps/desktop`, runs the storage tests that need the real TinyJS runtime (`tjs:sqlite`; `bun test` has none). It bundles the test with esbuild and runs it with `~/.tinyjs/bin/tjs` on a temp folder, never on your history. Turbo's `test` leaves it out, since it needs that runtime installed.
 
 TinyJS reads everything from the current folder, so run any `tinyjs` command (`dev`, `build`, `publish`) from `apps/desktop`. The release version lives in `apps/desktop/tinyjs.json`.
 

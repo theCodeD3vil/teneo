@@ -13,6 +13,10 @@ export interface AppSettings {
    *  Changed only through the setSecretEncryption api, which also encrypts
    *  or decrypts what's already saved */
   encryptSecrets: boolean;
+  /** keep clipboard text in step with the user's other devices. Off until the
+   *  user turns it on; changed only through the sync api, which also starts or
+   *  stops the sync engine */
+  syncEnabled: boolean;
   /** show a copied link's site icon, fetched from the site itself */
   showLinkPreviews: boolean;
   /** bundle ids of apps the user added to the ignore list; known password
@@ -38,6 +42,7 @@ export const defaultSettings: AppSettings = {
   ignorePasswords: true,
   maskSecrets: true,
   encryptSecrets: false,
+  syncEnabled: false,
   showLinkPreviews: true,
   excludedApps: [],
   openPanelShortcut: "",

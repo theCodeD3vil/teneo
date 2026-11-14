@@ -7,7 +7,7 @@ export const devSuffix = "-dev";
 /** Every `app.store` key and Keychain entry Teneo writes, by its normal name.
  *  `bun run desktop:reset-dev-data` removes the dev copies of these, so a new
  *  one goes here as well as through `devName()`. */
-export const appStoreKeys = ["settings", "setupComplete"];
+export const appStoreKeys = ["settings", "setupComplete", "syncDeviceId"];
 export const appSecretNames = ["history-encryption-key"];
 
 type Env = Record<string, string | undefined>;

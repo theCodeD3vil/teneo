@@ -89,8 +89,13 @@ export const api: Record<string, TinyApiHandler> = {
   settings: () => getSettings(),
   updateSettings: async (changes, app) => {
     const wasCheckingForUpdates = getSettings().checkForUpdates;
-    // encryption moves saved keys too, so it only changes through setSecretEncryption
-    const { encryptSecrets: _, ...otherChanges } = pickSettings(changes);
+    // encryption moves saved keys too, so it only changes through
+    // setSecretEncryption; sync starts and stops an engine, so it has its own api
+    const {
+      encryptSecrets: _encryptSecrets,
+      syncEnabled: _syncEnabled,
+      ...otherChanges
+    } = pickSettings(changes);
     const settings = await updateSettings(otherChanges, app);
     await syncOpenPanelShortcut(app);
     await trimClipboardHistory(app); // a tighter history limit applies now
