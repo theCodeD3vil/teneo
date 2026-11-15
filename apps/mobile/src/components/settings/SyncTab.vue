@@ -1,9 +1,10 @@
 <script lang="ts" setup>
-import { Button } from "@teneo/ui/components/button";
 import { Input } from "@teneo/ui/components/input";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { computed, ref } from "vue";
+import GoIcon from "~icons/tabler/arrow-right";
+import DeviceIcon from "~icons/tabler/devices";
 import ScanIcon from "~icons/tabler/scan";
 
 import { canScanQrCode, useQrScanner } from "../../composables/useQrScanner";
@@ -93,93 +94,118 @@ const isTurnOffWarningOpen = ref(false);
 </script>
 
 <template>
-  <div v-if="status" class="mx-auto grid max-w-xl gap-y-6">
+  <div v-if="status" class="mx-auto grid max-w-xl gap-y-5">
     <!-- sync is off -->
     <template v-if="!isOn">
-      <SettingsSection>
-        <SettingsField v-if="canScanQrCode">
-          <template #label>Join your other devices</template>
-          <template #description>Scan the QR code on your Mac</template>
-          <Button
-            size="sm"
+      <div class="grid gap-y-3">
+        <!-- scanning is the quick way in, so it leads -->
+        <div
+          v-if="canScanQrCode"
+          class="bg-panel text-panel-foreground flex flex-col gap-5 rounded-[2rem] p-6">
+          <span
+            class="grid size-[3.25rem] place-items-center rounded-[1.125rem] bg-white/12">
+            <ScanIcon class="size-[1.625rem]" />
+          </span>
+          <div class="grid gap-1">
+            <span
+              class="font-heading text-[1.5rem] leading-[1.875rem] font-semibold">
+              Join your other devices
+            </span>
+            <span class="text-panel-muted text-[1rem] leading-[1.5rem]">
+              Scan the QR code on your Mac
+            </span>
+          </div>
+          <button
+            type="button"
+            class="font-heading text-foreground dark:text-background flex h-[3.5rem] items-center justify-between rounded-full bg-white pr-1.5 pl-6 text-[1.125rem] font-semibold transition-transform active:scale-[0.98] disabled:opacity-60"
             :disabled="isBusy || isScanning"
             @click="scanAndJoin">
-            <Spinner v-if="isPreparing || (isBusy && !isJoining)" />
-            <ScanIcon v-else />
             Scan
-          </Button>
-        </SettingsField>
-        <SettingsField>
-          <template #label>
-            {{
-              canScanQrCode ? "Type the join code" : "Join your other devices"
-            }}
-          </template>
-          <template #description>
-            {{
-              canScanQrCode
-                ? "If the camera can't be used"
-                : "Use the join code from your Mac"
-            }}
-          </template>
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="isBusy"
-            @click="isJoining = !isJoining">
-            {{ isJoining ? "Cancel" : "Join" }}
-          </Button>
-          <template v-if="isJoining" #footer>
-            <form class="flex gap-2" @submit.prevent="joinWithCode">
-              <Input
-                :model-value="recoveryCode"
-                placeholder="Join code"
-                autocomplete="off"
-                autocapitalize="characters"
-                spellcheck="false"
-                enterkeyhint="go"
-                class="font-mono"
-                @update:model-value="recoveryCode = String($event)" />
-              <Button
-                type="submit"
-                size="sm"
-                class="h-9"
-                :disabled="isBusy || !recoveryCode.trim()">
-                <Spinner v-if="isBusy" />
-                Connect
-              </Button>
-            </form>
-          </template>
-        </SettingsField>
-      </SettingsSection>
-      <p class="text-foreground/60 -mt-3 px-1 text-xs text-balance">
-        On your Mac, open Teneo's Settings › Sync and choose Add a device to see
-        the {{ canScanQrCode ? "QR code and join code" : "code" }}. Your history
-        syncs over Wi-Fi, encrypted, with no account or server.
-      </p>
+            <span
+              class="bg-primary text-primary-foreground grid size-[2.75rem] place-items-center rounded-full">
+              <Spinner v-if="isPreparing || (isBusy && !isJoining)" />
+              <GoIcon v-else class="size-[1.25rem]" />
+            </span>
+          </button>
+        </div>
+        <SettingsSection>
+          <SettingsField>
+            <template #label>
+              {{
+                canScanQrCode ? "Type the join code" : "Join your other devices"
+              }}
+            </template>
+            <template #description>
+              {{
+                canScanQrCode
+                  ? "If the camera can't be used"
+                  : "Use the join code from your Mac"
+              }}
+            </template>
+            <button
+              type="button"
+              class="pill-button"
+              :disabled="isBusy"
+              @click="isJoining = !isJoining">
+              {{ isJoining ? "Cancel" : "Join" }}
+            </button>
+            <template v-if="isJoining" #footer>
+              <form class="flex gap-2" @submit.prevent="joinWithCode">
+                <Input
+                  :model-value="recoveryCode"
+                  placeholder="Join code"
+                  autocomplete="off"
+                  autocapitalize="characters"
+                  spellcheck="false"
+                  enterkeyhint="go"
+                  class="bg-well border-input h-[2.75rem] min-w-0 rounded-full px-[1.125rem] font-mono text-[1rem]"
+                  @update:model-value="recoveryCode = String($event)" />
+                <button
+                  type="submit"
+                  class="pill-button bg-cta text-cta-foreground border-transparent"
+                  :disabled="isBusy || !recoveryCode.trim()">
+                  <Spinner v-if="isBusy" />
+                  Connect
+                </button>
+              </form>
+            </template>
+          </SettingsField>
+        </SettingsSection>
+        <p class="text-muted-foreground px-2 pt-1 text-xs leading-[1.3125rem]">
+          On your Mac, open Teneo's Settings › Sync and choose Add a device to
+          see the {{ canScanQrCode ? "QR code and join code" : "code" }}. Your
+          history syncs over Wi-Fi, encrypted, with no account or server.
+        </p>
+      </div>
     </template>
 
     <!-- sync is on -->
     <template v-else>
-      <SettingsSection>
-        <SettingsField>
-          <template #label>Sync is on</template>
-          <template #description>
+      <div
+        class="bg-panel text-panel-foreground flex items-center gap-4 rounded-[2rem] py-5 pr-5 pl-6">
+        <div class="grid min-w-0 flex-1 gap-0.5">
+          <span
+            class="font-heading text-[1.375rem] leading-[1.75rem] font-semibold">
+            Sync is on
+          </span>
+          <span class="text-panel-muted text-[0.9375rem] leading-[1.375rem]">
             {{ summary }}
-            <span v-if="status.errorMessage" class="text-destructive block">
+            <span v-if="status.errorMessage" class="block text-[#ff9a8f]">
               {{ status.errorMessage }}
             </span>
-          </template>
-          <Spinner v-if="isBusy" />
-          <Button
-            v-else
-            variant="outline"
-            size="sm"
-            @click="isTurnOffWarningOpen = true">
-            Turn off
-          </Button>
-        </SettingsField>
+          </span>
+        </div>
+        <Spinner v-if="isBusy" />
+        <button
+          v-else
+          type="button"
+          class="h-[2.75rem] shrink-0 rounded-full border border-white/35 px-[1.125rem] text-[0.9375rem] font-semibold active:bg-white/10"
+          @click="isTurnOffWarningOpen = true">
+          Turn off
+        </button>
+      </div>
 
+      <SettingsSection>
         <SettingsField>
           <template #label>Receive in the background</template>
           <template #description>
@@ -194,20 +220,36 @@ const isTurnOffWarningOpen = ref(false);
 
         <p
           v-if="status.devices.length === 0"
-          class="text-foreground/60 px-3 py-2.5 text-sm">
+          class="text-muted-foreground px-[1.125rem] py-4 text-sm">
           No other devices yet
         </p>
-        <SettingsField v-for="device in status.devices" :key="device.id">
-          <template #label>{{ device.name }}</template>
-          <template #description>
-            {{ device.platform }} · {{ lastSeen(device) }}
-          </template>
+        <div
+          v-for="device in status.devices"
+          :key="device.id"
+          class="flex items-center gap-[0.875rem] px-[1.125rem] py-[0.875rem]">
+          <span
+            class="grid size-[2.75rem] shrink-0 place-items-center rounded-[0.875rem]"
+            :class="
+              device.connected
+                ? 'bg-tint-blue text-tint-blue-ink'
+                : 'bg-tint-neutral text-tint-neutral-ink'
+            ">
+            <DeviceIcon class="size-[1.375rem]" />
+          </span>
+          <div class="grid min-w-0 flex-1 gap-0.5">
+            <span class="truncate text-sm font-semibold">{{
+              device.name
+            }}</span>
+            <span class="text-muted-foreground text-xs">
+              {{ device.platform }} · {{ lastSeen(device) }}
+            </span>
+          </div>
           <span
             v-if="device.connected"
-            class="bg-success size-2 rounded-full"
+            class="bg-success ring-tint-mint mr-1 size-[0.625rem] rounded-full ring-[5px]"
             role="img"
             aria-label="Connected" />
-        </SettingsField>
+        </div>
       </SettingsSection>
 
       <SettingsSection>
@@ -220,10 +262,10 @@ const isTurnOffWarningOpen = ref(false);
       </SettingsSection>
     </template>
 
-    <p v-if="scanError || error" class="text-destructive text-sm">
+    <p v-if="scanError || error" class="text-destructive px-2 text-sm">
       {{ scanError || error }}
     </p>
-    <p v-else-if="notice && !isOn" class="text-foreground/60 text-sm">
+    <p v-else-if="notice && !isOn" class="text-muted-foreground px-2 text-sm">
       {{ notice }}
     </p>
 

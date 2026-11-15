@@ -14,7 +14,7 @@ const fraction = computed(() =>
 
 <template>
   <div
-    class="bg-foreground/10 h-1.5 overflow-hidden rounded-full"
+    class="bg-muted h-[0.625rem] overflow-hidden rounded-full"
     role="progressbar"
     aria-label="Download progress"
     aria-valuemin="0"

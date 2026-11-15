@@ -11,7 +11,7 @@ defineProps<{
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
     <SettingsHeader back-label="Back to settings">
-      <span class="text-lg font-medium">{{ settingsPages[page].title }}</span>
+      <span class="screen-title">{{ settingsPages[page].title }}</span>
     </SettingsHeader>
     <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4">
       <component :is="settingsPages[page].content" />

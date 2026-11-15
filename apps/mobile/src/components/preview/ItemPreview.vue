@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
-import Button from "@teneo/ui/components/button/Button.vue";
 import { onUnmounted, ref, watch } from "vue";
 import TickIcon from "~icons/tabler/check";
 import BackIcon from "~icons/tabler/chevron-left";
@@ -13,7 +12,6 @@ import DeleteIcon from "~icons/tabler/trash";
 import { useClient } from "../../client";
 import { showCopiedNotice } from "../../composables/useCopiedNotice";
 import { shareItem } from "../../utils/share";
-import BetaBadge from "../BetaBadge.vue";
 import ColorPreview from "./ColorPreview.vue";
 import LinkPreview from "./LinkPreview.vue";
 import TextPreview from "./TextPreview.vue";
@@ -34,6 +32,10 @@ watch(
   () => props.item.id,
   () => (convertedText.value = null),
 );
+
+// a round button in the bar at the foot of the preview
+const actionClass =
+  "grid size-[3rem] place-items-center rounded-full transition-colors active:bg-cta-foreground/15 [&_svg]:size-[1.375rem]";
 
 const isCopied = ref(false);
 let copiedTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -73,46 +75,16 @@ onUnmounted(() => clearTimeout(copiedTimeout));
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-3">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          class="text-foreground/70"
-          aria-label="Back to clipboard history"
-          @click="emit('back')">
-          <BackIcon />
-        </Button>
-        <BetaBadge />
-      </div>
-      <div class="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          class="text-foreground/70"
-          :aria-label="item.pinned ? 'Unpin' : 'Pin'"
-          @click="togglePin">
-          <PinOffIcon v-if="item.pinned" />
-          <PinIcon v-else />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="text-foreground/70"
-          aria-label="Share"
-          @click="share">
-          <ShareIcon />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="text-foreground/70 hover:text-destructive active:text-destructive"
-          aria-label="Delete"
-          @click="deleteItem">
-          <DeleteIcon />
-        </Button>
-      </div>
+  <!-- positioned, so a text's case buttons can sit in the top bar's free end -->
+  <div class="relative flex min-h-0 flex-1 flex-col gap-4">
+    <div class="flex shrink-0 items-center gap-[0.625rem]">
+      <button
+        type="button"
+        class="round-button"
+        aria-label="Back to clipboard history"
+        @click="emit('back')">
+        <BackIcon />
+      </button>
     </div>
 
     <LinkPreview v-if="item.link" :url="item.link.url" />
@@ -127,28 +99,57 @@ onUnmounted(() => clearTimeout(copiedTimeout));
       <img
         :src="item.image"
         alt=""
-        class="max-h-full max-w-full rounded-md object-contain" />
+        class="max-h-full max-w-full rounded-[2rem] object-contain" />
     </div>
     <div
       v-else
-      class="text-foreground/50 flex flex-1 items-center justify-center text-sm">
+      class="text-muted-foreground flex flex-1 items-center justify-center text-sm">
       This item can't be previewed on your phone yet.
     </div>
 
-    <Button size="lg" class="w-full shrink-0" @click="copy">
-      <Transition
-        mode="out-in"
-        enter-active-class="transition-all duration-200 ease-out"
-        enter-from-class="translate-y-1 opacity-0 scale-95"
-        leave-active-class="transition-all duration-150 ease-in"
-        leave-to-class="-translate-y-1 opacity-0 scale-95">
-        <span v-if="isCopied" class="flex items-center gap-1.5">
-          <TickIcon /> Copied
-        </span>
-        <span v-else class="flex items-center gap-1.5">
-          <CopyIcon /> Copy
-        </span>
-      </Transition>
-    </Button>
+    <!-- what can be done with the item, in one bar: copying it leads -->
+    <div
+      class="bg-cta text-cta-foreground flex h-[4rem] shrink-0 items-center justify-between rounded-full p-2">
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          :class="actionClass"
+          :aria-label="item.pinned ? 'Unpin' : 'Pin'"
+          @click="togglePin">
+          <PinOffIcon v-if="item.pinned" />
+          <PinIcon v-else />
+        </button>
+        <button
+          type="button"
+          :class="actionClass"
+          aria-label="Share"
+          @click="share">
+          <ShareIcon />
+        </button>
+        <button
+          type="button"
+          :class="[actionClass, 'text-[#ff9a8f] dark:text-[#b3261e]']"
+          aria-label="Delete"
+          @click="deleteItem">
+          <DeleteIcon />
+        </button>
+      </div>
+      <button
+        type="button"
+        class="bg-primary text-primary-foreground font-heading flex h-[3rem] items-center gap-2 rounded-full pr-5 pl-4 text-[1.0625rem] font-semibold transition-transform active:scale-[0.97] [&_svg]:size-[1.375rem]"
+        @click="copy">
+        <TickIcon v-if="isCopied" />
+        <CopyIcon v-else />
+        <Transition
+          mode="out-in"
+          enter-active-class="transition-all duration-200 ease-out"
+          enter-from-class="translate-y-1 opacity-0"
+          leave-active-class="transition-all duration-150 ease-in"
+          leave-to-class="-translate-y-1 opacity-0">
+          <span v-if="isCopied" key="copied">Copied</span>
+          <span v-else key="copy">Copy</span>
+        </Transition>
+      </button>
+    </div>
   </div>
 </template>

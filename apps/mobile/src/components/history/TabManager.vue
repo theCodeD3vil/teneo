@@ -1,19 +1,6 @@
 <script setup lang="ts">
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@teneo/ui/components/tabs";
-import {
-  type ComponentPublicInstance,
-  computed,
-  nextTick,
-  onUnmounted,
-  ref,
-  watch,
-} from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 
 import { useClipboardList } from "../../composables/useClipboard";
 import { emptyMessages, tabValues, type TabVariant } from "../../types/tabs";
@@ -28,7 +15,8 @@ const emit = defineEmits<{
   (e: "preview", item: ClipboardHistoryItem): void;
 }>();
 
-const selectedTab = ref<TabVariant>("all");
+// the dock in the footer picks the tab; a swipe here picks it too
+const selectedTab = defineModel<TabVariant>("tab", { required: true });
 // what was typed, once typing pauses: shown as typed, searched for in lower case
 const debouncedSearchText = ref(props.searchQuery.trim());
 const debouncedSearchQuery = computed(() =>
@@ -60,7 +48,6 @@ onUnmounted(() => clearTimeout(searchDebounceTimeout));
 // list slides with the finger. A tap on a tab slides the same way.
 
 const swipeArea = ref<HTMLElement | null>(null);
-const tabBar = ref<ComponentPublicInstance | null>(null);
 
 const axisLockDistance = 10; // px before a drag counts as sideways or a scroll
 const commitFraction = 0.25; // of the width, dragged past this switches tabs
@@ -109,6 +96,8 @@ function measureSwipeWidth(): number {
 function startSwipe(event: PointerEvent): void {
   didSwipe = false;
   if (event.pointerType === "mouse" || isSwitching) return;
+  // the pinned shelf scrolls sideways itself
+  if ((event.target as Element | null)?.closest("[data-no-tab-swipe]")) return;
   swipe = {
     x: event.clientX,
     y: event.clientY,
@@ -184,30 +173,12 @@ function waitForList(): Promise<void> {
   });
 }
 
-// scrollIntoView would nudge the page vertically too; only the bar moves
-function centerActiveTab(): void {
-  const bar = tabBar.value?.$el as HTMLElement | undefined;
-  const tab = bar?.querySelector?.("[data-state=active]");
-  if (!bar || !tab) return;
-  const barBox = bar.getBoundingClientRect();
-  const tabBox = tab.getBoundingClientRect();
-  bar.scrollTo({
-    left:
-      bar.scrollLeft +
-      tabBox.left -
-      barBox.left -
-      (barBox.width - tabBox.width) / 2,
-    behavior: reducedMotion.matches ? "auto" : "smooth",
-  });
-}
-
 const nextFrame = () =>
   new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve)),
   );
 
 watch(selectedTab, async (tab, previous) => {
-  void nextTick(centerActiveTab);
   isSwitching = true;
   const step = Math.sign(tabValues.indexOf(tab) - tabValues.indexOf(previous));
   swipeTransition.value = "none";
@@ -220,46 +191,27 @@ watch(selectedTab, async (tab, previous) => {
 </script>
 
 <template>
-  <Tabs
-    v-model="selectedTab"
-    class="flex min-h-0 w-full flex-1 flex-col bg-transparent!">
-    <!-- scrolls sideways if a narrow phone can't fit every tab -->
-    <TabsList
-      ref="tabBar"
-      class="h-auto! w-full shrink-0 touch-pan-x [scrollbar-width:none] justify-start gap-x-2 overflow-x-auto overflow-y-hidden bg-transparent! p-0!">
-      <div v-for="tabItem in tabValues" :key="tabItem" class="shrink-0">
-        <TabsTrigger
-          class="data-active:bg-primary/10! dark:data-active:bg-primary/20! bg-foreground/5 dark:bg-foreground/10 data-active:text-primary! h-9 min-w-14 rounded-full border-none! px-3.5 text-sm font-normal capitalize shadow-none!"
-          :value="tabItem">
-          {{ tabItem }}
-        </TabsTrigger>
-      </div>
-    </TabsList>
-    <TabsContent
-      :value="selectedTab"
-      force-mount
-      class="mt-3 min-h-0 flex-1 overflow-hidden bg-transparent!">
-      <div
-        ref="swipeArea"
-        class="size-full"
-        :style="swipeStyle"
-        @pointerdown="startSwipe"
-        @pointermove="moveSwipe"
-        @pointerup="endSwipe"
-        @pointercancel="cancelSwipe"
-        @click.capture="swallowSwipeClick">
-        <AllTabContent
-          :items="items"
-          :tab="selectedTab"
-          :loading="loading"
-          :error="error"
-          :has-more="hasMore"
-          :loading-more="loadingMore"
-          :empty-message="emptyMessages[selectedTab]"
-          :search-query="debouncedSearchText"
-          @preview="emit('preview', $event)"
-          @load-more="loadMore" />
-      </div>
-    </TabsContent>
-  </Tabs>
+  <div class="mt-4 min-h-0 w-full flex-1 overflow-hidden">
+    <div
+      ref="swipeArea"
+      class="size-full"
+      :style="swipeStyle"
+      @pointerdown="startSwipe"
+      @pointermove="moveSwipe"
+      @pointerup="endSwipe"
+      @pointercancel="cancelSwipe"
+      @click.capture="swallowSwipeClick">
+      <AllTabContent
+        :items="items"
+        :tab="selectedTab"
+        :loading="loading"
+        :error="error"
+        :has-more="hasMore"
+        :loading-more="loadingMore"
+        :empty-message="emptyMessages[selectedTab]"
+        :search-query="debouncedSearchText"
+        @preview="emit('preview', $event)"
+        @load-more="loadMore" />
+    </div>
+  </div>
 </template>

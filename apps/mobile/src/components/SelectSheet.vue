@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import CheckIcon from "~icons/tabler/check";
-import SelectorIcon from "~icons/tabler/selector";
+import SelectorIcon from "~icons/tabler/chevron-down";
 
 import BottomSheet from "./BottomSheet.vue";
-import SheetGroup from "./SheetGroup.vue";
 
 export interface SelectSheetOption {
   value: string;
@@ -34,28 +33,36 @@ function select(option: SelectSheetOption): void {
 <template>
   <button
     type="button"
-    class="border-input dark:bg-input/30 active:bg-foreground/5 flex h-9 items-center gap-x-1.5 rounded-md border pr-2 pl-3 text-sm whitespace-nowrap shadow-xs transition-colors"
+    class="bg-well active:bg-muted flex h-[2.75rem] items-center gap-x-1.5 rounded-full pr-3 pl-[1.125rem] text-[0.9375rem] font-semibold whitespace-nowrap transition-colors"
     @click="isOpen = true">
     {{ selectedLabel }}
-    <SelectorIcon class="text-muted-foreground size-4" aria-hidden="true" />
+    <SelectorIcon class="size-[1.125rem]" aria-hidden="true" />
   </button>
   <BottomSheet
     v-model:open="isOpen"
     :title="props.title"
     :description="props.description">
-    <SheetGroup role="listbox" :aria-label="props.title">
+    <div role="listbox" :aria-label="props.title" class="grid gap-2">
       <button
         v-for="option in props.options"
         :key="option.value"
         type="button"
         role="option"
         :aria-selected="option.value === value"
-        class="active:bg-foreground/5 flex h-12 items-center justify-between px-4 text-left text-sm transition-colors"
-        :class="option.value === value && 'text-primary'"
+        class="flex h-[3.5rem] items-center justify-between rounded-full pr-2 pl-[1.375rem] text-left text-sm transition-colors"
+        :class="
+          option.value === value
+            ? 'bg-cta text-cta-foreground font-semibold'
+            : 'bg-card active:bg-muted font-medium'
+        "
         @click="select(option)">
         {{ option.label }}
-        <CheckIcon v-if="option.value === value" class="size-5" />
+        <span
+          v-if="option.value === value"
+          class="bg-primary text-primary-foreground grid size-[2.5rem] place-items-center rounded-full">
+          <CheckIcon class="size-[1.25rem]" />
+        </span>
       </button>
-    </SheetGroup>
+    </div>
   </BottomSheet>
 </template>

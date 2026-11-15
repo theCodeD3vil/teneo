@@ -1,6 +1,5 @@
 <script lang="ts" setup>
-import { Button } from "@teneo/ui/components/button";
-import LinkIcon from "~icons/tabler/external-link";
+import LinkIcon from "~icons/tabler/arrow-up-right";
 
 const props = defineProps<{ name: string; url: string }>();
 
@@ -11,14 +10,12 @@ function openLink(): void {
 </script>
 
 <template>
-  <span class="text-foreground/60 flex items-center gap-1 text-sm">
+  <button
+    type="button"
+    class="bg-tint-blue text-tint-blue-ink flex h-[2.75rem] items-center gap-1.5 rounded-full pr-[0.875rem] pl-[1.125rem] text-[0.9375rem] font-semibold transition-transform active:scale-[0.97]"
+    :aria-label="`Open ${url}`"
+    @click="openLink">
     {{ name }}
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      :aria-label="`Open ${url}`"
-      @click="openLink">
-      <LinkIcon />
-    </Button>
-  </span>
+    <LinkIcon class="size-[1.125rem]" />
+  </button>
 </template>

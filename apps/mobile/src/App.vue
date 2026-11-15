@@ -36,14 +36,17 @@ const pageDepthStyle = computed(() => ({
 // A screen opened pushes in from the right while the one under it slides out
 // left, and back the other way, as the desktop preview does. The leaving
 // screen is lifted out of the flow so both share the window mid-swap.
+// The screens are full of opaque cards, so two of them laid over each other
+// read as a muddle. The leaving one is gone quickly, and the new one waits
+// for most of that before it comes in.
 const screenTransition = computed(() => {
   const isForward = direction.value === "forward";
   return {
     enterActiveClass:
-      "transition-all duration-200 ease-out motion-reduce:transition-none",
+      "transition-all duration-200 delay-75 ease-out motion-reduce:transition-none",
     enterFromClass: `${isForward ? "translate-x-6" : "-translate-x-6"} opacity-0`,
     leaveActiveClass:
-      "absolute inset-4 transition-all duration-150 ease-in motion-reduce:transition-none",
+      "absolute inset-4 transition-all duration-100 ease-out motion-reduce:transition-none",
     leaveToClass: `${isForward ? "-translate-x-6" : "translate-x-6"} opacity-0`,
   };
 });
