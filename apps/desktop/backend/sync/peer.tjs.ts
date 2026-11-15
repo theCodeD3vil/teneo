@@ -132,7 +132,7 @@ await loadSettings(app);
 let service: SyncService | null = null;
 let manager: SyncManager | null = null;
 if (appMode) {
-  tjs.env.TENEO_SYNC = "1"; // the app's feature switch
+  tjs.env.TENEO_SYNC = "1"; // on whatever the shell says: =0 would switch it off
   manager = createSyncManager(app);
   await initializeDatabase(app); // the app does this before it starts sync
   await manager.startIfEnabled();

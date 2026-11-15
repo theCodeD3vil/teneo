@@ -33,8 +33,8 @@ const allTabs = [
 
 type SettingsTab = (typeof allTabs)[number]["value"];
 
-// Sync is behind a switch until it ships: the tab shows only when the backend
-// says it is available
+// The tab shows when the backend says sync is on for this run: it is, unless
+// the app was started with TENEO_SYNC=0
 const { status: syncStatus } = useSyncStatus();
 const settingsTabs = computed(() =>
   allTabs.filter((tab) => tab.value !== "sync" || syncStatus.value?.available),

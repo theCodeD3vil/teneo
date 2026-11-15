@@ -1,13 +1,7 @@
-// Sync is not in full releases yet. It is on in a beta build, so testers can
-// try it, and wherever TENEO_SYNC=1 asks for it.
-import { isBetaVersion } from "../app-identity";
+// Sync ships in every build of Teneo: full releases, betas and dev runs.
+// TENEO_SYNC=0 switches it off for one run, to see the app without it.
 
-export { isBetaVersion };
-
-/** Whether this version of Teneo, started with this environment, has sync. */
-export function isSyncAvailableIn(
-  env: { TENEO_SYNC?: string },
-  version: string,
-): boolean {
-  return env.TENEO_SYNC === "1" || isBetaVersion(version);
+/** Whether Teneo, started with this environment, has sync. */
+export function isSyncAvailableIn(env: { TENEO_SYNC?: string }): boolean {
+  return env.TENEO_SYNC !== "0";
 }
