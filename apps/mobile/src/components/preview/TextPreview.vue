@@ -1,28 +1,14 @@
 <script setup lang="ts">
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
-import { ButtonGroup } from "@teneo/ui/components/button-group";
-import Button from "@teneo/ui/components/button/Button.vue";
 import { detectCodeLanguage, highlightCode } from "@teneo/ui/utils/highlight";
 import { maskSecrets } from "@teneo/ui/utils/secrets";
 import { convertCase, type TextCase } from "@teneo/ui/utils/text-case";
 import { computedAsync } from "@vueuse/core";
-import {
-  type Component,
-  type ComponentPublicInstance,
-  computed,
-  ref,
-  watch,
-} from "vue";
-import ResetIcon from "~icons/tabler/arrow-back-up";
+import { type ComponentPublicInstance, computed, ref, watch } from "vue";
 import RevealIcon from "~icons/tabler/eye";
 import ConcealIcon from "~icons/tabler/eye-off";
-import CapitalizeIcon from "~icons/tabler/letter-case";
-import LowerCaseIcon from "~icons/tabler/letter-case-lower";
-import CamelCaseIcon from "~icons/tabler/letter-case-toggle";
-import UpperCaseIcon from "~icons/tabler/letter-case-upper";
-import KebabCaseIcon from "~icons/tabler/minus";
-import SnakeCaseIcon from "~icons/tabler/underline";
+import ResetIcon from "~icons/tabler/restore";
 
 import { useSettings } from "../../composables/useSettings";
 
@@ -36,16 +22,17 @@ const convertedText = defineModel<string | null>("convertedText", {
 });
 
 const caseActions = [
-  { textCase: "upper", label: "UPPERCASE", icon: UpperCaseIcon },
-  { textCase: "lower", label: "lowercase", icon: LowerCaseIcon },
-  { textCase: "capitalize", label: "Capitalize", icon: CapitalizeIcon },
-  { textCase: "camel", label: "camelCase", icon: CamelCaseIcon },
-  { textCase: "snake", label: "snake_case", icon: SnakeCaseIcon },
-  { textCase: "kebab", label: "kebab-case", icon: KebabCaseIcon },
+  // each button shows its case in a few letters
+  { textCase: "upper", label: "UPPERCASE", glyph: "AA" },
+  { textCase: "lower", label: "lowercase", glyph: "aa" },
+  { textCase: "capitalize", label: "Capitalize", glyph: "Aa" },
+  { textCase: "camel", label: "camelCase", glyph: "aB" },
+  { textCase: "snake", label: "snake_case", glyph: "a_b" },
+  { textCase: "kebab", label: "kebab-case", glyph: "a-b" },
 ] as const satisfies ReadonlyArray<{
   textCase: TextCase;
   label: string;
-  icon: Component;
+  glyph: string;
 }>;
 
 const { settings } = useSettings();
@@ -115,8 +102,8 @@ const virtualizer = useVirtualizer(
     getScrollElement: () => viewport.value,
     estimateSize: () => 23,
     overscan: 10,
-    paddingStart: 12,
-    paddingEnd: 12,
+    paddingStart: 24,
+    paddingEnd: 24,
   })),
 );
 const virtualRows = computed(() => virtualizer.value.getVirtualItems());
@@ -141,76 +128,89 @@ function toggleCase(nextCase: TextCase): void {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-2">
-    <div class="flex min-h-9 items-center gap-2">
-      <ButtonGroup v-if="!hasSecrets">
-        <Button
+  <div class="flex min-h-0 flex-1 flex-col gap-4">
+    <!-- the case buttons sit in the screen's top bar, beside the back button:
+         placed against the screen, over the bar's free end -->
+    <div
+      class="absolute top-0 right-0 left-[3.625rem] flex h-[3rem] items-center justify-end gap-2">
+      <div
+        v-if="!hasSecrets"
+        class="bg-card flex shrink-0 rounded-full p-[3px] font-mono">
+        <button
           v-for="action in caseActions"
           :key="action.textCase"
-          :variant="textCase === action.textCase ? 'secondary' : 'outline'"
-          size="icon"
+          type="button"
+          class="h-[2.5rem] w-[2.625rem] rounded-full text-[0.8125rem] font-medium transition-colors"
+          :class="textCase === action.textCase && 'bg-cta text-cta-foreground'"
           :aria-label="action.label"
           :aria-pressed="textCase === action.textCase"
           @click="toggleCase(action.textCase)">
-          <component :is="action.icon" />
-        </Button>
-      </ButtonGroup>
+          {{ action.glyph }}
+        </button>
+      </div>
       <template v-else-if="settings.hideSecrets">
-        <Button
-          variant="outline"
-          size="sm"
-          class="text-xs"
+        <button
+          type="button"
+          class="pill-button"
           @click="isRevealed = !isRevealed">
           <ConcealIcon v-if="isRevealed" />
           <RevealIcon v-else />
           {{ isRevealed ? "Hide" : "Reveal" }}
-        </Button>
-        <span class="text-foreground/50 truncate text-xs">
+        </button>
+        <span class="text-muted-foreground truncate text-[0.8125rem]">
           {{ secretLabels }}
         </span>
       </template>
-      <Button
-        v-if="textCase"
-        variant="ghost"
-        size="icon"
-        aria-label="Reset text"
-        @click="textCase = null">
-        <ResetIcon />
-      </Button>
+      <!-- it grows out of the bar's end and shrinks back into it, so the
+           case buttons slide over instead of jumping -->
+      <Transition name="reset-button">
+        <button
+          v-if="textCase"
+          type="button"
+          class="text-muted-foreground active:bg-muted grid h-[2.75rem] w-[2.75rem] shrink-0 place-items-center overflow-hidden rounded-full"
+          aria-label="Reset text"
+          @click="textCase = null">
+          <ResetIcon class="size-[1.25rem]" />
+        </button>
+      </Transition>
+    </div>
 
-      <span v-if="language" class="text-foreground/50 ml-auto text-xs">
+    <div class="relative min-h-0 flex-1">
+      <div
+        ref="viewport"
+        class="code-panel bg-panel text-panel-foreground size-full overflow-y-auto overscroll-contain rounded-[2rem] select-text">
+        <!-- only the rows on screen are in the page -->
+        <div
+          v-if="isLong"
+          class="relative w-full"
+          :style="{ height: `${virtualizer.getTotalSize()}px` }">
+          <div
+            v-for="row in virtualRows"
+            :key="row.key as number"
+            :ref="measureRow"
+            :data-index="row.index"
+            class="absolute inset-x-6 top-0 font-sans text-[1rem] leading-relaxed break-words whitespace-pre-wrap"
+            :style="{ transform: `translateY(${row.start}px)` }"
+            v-text="rows[row.index] || ' '" />
+        </div>
+        <!-- hljs escapes the text, so its output is safe to render as HTML -->
+        <pre
+          v-else-if="highlightedHtml"
+          class="hljs p-6 font-mono text-[0.875rem] leading-[1.5rem] break-words whitespace-pre-wrap"
+          v-html="highlightedHtml" />
+        <pre
+          v-else
+          class="p-6 font-sans text-[1rem] leading-relaxed break-words whitespace-pre-wrap"
+          >{{ previewText }}</pre>
+      </div>
+      <!-- the language the code was read as, in the panel's corner -->
+      <span
+        v-if="language"
+        class="bg-panel/80 text-panel-muted pointer-events-none absolute top-3 right-5 rounded-full px-2 text-[0.75rem] leading-[1.25rem]">
         {{ language.name }}
       </span>
     </div>
-
-    <div
-      ref="viewport"
-      class="bg-foreground/5 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md select-text">
-      <!-- only the rows on screen are in the page -->
-      <div
-        v-if="isLong"
-        class="relative w-full"
-        :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <div
-          v-for="row in virtualRows"
-          :key="row.key as number"
-          :ref="measureRow"
-          :data-index="row.index"
-          class="absolute inset-x-3 top-0 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap"
-          :style="{ transform: `translateY(${row.start}px)` }"
-          v-text="rows[row.index] || ' '" />
-      </div>
-      <!-- hljs escapes the text, so its output is safe to render as HTML -->
-      <pre
-        v-else-if="highlightedHtml"
-        class="hljs p-3 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap"
-        v-html="highlightedHtml" />
-      <pre
-        v-else
-        class="p-3 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap"
-        >{{ previewText }}</pre>
-    </div>
-    <p v-if="isCapped" class="text-foreground/50 text-xs">
+    <p v-if="isCapped" class="text-muted-foreground text-xs">
       Showing the first {{ previewTextLimit.toLocaleString() }} of
       {{ shownText.length.toLocaleString() }} characters. Copy takes all of it.
     </p>

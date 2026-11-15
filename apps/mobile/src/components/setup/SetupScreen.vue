@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Button } from "@teneo/ui/components/button";
 import { Input } from "@teneo/ui/components/input";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { cn } from "@teneo/ui/lib/utils";
 import { type Component, computed, onScopeDispose, ref, watch } from "vue";
+import GoIcon from "~icons/tabler/arrow-right";
 import TickIcon from "~icons/tabler/check";
 import ScanIcon from "~icons/tabler/scan";
 
@@ -135,7 +135,7 @@ const primaryAction = computed<FooterAction>(() => {
   if (currentStep.value === "sync") {
     return { label: "Continue", run: () => (currentStep.value = "ready") };
   }
-  return { label: "Done", run: finishSetup };
+  return { label: "Done", run: finishSetup, icon: TickIcon };
 });
 </script>
 
@@ -153,12 +153,25 @@ const primaryAction = computed<FooterAction>(() => {
         <section
           v-if="currentStep === 'welcome'"
           key="welcome"
-          class="col-start-1 row-start-1 flex min-h-0 flex-col items-center justify-center gap-y-4 text-center">
-          <img class="mb-2 size-24" :src="logoUrl" alt="Teneo logo" />
-          <h1 class="text-2xl font-medium text-balance">
+          class="col-start-1 row-start-1 flex min-h-0 flex-col justify-center gap-y-4">
+          <!-- the logo on a loose pile of cards in the kinds' tints -->
+          <div class="relative mx-auto mb-4 h-[17rem] w-full max-w-[21rem]">
+            <span
+              class="bg-tint-violet absolute top-[22%] left-[8%] h-[52%] w-[36%] -rotate-[14deg] rounded-[2.125rem]" />
+            <span
+              class="bg-tint-mint absolute top-[18%] right-[6%] h-[52%] w-[36%] rotate-[16deg] rounded-[2.125rem]" />
+            <span
+              class="bg-tint-peach absolute right-[22%] bottom-[2%] h-[46%] w-[33%] rotate-[8deg] rounded-[1.875rem]" />
+            <img
+              class="absolute top-1/2 left-1/2 size-[13.5rem] -translate-1/2"
+              :src="logoUrl"
+              alt="Teneo logo" />
+          </div>
+          <h1
+            class="font-heading text-[2.25rem] leading-[2.625rem] font-semibold tracking-[-0.01em]">
             Everything you copy, always within reach
           </h1>
-          <p class="text-foreground/60 max-w-md text-sm text-balance">
+          <p class="text-muted-foreground text-sm leading-[1.625rem]">
             Copy on your Mac, find it on your phone. Teneo keeps track of
             everything.
           </p>
@@ -167,10 +180,16 @@ const primaryAction = computed<FooterAction>(() => {
         <section
           v-else-if="currentStep === 'sync'"
           key="sync"
-          class="col-start-1 row-start-1 flex min-h-0 flex-col items-center justify-center gap-y-4 overflow-y-auto text-center">
-          <ConnectIllustration class="w-52 shrink-0" />
-          <h1 class="text-2xl font-medium text-balance">Connect to your Mac</h1>
-          <p class="text-foreground/60 max-w-md text-xs text-balance">
+          class="col-start-1 row-start-1 flex min-h-0 flex-col justify-center gap-y-[0.875rem] overflow-y-auto">
+          <div
+            class="bg-tint-blue mb-2 grid shrink-0 place-items-center rounded-[2.25rem] py-4">
+            <ConnectIllustration class="w-52 shrink-0" />
+          </div>
+          <h1
+            class="font-heading text-[2rem] leading-[2.375rem] font-semibold tracking-[-0.01em]">
+            Connect to your Mac
+          </h1>
+          <p class="text-muted-foreground text-[1rem] leading-[1.5rem]">
             On your Mac, open Teneo's Settings › Sync and choose Add a device.
             {{
               canScanQrCode
@@ -179,11 +198,12 @@ const primaryAction = computed<FooterAction>(() => {
             }}
           </p>
 
-          <SettingsSection class="mt-4 w-full text-left">
+          <SettingsSection class="mt-2 w-full shrink-0">
             <template #section-title>Sync</template>
             <SettingsField v-if="isSyncOn">
               <template #label>Sync is on</template>
-              <span class="text-success flex items-center gap-1 text-sm">
+              <span
+                class="text-success flex items-center gap-1 text-sm font-semibold">
                 <TickIcon /> Joined
               </span>
             </SettingsField>
@@ -203,17 +223,15 @@ const primaryAction = computed<FooterAction>(() => {
                     autocapitalize="characters"
                     spellcheck="false"
                     enterkeyhint="go"
-                    class="font-mono" />
+                    class="bg-well border-input h-[3.25rem] rounded-full px-5 font-mono text-[1rem]" />
                 </form>
               </template>
             </SettingsField>
           </SettingsSection>
-          <p
-            v-if="scanError || error"
-            class="text-destructive text-xs text-balance">
+          <p v-if="scanError || error" class="text-destructive text-xs">
             {{ scanError || error }}
           </p>
-          <p v-else class="text-foreground/60 text-xs text-balance">
+          <p v-else class="text-muted-foreground text-xs leading-[1.3125rem]">
             Your history syncs over Wi-Fi, encrypted, with no account or server.
           </p>
         </section>
@@ -221,26 +239,32 @@ const primaryAction = computed<FooterAction>(() => {
         <section
           v-else
           key="ready"
-          class="col-start-1 row-start-1 flex min-h-0 flex-col items-center justify-center gap-y-4 overflow-y-auto text-center">
-          <ReadyIllustration class="w-52 shrink-0" />
-          <h1 class="text-2xl font-medium">Teneo is ready</h1>
+          class="col-start-1 row-start-1 flex min-h-0 flex-col justify-center gap-y-[0.875rem] overflow-y-auto">
+          <div
+            class="bg-tint-mint mb-2 grid shrink-0 place-items-center rounded-[2.25rem] py-4">
+            <ReadyIllustration class="w-52 shrink-0" />
+          </div>
+          <h1
+            class="font-heading text-[2rem] leading-[2.375rem] font-semibold tracking-[-0.01em]">
+            Teneo is ready
+          </h1>
           <p
             v-if="joinedDeviceName"
-            class="text-foreground/60 max-w-md text-sm text-balance">
+            class="text-muted-foreground text-sm leading-[1.625rem]">
             Connected to {{ joinedDeviceName }}. What you copy there shows up
             here.
           </p>
           <p
             v-else-if="hasJoined || isSyncOn"
-            class="text-foreground/60 max-w-md text-sm text-balance">
+            class="text-muted-foreground text-sm leading-[1.625rem]">
             Teneo now syncs clipboard items when both devices are on the same
             network.
           </p>
-          <p v-else class="text-foreground/60 max-w-md text-sm text-balance">
+          <p v-else class="text-muted-foreground text-sm leading-[1.625rem]">
             Connect to your Mac any time in Settings › Sync.
           </p>
 
-          <SettingsSection class="mt-4 w-full text-left">
+          <SettingsSection class="mt-3 w-full shrink-0">
             <template #section-title>Clipboard</template>
             <SettingsField>
               <template #label>Save clipboard on open</template>
@@ -251,7 +275,7 @@ const primaryAction = computed<FooterAction>(() => {
       </Transition>
     </div>
 
-    <footer class="flex shrink-0 flex-col items-center gap-y-5 pt-4">
+    <footer class="flex shrink-0 flex-col gap-y-5 pt-4">
       <!-- where the user is in the steps -->
       <div class="flex gap-x-1.5" aria-hidden="true">
         <span
@@ -259,35 +283,40 @@ const primaryAction = computed<FooterAction>(() => {
           :key="step"
           :class="
             cn(
-              'h-1.5 rounded-full transition-all duration-300',
+              'h-[0.375rem] rounded-full transition-all duration-300',
               step === currentStep
-                ? 'bg-primary w-4'
-                : 'bg-foreground/20 w-1.5',
+                ? 'bg-primary w-[1.75rem]'
+                : 'bg-foreground/20 w-[0.375rem]',
             )
           " />
       </div>
 
       <!-- the same two rows on every step, the second kept invisible when
            unused, so the footer never changes height and moves the step -->
-      <div class="flex w-full flex-col items-center gap-y-2">
-        <Button
-          size="lg"
-          class="w-full max-w-xs"
+      <div class="flex w-full flex-col items-center gap-y-1">
+        <button
+          type="button"
+          class="cta"
           :disabled="primaryAction.disabled"
           @click="primaryAction.run">
-          <Spinner v-if="primaryAction.isBusy" />
-          <component :is="primaryAction.icon" v-else-if="primaryAction.icon" />
           {{ primaryAction.label }}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+          <span class="cta-dot">
+            <Spinner v-if="primaryAction.isBusy" />
+            <component
+              :is="primaryAction.icon"
+              v-else-if="primaryAction.icon" />
+            <GoIcon v-else />
+          </span>
+        </button>
+        <button
+          type="button"
+          class="text-tint-neutral-ink h-[2.75rem] px-6 text-[1rem] font-semibold"
           :class="!canSetUpLater && 'invisible'"
           :disabled="!canSetUpLater || isBusy"
           :aria-hidden="!canSetUpLater"
           @click="currentStep = 'ready'">
           Set up later
-        </Button>
+        </button>
       </div>
     </footer>
   </div>

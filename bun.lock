@@ -15,7 +15,7 @@
     },
     "apps/desktop": {
       "name": "@teneo/desktop",
-      "version": "0.3.7",
+      "version": "0.4.0-beta.3",
       "dependencies": {
         "@tailwindcss/vite": "catalog:",
         "@tanstack/vue-query": "^5.104.3",
@@ -55,9 +55,12 @@
     },
     "apps/mobile": {
       "name": "@teneo/mobile",
+      "version": "0.1.0-beta.6",
       "dependencies": {
         "@capacitor/android": "8.6.2",
         "@capacitor/core": "8.6.2",
+        "@fontsource-variable/google-sans": "^5.3.2",
+        "@fontsource-variable/jetbrains-mono": "^5.3.0",
         "@tailwindcss/vite": "catalog:",
         "@tanstack/vue-virtual": "^3.13.45",
         "@teneo/shared": "workspace:*",
@@ -306,6 +309,10 @@
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
 
     "@floating-ui/vue": ["@floating-ui/vue@2.0.1", "", { "dependencies": { "@floating-ui/dom": "^1.8.0", "@floating-ui/utils": "^0.2.12" }, "peerDependencies": { "vue": ">=3.3.0" } }, "sha512-043dyEKD9TDSfz080YH2vobubgg+NIo/9Fw4RAl7sEMpD8Am1DNrrSTl/GpMBjyGHoD/FbJY2QLawY+HSQsEIA=="],
+
+    "@fontsource-variable/google-sans": ["@fontsource-variable/google-sans@5.3.2", "", {}, "sha512-fN+fO2Ffm+n2G5K+UK4ynP5WrWT+M/dbBs9HZaYcgAT5evhefJJH2MlGj8yMz+8slQmhjWAqPJyJ1sELkUM4Uw=="],
+
+    "@fontsource-variable/jetbrains-mono": ["@fontsource-variable/jetbrains-mono@5.3.0", "", {}, "sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw=="],
 
     "@hono/node-server": ["@hono/node-server@2.1.5", "", { "peerDependencies": { "hono": "^4 || ^5.0.0-0" } }, "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q=="],
 

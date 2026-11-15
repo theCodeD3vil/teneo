@@ -76,7 +76,7 @@ const share = async (item: ClipboardHistoryItem) =>
   shareItem((item.isTruncated ? await client.getItem(item.id) : null) ?? item);
 
 const rowClass =
-  "active:bg-foreground/5 flex h-12 w-full items-center gap-x-3 px-4 text-left text-sm transition-colors [&_svg]:size-5";
+  "active:bg-muted flex h-[3.625rem] w-full items-center gap-x-[0.875rem] px-[1.125rem] text-left text-sm font-medium transition-colors [&_svg]:size-[1.375rem]";
 </script>
 
 <template>
@@ -84,30 +84,30 @@ const rowClass =
     <div v-if="props.item" class="grid gap-3">
       <SheetGroup>
         <button type="button" :class="rowClass" @click="run(copy)">
-          <CopyIcon class="text-foreground/70" /> Copy
+          <CopyIcon class="text-muted-foreground" /> Copy
         </button>
         <button
           type="button"
           :class="rowClass"
           @click="run((item) => emit('preview', item))">
-          <OpenIcon class="text-foreground/70" /> Preview
+          <OpenIcon class="text-muted-foreground" /> Preview
         </button>
         <button type="button" :class="rowClass" @click="run(togglePin)">
           <template v-if="props.item.pinned">
-            <PinOffIcon class="text-foreground/70" /> Unpin
+            <PinOffIcon class="text-muted-foreground" /> Unpin
           </template>
           <template v-else>
-            <PinIcon class="text-foreground/70" /> Pin
+            <PinIcon class="text-muted-foreground" /> Pin
           </template>
         </button>
         <button type="button" :class="rowClass" @click="run(share)">
-          <ShareIcon class="text-foreground/70" /> Share
+          <ShareIcon class="text-muted-foreground" /> Share
         </button>
       </SheetGroup>
       <SheetGroup>
         <button
           type="button"
-          :class="[rowClass, 'text-destructive']"
+          :class="[rowClass, 'text-destructive font-semibold']"
           @click="run(remove)">
           <DeleteIcon /> Delete
         </button>

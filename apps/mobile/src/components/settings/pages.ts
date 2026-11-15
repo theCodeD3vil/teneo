@@ -13,8 +13,11 @@ import SyncTab from "./SyncTab.vue";
 export interface SettingsPage {
   title: string;
   icon: Component;
-  /** the icon tile's colours, as on the clipboard cards */
-  iconClass: string;
+  /** the page's tint, as on the clipboard cards: its tile on the settings
+   *  screen, and the icon and summary on that tile */
+  tileClass: string;
+  inkClass: string;
+  subClass: string;
   content: Component;
 }
 
@@ -22,25 +25,33 @@ export const settingsPages: Record<SettingsPageName, SettingsPage> = {
   general: {
     title: "General",
     icon: SettingsIcon,
-    iconClass: "bg-foreground/10 text-foreground/70",
+    tileClass: "bg-tint-neutral",
+    inkClass: "text-tint-neutral-ink",
+    subClass: "text-tint-neutral-sub",
     content: GeneralTab,
   },
   sync: {
     title: "Sync",
     icon: SyncIcon,
-    iconClass: "bg-primary/10 text-primary",
+    tileClass: "bg-tint-blue",
+    inkClass: "text-tint-blue-ink",
+    subClass: "text-tint-blue-sub",
     content: SyncTab,
   },
   storage: {
     title: "Storage",
     icon: StorageIcon,
-    iconClass: "bg-warning/10 text-warning",
+    tileClass: "bg-tint-amber",
+    inkClass: "text-tint-amber-ink",
+    subClass: "text-tint-amber-sub",
     content: StorageTab,
   },
   about: {
     title: "About",
     icon: InformationCircleIcon,
-    iconClass: "bg-success/10 text-success",
+    tileClass: "bg-tint-mint",
+    inkClass: "text-tint-mint-ink",
+    subClass: "text-tint-mint-sub",
     content: AboutTab,
   },
 };

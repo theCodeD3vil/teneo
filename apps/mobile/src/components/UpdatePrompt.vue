@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Button } from "@teneo/ui/components/button";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { useClient } from "../client";
@@ -95,25 +94,33 @@ function later(): void {
 
 <template>
   <BottomSheet v-model:open="isOpen" :title="title" :description="description">
-    <div class="grid gap-2 pt-2">
-      <UpdateProgress
+    <div class="grid gap-3 pt-2">
+      <div
         v-if="state.kind === 'downloading'"
-        class="mb-2"
-        :received="state.received"
-        :size="state.update.size" />
-      <Button class="h-12 text-sm" :disabled="isDownloading" @click="install()">
+        class="bg-card rounded-[1.5rem] px-[1.125rem] py-4">
+        <UpdateProgress :received="state.received" :size="state.update.size" />
+      </div>
+      <button
+        type="button"
+        class="sheet-button bg-cta text-cta-foreground disabled:bg-muted disabled:text-muted-foreground"
+        :disabled="isDownloading"
+        @click="install()">
         {{ isDownloading ? "Downloading…" : "Update" }}
-      </Button>
-      <Button
+      </button>
+      <button
         v-if="isDownloading"
-        variant="secondary"
-        class="h-12 text-sm"
+        type="button"
+        class="sheet-button border-input bg-card border"
         @click="cancel()">
         Cancel
-      </Button>
-      <Button v-else variant="secondary" class="h-12 text-sm" @click="later">
+      </button>
+      <button
+        v-else
+        type="button"
+        class="sheet-button border-input bg-card border"
+        @click="later">
         Later
-      </Button>
+      </button>
     </div>
   </BottomSheet>
 </template>

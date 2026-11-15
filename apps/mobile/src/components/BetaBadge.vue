@@ -7,7 +7,7 @@ import TestTubeIcon from "~icons/tabler/test-pipe";
   <Badge
     variant="outline"
     title="This feature is in beta"
-    class="text-foreground/60 h-5 gap-0.5 px-1.5 align-text-bottom text-[0.75rem]">
+    class="text-muted-foreground border-input h-[1.25rem] gap-0.5 rounded-[0.625rem] px-2 align-text-bottom text-[0.75rem] font-semibold">
     <TestTubeIcon />
     Beta
   </Badge>

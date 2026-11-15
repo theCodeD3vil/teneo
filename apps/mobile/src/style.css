@@ -6,27 +6,166 @@
 
 @source "../../../packages/ui/src";
 
-/* Open Sans is bundled, so every phone shows the same font. The file is
-   variable from light (300) to extra bold (800). */
-@font-face {
-  font-family: "Open Sans";
-  src: url("./assets/fonts/OpenSans.ttf") format("truetype");
-  font-weight: 300 800;
-  font-style: normal;
-  font-display: block;
-}
+/* The fonts are bundled, so every phone shows the same ones: Google Sans for
+   titles and text, JetBrains Mono for code and colour values. */
+@import "@fontsource-variable/google-sans";
+@import "@fontsource-variable/jetbrains-mono";
 
 @theme inline {
-  --font-sans: "Open Sans", sans-serif;
+  --font-sans: "Google Sans Variable", sans-serif;
+  --font-heading: "Google Sans Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", monospace;
+
+  --color-dock: var(--dock);
+  --color-dock-foreground: var(--dock-foreground);
+  --color-dock-border: var(--dock-border);
+  --color-cta: var(--cta);
+  --color-cta-foreground: var(--cta-foreground);
+  --color-panel: var(--panel);
+  --color-panel-foreground: var(--panel-foreground);
+  --color-panel-muted: var(--panel-muted);
+  --color-hairline: var(--hairline);
+  --color-well: var(--well);
+  --color-toast: var(--toast);
+  --color-tint-blue: var(--tint-blue);
+  --color-tint-blue-ink: var(--tint-blue-ink);
+  --color-tint-blue-sub: var(--tint-blue-sub);
+  --color-tint-violet: var(--tint-violet);
+  --color-tint-violet-ink: var(--tint-violet-ink);
+  --color-tint-violet-sub: var(--tint-violet-sub);
+  --color-tint-peach: var(--tint-peach);
+  --color-tint-peach-ink: var(--tint-peach-ink);
+  --color-tint-peach-sub: var(--tint-peach-sub);
+  --color-tint-mint: var(--tint-mint);
+  --color-tint-mint-ink: var(--tint-mint-ink);
+  --color-tint-mint-sub: var(--tint-mint-sub);
+  --color-tint-amber: var(--tint-amber);
+  --color-tint-amber-ink: var(--tint-amber-ink);
+  --color-tint-amber-sub: var(--tint-amber-sub);
+  --color-tint-neutral: var(--tint-neutral);
+  --color-tint-neutral-ink: var(--tint-neutral-ink);
+  --color-tint-neutral-sub: var(--tint-neutral-sub);
+}
+
+/* The phone's own palette, over the shared theme: a cool off-white ground,
+   deep ink, Teneo's blue as the one accent, and a soft tint per kind of
+   item. These rules are unlayered and come after the shared theme, so they
+   win over it. */
+:root {
+  --background: #f4f5fb;
+  --foreground: #14162b;
+  --card: #ffffff;
+  --card-foreground: #14162b;
+  --popover: #ffffff;
+  --popover-foreground: #14162b;
+  --primary: #236ade;
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
+  --secondary-foreground: #14162b;
+  --muted: #e6e8f4;
+  --muted-foreground: #5a5f7a;
+  --accent: #e6e8f4;
+  --accent-foreground: #14162b;
+  --destructive: #b3261e;
+  --success: #1a9a68;
+  --border: #e6e8f2;
+  --input: #d5d8e6;
+  --ring: #8c91ab;
+  --radius: 1rem;
+
+  --dock: #14162b;
+  --dock-foreground: #b4b9d6;
+  --dock-border: transparent;
+  --cta: #14162b;
+  --cta-foreground: #ffffff;
+  --panel: #14162b;
+  --panel-foreground: #ffffff;
+  --panel-muted: #c5c9e0;
+  --hairline: #eceef6;
+  --well: #f4f5fb;
+  --toast: #136a48;
+  --switch-off: #8c91ab;
+
+  --tint-blue: #dce8ff;
+  --tint-blue-ink: #1b4fb0;
+  --tint-blue-sub: #2f4372;
+  --tint-violet: #e7e0ff;
+  --tint-violet-ink: #5437b8;
+  --tint-violet-sub: #4a3d7a;
+  --tint-peach: #ffe2d4;
+  --tint-peach-ink: #a8431a;
+  --tint-peach-sub: #7a3a1c;
+  --tint-mint: #d3f2e4;
+  --tint-mint-ink: #136a48;
+  --tint-mint-sub: #1f5a45;
+  --tint-amber: #ffedbe;
+  --tint-amber-ink: #7a5200;
+  --tint-amber-sub: #6b4a00;
+  --tint-neutral: #e6e8f4;
+  --tint-neutral-ink: #3a3f5c;
+  --tint-neutral-sub: #3a3f5c;
+}
+.dark {
+  --background: #0d0f1e;
+  --foreground: #f2f3fa;
+  --card: #181b31;
+  --card-foreground: #f2f3fa;
+  --popover: #181b31;
+  --popover-foreground: #f2f3fa;
+  --primary: #7aa7ff;
+  --primary-foreground: #0b1430;
+  --secondary: #181b31;
+  --secondary-foreground: #f2f3fa;
+  --muted: #262a47;
+  --muted-foreground: #a3a8c4;
+  --accent: #262a47;
+  --accent-foreground: #f2f3fa;
+  --destructive: #ff9a8f;
+  --success: #4cc797;
+  --border: #2a2e4a;
+  --input: #3a3f63;
+  --ring: #a3a8c4;
+
+  --dock: #232745;
+  --dock-foreground: #b4b9d6;
+  --dock-border: #363b60;
+  --cta: #f2f3fa;
+  --cta-foreground: #0d0f1e;
+  --panel: #181b31;
+  --panel-foreground: #f2f3fa;
+  --panel-muted: #c5c9e0;
+  --hairline: #2a2e4a;
+  --well: #262a47;
+  --toast: #136a48;
+  --switch-off: #5a5f7a;
+
+  --tint-blue: #1c2b52;
+  --tint-blue-ink: #9dbdff;
+  --tint-blue-sub: #b9cbf2;
+  --tint-violet: #2b2456;
+  --tint-violet-ink: #c3b4ff;
+  --tint-violet-sub: #cfc6f5;
+  --tint-peach: #45271a;
+  --tint-peach-ink: #ffb692;
+  --tint-peach-sub: #f2c9b5;
+  --tint-mint: #173b2e;
+  --tint-mint-ink: #8fe0bd;
+  --tint-mint-sub: #a9dcc6;
+  --tint-amber: #40320f;
+  --tint-amber-ink: #ffd77a;
+  --tint-amber-sub: #f2dda6;
+  --tint-neutral: #232745;
+  --tint-neutral-ink: #d5d8ec;
+  --tint-neutral-sub: #c5c9e0;
 }
 
 /* The desktop classes are sized for a mouse on a laptop screen. On a phone
-   the same classes map to a mobile scale: body text (text-sm) at 17px,
-   secondary text (text-xs) at 15px, and spacing, icons and touch targets
+   the same classes map to a mobile scale: labels (text-sm) at 17px,
+   descriptions (text-xs) at 14px, and spacing, icons and touch targets
    12.5% larger than Tailwind's default. */
 @theme {
   --spacing: 0.28125rem;
-  --text-xs: 0.9375rem;
+  --text-xs: 0.875rem;
   --text-xs--line-height: 1.25rem;
   --text-sm: 1.0625rem;
   --text-sm--line-height: 1.5rem;
@@ -38,19 +177,6 @@
   --text-xl--line-height: 2rem;
   --text-2xl: 1.75rem;
   --text-2xl--line-height: 2.25rem;
-  /* Open Sans reads thin on a phone at the weights the desktop classes name,
-     so each class is one step heavier here: body text is medium (500),
-     font-medium semibold (600), font-semibold bold (700). Nothing is lighter
-     than body text: thin strokes blur on a phone screen. */
-  --font-weight-thin: 500;
-  --font-weight-extralight: 500;
-  --font-weight-light: 500;
-  --font-weight-normal: 500;
-  --font-weight-medium: 600;
-  --font-weight-semibold: 700;
-  --font-weight-bold: 800;
-  --font-weight-extrabold: 800;
-  --font-weight-black: 800;
 
   /* dashes travelling along a line, for the sync link in setup */
   --animate-dash-flow: dash-flow 1s linear infinite;
@@ -59,6 +185,60 @@
       stroke-dashoffset: -16;
     }
   }
+}
+
+/* The pieces every screen shares. They sit in the components layer, so a
+   utility class on the same element still wins. */
+@layer components {
+  /* the round back button at the top of a screen */
+  .round-button {
+    @apply bg-card text-foreground active:bg-muted grid size-[3rem] shrink-0 place-items-center rounded-full transition-colors disabled:opacity-50 [&_svg]:size-[1.375rem];
+  }
+  /* a screen's one main action: an ink pill with the icon in a blue circle */
+  .cta {
+    @apply bg-cta text-cta-foreground font-heading flex h-[4rem] w-full shrink-0 items-center justify-between rounded-full pr-2 pl-7 text-left text-[1.1875rem] font-semibold transition-transform active:scale-[0.98] disabled:opacity-50;
+  }
+  .cta-dot {
+    @apply bg-primary text-primary-foreground grid size-[3rem] shrink-0 place-items-center rounded-full [&_svg]:size-[1.375rem];
+  }
+  /* a small action beside a setting */
+  .pill-button {
+    @apply border-input bg-card text-foreground active:bg-muted inline-flex h-[2.75rem] shrink-0 items-center justify-center gap-1.5 rounded-full border px-[1.125rem] text-[0.9375rem] font-semibold whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[1.125rem];
+  }
+  /* a full-width button in a sheet */
+  .sheet-button {
+    @apply font-heading flex h-[3.75rem] w-full items-center justify-center gap-2 rounded-full text-[1.125rem] font-semibold transition-transform active:scale-[0.98] disabled:pointer-events-none;
+  }
+  /* the small label over a group: a day in the list, a settings section */
+  .group-label {
+    @apply text-muted-foreground text-[0.9375rem] leading-[1.25rem] font-semibold capitalize;
+  }
+  .screen-title {
+    @apply font-heading text-[2.25rem] leading-[2.5rem] font-semibold tracking-[-0.01em];
+  }
+}
+
+/* The shared switch is sized for a mouse. Here it is a thumb-sized pill. */
+[data-slot="switch"][data-size="default"] {
+  width: 3.5rem;
+  height: 2.125rem;
+  padding: 0 3px;
+  border: none;
+  box-shadow: none;
+}
+[data-slot="switch"][data-state="unchecked"],
+[data-slot="switch"][data-unchecked] {
+  background: var(--switch-off);
+}
+[data-slot="switch"] > [data-slot="switch-thumb"] {
+  width: 1.75rem;
+  height: 1.75rem;
+  background: #ffffff;
+  translate: 0 0;
+}
+[data-slot="switch"] > [data-slot="switch-thumb"][data-state="checked"],
+[data-slot="switch"] > [data-slot="switch-thumb"][data-checked] {
+  translate: 1.375rem 0;
 }
 
 /* Android's status and navigation bars. Capacitor's SystemBars plugin sets
@@ -226,6 +406,98 @@
       animation: none;
     }
   }
+}
+
+/* The pinned tiles answer to scrolling, each inside a slot that keeps its
+   size. As the list scrolls down they get up to a tenth shorter. As the shelf
+   scrolls sideways, a tile leaving at one edge narrows toward the middle of
+   the shelf, and one coming in at the other edge widens to full. The
+   animations follow the scroll positions themselves, so they run with the
+   finger and need no script. Where the browser can't do that, the tiles
+   simply stay full size. */
+.history-list {
+  scroll-timeline: --history-list block;
+}
+.shelf-slot {
+  view-timeline: --shelf-slot inline;
+}
+@keyframes shelf-tile-shorten {
+  to {
+    height: 90%;
+  }
+}
+@keyframes shelf-tile-narrow {
+  entry 0% {
+    width: 60%;
+    margin-left: 0;
+  }
+  entry 100% {
+    width: 100%;
+    margin-left: 0;
+  }
+  exit 0% {
+    width: 100%;
+    margin-left: 0;
+  }
+  exit 100% {
+    width: 60%;
+    margin-left: 40%;
+  }
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .shelf-tile {
+      animation:
+        shelf-tile-shorten linear both,
+        shelf-tile-narrow linear both;
+      animation-timeline: --history-list, --shelf-slot;
+      animation-range:
+        0 10rem,
+        normal;
+    }
+  }
+}
+
+/* The text preview's reset button grows out of the end of its bar and
+   shrinks back into it. Its width and the gap beside it close up with it, so
+   the case buttons slide over rather than jump. Unlayered, so the width here
+   wins over the button's own. */
+.reset-button-enter-active {
+  transition:
+    width 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    margin 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 200ms ease-out,
+    scale 200ms ease-out;
+}
+.reset-button-leave-active {
+  transition:
+    width 180ms cubic-bezier(0.32, 0.72, 0, 1),
+    margin 180ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 120ms ease-in,
+    scale 120ms ease-in;
+}
+.reset-button-enter-from,
+.reset-button-leave-to {
+  width: 0;
+  margin-left: calc(var(--spacing) * -2);
+  opacity: 0;
+  scale: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reset-button-enter-active,
+  .reset-button-leave-active {
+    transition: none;
+  }
+}
+
+/* The text preview is a dark panel in both themes, so the text and code
+   colours inside it are the ones for a dark ground. */
+.code-panel {
+  --foreground: var(--panel-foreground);
+  --muted-foreground: var(--panel-muted);
+  --primary: #9dbdff;
+  --success: #6fd6a8;
+  --destructive: #ff9a8f;
 }
 
 /* Code in the text preview, as on desktop. Each token colour is mixed toward

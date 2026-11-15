@@ -53,6 +53,8 @@ interface ClipboardItemGroup {
 
 type ListRow =
   | { type: "header"; key: string; label: string; isFirst: boolean }
+  // the pinned items, side by side on one shelf that scrolls sideways
+  | { type: "shelf"; key: string; items: ClipboardHistoryItem[] }
   | { type: "item"; key: string; item: ClipboardHistoryItem; isFirst: boolean };
 
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
@@ -101,24 +103,28 @@ const listRows = computed<ListRow[]>(() =>
       label: group.label,
       isFirst: groupIndex === 0,
     },
-    ...group.items.map((item, itemIndex) => ({
-      type: "item" as const,
-      key: item.id,
-      item,
-      isFirst: itemIndex === 0,
-    })),
+    ...(group.key === "pinned"
+      ? [{ type: "shelf" as const, key: "shelf", items: group.items }]
+      : group.items.map((item, itemIndex) => ({
+          type: "item" as const,
+          key: item.id,
+          item,
+          isFirst: itemIndex === 0,
+        }))),
   ]),
 );
 
 // Only the rows on screen are in the page. Each row carries the gap above it,
 // so the rows can be laid out from their measured heights alone. Sizes are in
 // rem, like the text sizes, so they follow the root font size.
-const headerHeight = 1.25;
-const cardHeight = 6.5;
+const rowHeights = { header: 1.25, item: 4.75, shelf: 13 };
 function rowGap(row: ListRow): number {
-  if (row.type === "header") return row.isFirst ? 0 : 1;
-  return 0.25;
+  if (row.type === "header") return row.isFirst ? 0 : 1.25;
+  if (row.type === "shelf") return 0.75;
+  return row.isFirst ? 0.75 : 0.5;
 }
+// the dock floats over the foot of the list: the last card scrolls clear of it
+const dockClearance = 6;
 const remInPixels = parseFloat(
   getComputedStyle(document.documentElement).fontSize,
 );
@@ -131,12 +137,11 @@ const virtualizer = useVirtualizer(
     getScrollElement: () => viewport.value,
     estimateSize: (index: number) => {
       const row = listRows.value[index];
-      if (!row) return cardHeight;
-      const rems =
-        rowGap(row) + (row.type === "header" ? headerHeight : cardHeight);
-      return rems * remInPixels;
+      if (!row) return rowHeights.item * remInPixels;
+      return (rowGap(row) + rowHeights[row.type]) * remInPixels;
     },
     getItemKey: (index: number) => listRows.value[index]?.key ?? index,
+    paddingEnd: dockClearance * remInPixels,
     overscan: 6,
   })),
 );
@@ -281,22 +286,22 @@ function handleContextMenu(event: MouseEvent): void {
 <template>
   <div
     ref="viewport"
-    class="size-full touch-pan-y overflow-y-auto overscroll-contain">
+    class="history-list size-full touch-pan-y overflow-y-auto overscroll-contain">
     <p
       v-if="props.loading"
-      class="text-foreground/50 p-3 text-sm"
+      class="text-muted-foreground p-3 text-sm"
       :class="{ invisible: !isLoadingTextShown }">
       Loading clipboard history…
     </p>
-    <Empty v-else-if="props.error">
+    <Empty v-else-if="props.error" class="pb-[6rem]">
       <EmptyHeader>
         <EmptyMedia>
           <EmptyIllustration kind="error" class="w-44" />
         </EmptyMedia>
-        <EmptyTitle class="text-foreground/70">
+        <EmptyTitle class="font-heading text-[1.375rem] font-semibold">
           Could not load clipboard history.
         </EmptyTitle>
-        <EmptyDescription class="text-foreground/50">
+        <EmptyDescription class="text-muted-foreground text-[1rem]">
           Try again in a moment.
         </EmptyDescription>
       </EmptyHeader>
@@ -321,11 +326,27 @@ function handleContextMenu(event: MouseEvent): void {
             transform: `translateY(${virtualRow.start}px)`,
             paddingTop: `${rowGap(row)}rem`,
           }">
-          <h2
-            v-if="row.type === 'header'"
-            class="text-foreground/50 px-1 text-xs font-medium">
+          <h2 v-if="row.type === 'header'" class="group-label px-2">
             {{ row.label }}
           </h2>
+          <div
+            v-else-if="row.type === 'shelf'"
+            data-no-tab-swipe
+            class="flex touch-pan-x touch-pan-y [scrollbar-width:none] gap-3 overflow-x-auto overscroll-x-contain pb-2">
+            <!-- each tile has a slot of fixed size. The tile shrinks inside
+                 it as the list or the shelf scrolls, and the slots stay put,
+                 so nothing else moves. -->
+            <div
+              v-for="item in row.items"
+              :key="item.id"
+              class="shelf-slot flex h-[12.5rem] w-[10.5rem] shrink-0 items-end">
+              <ClipboardItemCard
+                layout="tile"
+                :item-details="item"
+                :is-active="isMenuOpen && menuItem?.id === item.id"
+                @preview="emit('preview', $event)" />
+            </div>
+          </div>
           <ClipboardItemCard
             v-else
             :item-details="row.item"
@@ -338,28 +359,28 @@ function handleContextMenu(event: MouseEvent): void {
         :item="menuItem"
         @preview="emit('preview', $event)" />
     </template>
-    <Empty v-else-if="props.searchQuery">
+    <Empty v-else-if="props.searchQuery" class="pb-[6rem]">
       <EmptyHeader>
         <EmptyMedia>
           <EmptyIllustration kind="search" class="w-44" />
         </EmptyMedia>
-        <EmptyTitle class="text-foreground/70">
+        <EmptyTitle class="font-heading text-[1.375rem] font-semibold">
           Nothing matches “{{ props.searchQuery }}”
         </EmptyTitle>
-        <EmptyDescription class="text-foreground/50">
+        <EmptyDescription class="text-muted-foreground text-[1rem]">
           Try other words, or look in another tab.
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
-    <Empty v-else>
+    <Empty v-else class="pb-[6rem]">
       <EmptyHeader>
         <EmptyMedia>
           <EmptyIllustration :kind="props.tab" class="w-44" />
         </EmptyMedia>
-        <EmptyTitle class="text-foreground/70">
+        <EmptyTitle class="font-heading text-[1.375rem] font-semibold">
           {{ props.emptyMessage }}
         </EmptyTitle>
-        <EmptyDescription class="text-foreground/50">
+        <EmptyDescription class="text-muted-foreground text-[1rem]">
           Copy something to see it here.
         </EmptyDescription>
       </EmptyHeader>

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import type { LinkPreviewImage } from "@teneo/shared/types/clipboard";
-import Button from "@teneo/ui/components/button/Button.vue";
 import { Skeleton } from "@teneo/ui/components/skeleton";
 import { ref, watch } from "vue";
-import OpenIcon from "~icons/tabler/external-link";
+import OpenIcon from "~icons/tabler/arrow-up-right";
 import LinkIcon from "~icons/tabler/link";
 
 import { useClient } from "../../client";
@@ -45,10 +44,10 @@ function openInBrowser(): void {
 
 <template>
   <div
-    class="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 text-center">
+    class="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 text-center">
     <!-- 1.91:1 is the shape sites make their share images in -->
     <div
-      class="bg-foreground/5 flex aspect-[1.91/1] w-72 shrink-0 items-center justify-center overflow-hidden rounded-md">
+      class="bg-tint-violet flex aspect-[1.91/1] w-full shrink-0 items-center justify-center overflow-hidden rounded-[2rem]">
       <Skeleton v-if="isLoading" class="size-full" />
       <img
         v-else-if="preview && preview.source !== 'icon'"
@@ -61,15 +60,19 @@ function openInBrowser(): void {
         :src="preview.image"
         alt=""
         class="size-12 rounded-xl" />
-      <LinkIcon v-else class="text-foreground/30 size-8" />
+      <LinkIcon v-else class="text-tint-violet-ink size-8" />
     </div>
 
-    <p class="min-h-0 max-w-sm overflow-y-auto text-sm break-all select-text">
+    <p
+      class="min-h-0 max-w-[20rem] overflow-y-auto text-sm leading-[1.625rem] break-all select-text">
       {{ url }}
     </p>
-    <Button variant="secondary" @click="openInBrowser">
+    <button
+      type="button"
+      class="pill-button h-[3.25rem] gap-[0.625rem] px-6 text-[1rem]"
+      @click="openInBrowser">
       <OpenIcon />
       Open in browser
-    </Button>
+    </button>
   </div>
 </template>

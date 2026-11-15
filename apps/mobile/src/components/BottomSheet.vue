@@ -79,30 +79,34 @@ watch(isOpen, (open) => {
     <SheetContent
       side="bottom"
       :show-close-button="false"
-      class="pb-safe max-h-[90dvh] gap-0 rounded-t-2xl border-none"
+      class="pb-safe bg-background max-h-[90dvh] gap-0 rounded-t-[2.25rem] border-none"
       :class="!isDragging && 'transition-transform duration-200'"
       :style="sheetStyle"
       @open-auto-focus.prevent>
       <div
-        class="shrink-0 touch-none pt-2"
+        class="shrink-0 touch-none pt-3"
         @pointerdown="startDrag"
         @pointermove="drag"
         @pointerup="endDrag"
         @pointercancel="endDrag">
-        <div class="bg-foreground/20 mx-auto h-1.5 w-10 rounded-full" />
-        <SheetHeader class="items-center px-6 pt-3 pb-2 text-center">
-          <SheetTitle class="text-lg font-medium text-balance">
+        <div
+          class="bg-foreground/20 mx-auto h-[5px] w-[2.75rem] rounded-full" />
+        <SheetHeader class="gap-1.5 px-6 pt-5 pb-2 text-left">
+          <SheetTitle
+            class="font-heading text-[1.5rem] leading-[1.875rem] font-semibold">
             {{ props.title }}
           </SheetTitle>
           <SheetDescription
             :class="
-              props.description ? 'text-foreground/60 text-balance' : 'sr-only'
+              props.description
+                ? 'text-muted-foreground text-[0.9375rem] leading-[1.375rem]'
+                : 'sr-only'
             ">
             {{ props.description ?? props.title }}
           </SheetDescription>
         </SheetHeader>
       </div>
-      <div class="min-h-0 overflow-y-auto overscroll-contain px-4 pt-2 pb-4">
+      <div class="min-h-0 overflow-y-auto overscroll-contain px-4 pt-2 pb-7">
         <slot />
       </div>
     </SheetContent>
