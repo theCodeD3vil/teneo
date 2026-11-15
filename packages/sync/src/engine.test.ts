@@ -455,3 +455,131 @@ for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
     net.stop();
   });
 }
+
+// --- what came after the first release: a device's maker, and app icons
+
+const png = (...body: number[]) =>
+  new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...body]);
+
+/** A Mac's icons by app name, and what was asked of it */
+function iconSource(icons: Record<string, Uint8Array>) {
+  const asked: string[] = [];
+  return {
+    asked,
+    icon: async (name: string) => {
+      asked.push(name);
+      return icons[name] ?? null;
+    },
+  };
+}
+
+/** A phone's saved icons */
+function iconSink(saved = new Map<string, Uint8Array>()) {
+  return {
+    saved,
+    missing: async (names: string[]) =>
+      names.filter((name) => !saved.has(name)),
+    save: async (name: string, icon: Uint8Array) => {
+      saved.set(name, icon);
+    },
+  };
+}
+
+test("a device that says who made it is known by it, and one that doesn't is not", async () => {
+  const net = new TestNetwork();
+  const mac = net.add("a");
+  const phone = net.add("b", { maker: "google" });
+  net.connect(mac, phone);
+  await net.settle();
+  expect(mac.engine.peers()).toMatchObject([{ maker: "google" }]);
+  expect(phone.engine.peers()).toMatchObject([{ maker: "" }]);
+  expect((await mac.store.getPeer(phone.id))?.maker).toBe("google");
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a phone gets the icon of each app its items were copied from, once", async () => {
+  const net = new TestNetwork();
+  const source = iconSource({ Safari: png(1), Notes: png(2) });
+  const sink = iconSink();
+  const mac = net.add("a", { iconSource: source });
+  const phone = net.add("b", { iconSink: sink });
+  mac.copy("one", { sourceApp: "Safari" });
+  mac.copy("two", { sourceApp: "Safari" });
+  mac.copy("three", { sourceApp: "Unknown App" });
+  net.connect(mac, phone);
+  await net.settle();
+  expect([...sink.saved.keys()]).toEqual(["Safari"]);
+  expect(sink.saved.get("Safari")).toEqual(png(1));
+  expect(phone.iconsChanged).toBe(1);
+
+  // an app it has, or has asked this Mac for, is not asked for again
+  mac.copy("four", { sourceApp: "Safari" });
+  mac.copy("five", { sourceApp: "Unknown App" });
+  mac.copy("six", { sourceApp: "Notes" });
+  await net.settle();
+  expect(source.asked.sort()).toEqual(["Notes", "Safari", "Unknown App"]);
+  expect([...sink.saved.keys()].sort()).toEqual(["Notes", "Safari"]);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("icons are asked for in batches, however many apps there are", async () => {
+  const net = new TestNetwork();
+  const names = Array.from({ length: 70 }, (_, index) => `App ${index}`);
+  const source = iconSource(
+    Object.fromEntries(names.map((name, index) => [name, png(index)])),
+  );
+  const sink = iconSink();
+  const mac = net.add("a", { iconSource: source });
+  const phone = net.add("b", { iconSink: sink });
+  for (const name of names) mac.copy(`from ${name}`, { sourceApp: name });
+  net.connect(mac, phone);
+  await net.settle();
+  expect(sink.saved.size).toBe(70);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a device that offers no icons is never asked, and sync goes on", async () => {
+  const net = new TestNetwork();
+  const sink = iconSink();
+  // an older Teneo, or another phone: it would close over a frame it doesn't know
+  const old = net.add("a");
+  const phone = net.add("b", { iconSink: sink });
+  old.copy("one", { sourceApp: "Safari" });
+  net.connect(old, phone);
+  await net.settle();
+  expect(live(phone)).toEqual(["one"]);
+  expect(sink.saved.size).toBe(0);
+  expect(net.isConnected(old, phone)).toBe(true);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("an icon that isn't a small png is not saved, and one that fails to save doesn't end sync", async () => {
+  const net = new TestNetwork();
+  const source = iconSource({
+    Fake: new TextEncoder().encode("<svg onload=alert(1)>"),
+    Huge: png(...Array.from({ length: 70 * 1024 }, () => 0)),
+    Good: png(1),
+    Unsavable: png(2),
+  });
+  const sink = iconSink();
+  const save = sink.save;
+  sink.save = async (name, icon) => {
+    if (name === "Unsavable") throw new Error("disk full");
+    await save(name, icon);
+  };
+  const mac = net.add("a", { iconSource: source });
+  const phone = net.add("b", { iconSink: sink });
+  for (const name of ["Fake", "Huge", "Good", "Unsavable"]) {
+    mac.copy(`from ${name}`, { sourceApp: name });
+  }
+  net.connect(mac, phone);
+  await net.settle();
+  expect([...sink.saved.keys()]).toEqual(["Good"]);
+  expect(live(phone)).toHaveLength(4);
+  expect(net.errors.map(String)).toEqual(["Error: disk full"]);
+  net.stop();
+});

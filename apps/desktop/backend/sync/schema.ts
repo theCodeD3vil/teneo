@@ -18,6 +18,16 @@ export function createSyncTables(database: Database): void {
       lastSeenAt INTEGER NOT NULL DEFAULT 0
     );
   `);
+  // added after the first release: who made the device ("google"), as it said
+  const peerColumns = all<{ name: string }>(
+    database,
+    `PRAGMA table_info("SYNC_PEERS")`,
+  ).map((column) => column.name);
+  if (!peerColumns.includes("maker")) {
+    database.exec(
+      `ALTER TABLE "SYNC_PEERS" ADD COLUMN maker TEXT NOT NULL DEFAULT ''`,
+    );
+  }
   // The epoch is made with the database: a peer that sees another one knows
   // its cursor into this store means nothing. The counter only ever goes up,
   // even when rows are deleted, so a number is never handed out twice.

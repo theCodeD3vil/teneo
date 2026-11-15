@@ -59,6 +59,10 @@ export interface ClipboardHistoryItem {
   color: string | null;
   concealed: boolean;
   sourceApp: ClipboardSourceApp | null;
+  /** who made the device it was copied on, such as "google", when it came
+   *  from another device that said so: the Mac shows that maker's logo by a
+   *  phone's name */
+  originMaker?: string | null;
   sourceURL: string | null;
   pinned: boolean;
   /** an image from a screenshot tool's temp file: copying it back puts the

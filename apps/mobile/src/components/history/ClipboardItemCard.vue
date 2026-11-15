@@ -15,6 +15,7 @@ import LinkIcon from "~icons/tabler/link";
 import ImageIcon from "~icons/tabler/photo";
 
 import { useClient } from "../../client";
+import { useAppIcons } from "../../composables/useAppIcons";
 import { showCopiedNotice } from "../../composables/useCopiedNotice";
 import { useLinkPreviews } from "../../composables/useLinkPreviews";
 import { useSettings } from "../../composables/useSettings";
@@ -36,6 +37,12 @@ const { settings } = useSettings();
 // loads, or when previews are off, the link icon holds its place.
 const { linkIcon } = useLinkPreviews();
 const siteIcon = computed(() => linkIcon(props.itemDetails));
+// An item copied on a Mac shows the icon of the app it came from, which sync
+// fetched from the Mac and the phone keeps by the app's name
+const { appIcon } = useAppIcons();
+const sourceAppIcon = computed(() =>
+  appIcon(props.itemDetails.sourceApp?.name),
+);
 
 const isCopying = ref(false);
 // Bumped on each copy so the sweep across the card plays again
@@ -190,8 +197,17 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
         <!-- one line: where it came from, size, date, secrets -->
         <div
           class="text-foreground/50 flex items-center gap-x-2 text-xs whitespace-nowrap">
-          <span v-if="itemDetails.sourceApp" class="min-w-0 truncate">
-            {{ itemDetails.sourceApp.name }}
+          <span
+            v-if="itemDetails.sourceApp"
+            class="flex min-w-0 items-center gap-x-1">
+            <img
+              v-if="sourceAppIcon"
+              :src="sourceAppIcon"
+              alt=""
+              class="size-4 shrink-0 rounded" />
+            <span class="min-w-0 truncate">
+              {{ itemDetails.sourceApp.name }}
+            </span>
           </span>
           <template v-if="fileSize">
             <span v-if="itemDetails.sourceApp">·</span>

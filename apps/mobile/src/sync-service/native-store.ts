@@ -312,8 +312,10 @@ class NativeTransaction implements SyncTransaction {
   }
 
   async updatePeer(deviceId: string, patch: PeerPatch): Promise<void> {
+    // the phone has no use for a device's maker, and native code no column
+    const { maker: _maker, ...kept } = patch;
     const changes = Object.fromEntries(
-      Object.entries(patch).filter(([, value]) => value !== undefined),
+      Object.entries(kept).filter(([, value]) => value !== undefined),
     );
     this.peers.set(deviceId, { ...this.peers.get(deviceId), ...changes });
   }

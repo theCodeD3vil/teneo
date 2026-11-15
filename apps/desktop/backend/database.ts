@@ -623,12 +623,19 @@ export function notifyClipboardHistoryChanged(app: TinyApp): void {
   }
 }
 
+// Who made the device an item was copied on ("google"), for its logo on the
+// card. Only a device that said so has one: a phone, never this Mac.
+const originMakerColumn = `
+  (SELECT maker FROM "SYNC_PEERS" WHERE deviceId = originDevice) AS originMaker
+`;
+
 // The list reads only the start of a long text: the card shows two lines, and
 // the whole text comes by id when it's previewed or copied. A text holding a
 // secret is read whole, so the search can tell the secret from the rest.
 const listColumns = `
   id, kind, imageSize, path, dateCopied, sourceAppName, sourceAppBundleId,
   pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
+  ${originMakerColumn},
   CASE WHEN kind != 'text' OR encrypted IS 1 OR secrets IS NOT NULL
     THEN value ELSE substr(value, 1, ?) END AS value,
   length(value) AS valueLength
@@ -709,7 +716,8 @@ export async function getClipboardItem(
     await initializeDatabase(app),
     `
       SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId,
-        pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost
+        pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
+        ${originMakerColumn}
       FROM "CLIPBOARD_ITEMS"
       WHERE id = ? AND deletedAt IS NULL
     `,
@@ -1058,6 +1066,7 @@ function rowToClipboardItem(
     color: row.kind === "color" ? row.value : null,
     concealed: false,
     sourceApp: sourceAppFromRow(row),
+    originMaker: row.originMaker || null,
     sourceURL: null,
     pinned: row.pinnedAt != null,
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,

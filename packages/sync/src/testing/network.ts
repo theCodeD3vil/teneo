@@ -3,13 +3,16 @@
 // every time.
 import { type MemoryPair, memoryChannelPair } from "../channel";
 import { randomBytes } from "../crypto";
-import { SyncEngine } from "../engine";
+import { type AppIconSink, type AppIconSource, SyncEngine } from "../engine";
 import { Hlc } from "../hlc";
 import type { SyncError } from "../session";
 import { type CopyOptions, MemoryStore } from "./memory-store";
 
 export interface DeviceOptions {
   name?: string;
+  maker?: string;
+  iconSource?: AppIconSource;
+  iconSink?: AppIconSink;
   historyLimit?: number;
   /** What the ids of items made here start with. */
   idPrefix?: string;
@@ -21,6 +24,8 @@ export class TestDevice {
   readonly engine: SyncEngine;
   /** How many times received changes changed this device's history. */
   itemsChanged = 0;
+  /** How many times an icon arrived that this device had none for. */
+  iconsChanged = 0;
   private syncSecrets = false;
 
   constructor(network: TestNetwork, id: string, options: DeviceOptions = {}) {
@@ -32,6 +37,12 @@ export class TestDevice {
       deviceId: id,
       name: options.name ?? `Device ${id.slice(0, 1)}`,
       platform: "test",
+      maker: options.maker,
+      iconSource: options.iconSource,
+      iconSink: options.iconSink,
+      onIconsChanged: () => {
+        this.iconsChanged += 1;
+      },
       vaultKey: network.vaultKey,
       store: this.store,
       syncSecrets: () => this.syncSecrets,

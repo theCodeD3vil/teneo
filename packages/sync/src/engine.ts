@@ -8,9 +8,24 @@
 // Mac's items from another). A merge that changes nothing writes nothing, which
 // is what ends the echo.
 import type { Channel } from "./channel";
-import { type VaultKeys, deriveVaultKeys, type Bytes } from "./crypto";
+import {
+  type VaultKeys,
+  deriveVaultKeys,
+  type Bytes,
+  fromBase64,
+  toBase64,
+} from "./crypto";
 import type { Hlc } from "./hlc";
-import { batchLimits, type ChangesFrame, type StateFrame } from "./protocol";
+import {
+  batchLimits,
+  capabilities,
+  type ChangesFrame,
+  type Frame,
+  iconLimits,
+  type IconsFrame,
+  type IconsWantFrame,
+  type StateFrame,
+} from "./protocol";
 import {
   type ItemRecord,
   collapseSameText,
@@ -22,8 +37,38 @@ import {
   parseRecord,
   utf8Length,
 } from "./record";
-import { type Scheduler, Session, SyncError } from "./session";
+import {
+  type FrameHandler,
+  type Scheduler,
+  Session,
+  SyncError,
+} from "./session";
 import type { StoredChange, SyncStore, SyncTransaction } from "./store";
+
+/** A device that has the icons of the apps items were copied from: a Mac. */
+export interface AppIconSource {
+  /** The png of the app with this name, or null when this device has none. */
+  icon(name: string): Promise<Bytes | null>;
+}
+
+/** A device that shows those icons but can't make them: a phone. It keeps
+ *  one per app name and asks for the ones it lacks. */
+export interface AppIconSink {
+  /** Which of these apps this device has no icon for. */
+  missing(names: string[]): Promise<string[]>;
+  save(name: string, png: Bytes): Promise<void>;
+}
+
+const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** An icon from another device is untrusted: a png, and a small one. */
+export function isIconPng(bytes: Bytes): boolean {
+  return (
+    bytes.length > pngSignature.length &&
+    bytes.length <= iconLimits.bytes &&
+    pngSignature.every((byte, index) => bytes[index] === byte)
+  );
+}
 
 export interface EngineOptions {
   /** 32 hex digits, made once per device. */
@@ -31,6 +76,12 @@ export interface EngineOptions {
   /** Shown to the other devices: the computer's name. */
   name: string;
   platform: string;
+  /** Who made this device ("google"), for the others to show its logo. */
+  maker?: string;
+  /** This device hands out app icons to the devices that ask. */
+  iconSource?: AppIconSource;
+  /** This device asks for the icons of the apps in the items it receives. */
+  iconSink?: AppIconSink;
   vaultKey: Bytes;
   store: SyncStore;
   /** Items holding detected secrets travel only while this says true. */
@@ -42,6 +93,8 @@ export interface EngineOptions {
   /** Received changes changed the local history. */
   onItemsChanged?: () => void;
   onPeersChanged?: () => void;
+  /** An icon arrived for an app this device had none for. */
+  onIconsChanged?: () => void;
   /** A connection failed because of something on this device. */
   onError?: (error: unknown) => void;
 }
@@ -50,6 +103,8 @@ export interface ConnectedPeer {
   deviceId: string;
   name: string;
   platform: string;
+  /** Empty when the device didn't say. */
+  maker: string;
   address: string | undefined;
 }
 
@@ -61,6 +116,12 @@ interface Link {
   peerId: string;
   name: string;
   platform: string;
+  maker: string;
+  /** What the peer said it understands. */
+  caps: string[];
+  /** App names this device has asked the peer's icon for, on this connection:
+   *  it answers with what it has, so none is asked for twice. */
+  askedIcons: Set<string>;
   /** The peer's store epoch: null until its state frame arrives. */
   epoch: string | null;
   /** The peer has everything up to here. Null until its state frame arrives. */
@@ -138,6 +199,7 @@ export class SyncEngine {
         deviceId: link.peerId,
         name: link.name,
         platform: link.platform,
+        maker: link.maker,
         address: link.session.remoteAddress,
       }));
   }
@@ -198,6 +260,9 @@ export class SyncEngine {
       peerId: session.peerId,
       name: "",
       platform: "",
+      maker: "",
+      caps: [],
+      askedIcons: new Set(),
       epoch: null,
       sentUpTo: null,
       pumping: false,
@@ -212,6 +277,8 @@ export class SyncEngine {
       epoch: await this.epoch(),
       name: this.options.name,
       platform: this.options.platform,
+      ...(this.options.maker ? { maker: this.options.maker } : {}),
+      ...(this.options.iconSource ? { caps: [capabilities.appIcons] } : {}),
       cursor: { epoch: known?.epoch ?? null, seq: known?.receivedSeq ?? 0 },
     });
     return link;
@@ -221,10 +288,12 @@ export class SyncEngine {
 
   private async handleFrame(
     link: Link,
-    frame: StateFrame | ChangesFrame,
+    frame: Parameters<FrameHandler>[0],
   ): Promise<void> {
     if (frame.t === "state") await this.handleState(link, frame);
-    else await this.handleChanges(link, frame);
+    else if (frame.t === "changes") await this.handleChanges(link, frame);
+    else if (frame.t === "icons-want") await this.handleIconsWant(link, frame);
+    else await this.handleIcons(link, frame);
   }
 
   private async handleState(link: Link, frame: StateFrame): Promise<void> {
@@ -234,6 +303,8 @@ export class SyncEngine {
     link.epoch = frame.epoch;
     link.name = frame.name;
     link.platform = frame.platform;
+    link.maker = frame.maker ?? "";
+    link.caps = frame.caps ?? [];
     // a cursor into another store, or into one this device has since replaced,
     // means nothing: start from the beginning
     link.sentUpTo =
@@ -244,6 +315,7 @@ export class SyncEngine {
       tx.updatePeer(link.peerId, {
         name: frame.name,
         platform: frame.platform,
+        maker: frame.maker ?? "",
         lastSeenAt: this.now(),
         ...(address ? { lastAddress: address } : {}),
       }),
@@ -281,6 +353,10 @@ export class SyncEngine {
       });
       return changed;
     });
+    // the batch is saved whatever becomes of its icons
+    await this.askForIcons(link, records).catch((error: unknown) =>
+      this.options.onError?.(error),
+    );
     if (!changed) return;
 
     await store.trimHistory();
@@ -319,6 +395,73 @@ export class SyncEngine {
 
     await tx.put(incoming); // a tombstone for an item not seen here is stored too
     return true;
+  }
+
+  // --- app icons: a phone asks a Mac for the icons of the apps its items
+  // were copied from, once per app, and keeps them
+
+  /** Ask the peer for the icons of the apps in these records that this
+   *  device has none for. */
+  private async askForIcons(link: Link, records: ItemRecord[]): Promise<void> {
+    const { iconSink } = this.options;
+    if (!iconSink || !link.caps.includes(capabilities.appIcons)) return;
+    const names = new Set<string>();
+    for (const record of records) {
+      const name = record.sourceApp;
+      if (name && !isTombstone(record) && !link.askedIcons.has(name)) {
+        names.add(name);
+      }
+    }
+    if (names.size === 0) return;
+    const missing = await iconSink.missing([...names]);
+    for (let start = 0; start < missing.length; start += iconLimits.count) {
+      const batch = missing.slice(start, start + iconLimits.count);
+      for (const name of batch) link.askedIcons.add(name);
+      await this.sendOrClosed(link, { t: "icons-want", names: batch });
+    }
+  }
+
+  private async handleIconsWant(
+    link: Link,
+    frame: IconsWantFrame,
+  ): Promise<void> {
+    const { iconSource } = this.options;
+    // a device that never offered icons has none to give: not worth an error
+    if (!iconSource) return;
+    const icons: IconsFrame["icons"] = [];
+    for (const name of new Set(frame.names)) {
+      const png = await iconSource.icon(name).catch(() => null);
+      if (png && isIconPng(png)) icons.push({ name, png: toBase64(png) });
+    }
+    if (icons.length > 0) await this.sendOrClosed(link, { t: "icons", icons });
+  }
+
+  private async handleIcons(link: Link, frame: IconsFrame): Promise<void> {
+    const { iconSink } = this.options;
+    if (!iconSink) return;
+    let saved = false;
+    for (const { name, png } of frame.icons) {
+      // only what was asked for, and only a real, small png
+      if (!link.askedIcons.has(name)) continue;
+      const bytes = fromBase64(png);
+      if (!bytes || !isIconPng(bytes)) continue;
+      try {
+        await iconSink.save(name, bytes);
+        saved = true;
+      } catch (error) {
+        this.options.onError?.(error);
+      }
+    }
+    if (saved) this.options.onIconsChanged?.();
+  }
+
+  /** A connection that closed mid-send is an ordinary disconnect */
+  private async sendOrClosed(link: Link, frame: Frame): Promise<void> {
+    try {
+      await link.session.send(frame);
+    } catch (error) {
+      if (!(error instanceof SyncError && error.code === "closed")) throw error;
+    }
   }
 
   // --- sending

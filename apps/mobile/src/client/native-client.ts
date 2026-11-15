@@ -272,6 +272,16 @@ export class NativeClient implements TeneoClient {
     await this.plugin.copyText({ ...this.database, text });
   }
 
+  async getAppIcons(names: string[]): Promise<Record<string, string>> {
+    if (names.length === 0) return {};
+    return (await this.plugin.appIcons({ names })).icons;
+  }
+
+  onAppIconsChanged(listener: () => void): () => void {
+    const handle = this.plugin.addListener("appIconsChanged", listener);
+    return () => void handle.then((added) => added.remove());
+  }
+
   /** Without a preview service (a test database) there are none */
   private async previews(): Promise<LinkPreviews | null> {
     if (!this.linkPreviews) return null;

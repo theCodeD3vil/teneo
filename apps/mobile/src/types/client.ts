@@ -26,6 +26,11 @@ export interface TeneoClient {
    *  text in another case. Rejects like `copyToClipboard`. */
   copyText(text: string): Promise<void>;
   onHistoryChanged(listener: () => void): () => void;
+  /** The icons of the Mac apps with these names, each a data: URL, by
+   *  name. An app the phone has no icon for is left out: sync asks a Mac
+   *  for it, and `onAppIconsChanged` says when one has come. */
+  getAppIcons(names: string[]): Promise<Record<string, string>>;
+  onAppIconsChanged(listener: () => void): () => void;
   /** A link's small picture for its card, as a data: URL. Null when
    *  previews are off or the site has none; rejects when the site can't
    *  be reached, so it can be asked again. */

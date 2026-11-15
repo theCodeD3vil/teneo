@@ -130,6 +130,19 @@ before it is decrypted.
 | `changes`      | `epoch`, `items`, `upTo`, `more`                      | A batch of records, at most 200 and about 256 KB. `upTo` is the sender's `syncSeq` that everything up to has been sent; `more` says another batch follows at once. |
 | `ping`, `pong` | none                                                  | Every 15 seconds. A connection silent for 45 seconds closes with `timeout`.                                                                                        |
 
+Two things came after the first release, without a new version:
+
+- `state` may also carry `maker` (who made the device, such as `google`, at
+  most 64 characters) and `caps` (a list of what the sender understands beyond
+  the first release). An older Teneo drops both; a malformed one is left out,
+  never a reason to refuse the device.
+- A device that lists the capability `app-icons` answers `icons-want`
+  (`names`: at most 32 app names) with `icons` (`icons`: `{ name, png }`, the
+  png in base64 and at most 64 KB), leaving out the apps it has no icon for.
+  An older Teneo closes over a frame it doesn't know, so these two are only
+  ever sent to a device that listed the capability. A Mac lists it; a phone
+  asks for the icon of each app in the records it receives, once per app.
+
 A device that closes for a protocol reason says which one (`auth`, `version`,
 `protocol`, `timeout`) as the close reason, so both sides show the same cause.
 
@@ -171,6 +184,8 @@ by the device with the smaller id, so they never keep different ones.
   `latestStamp`, `trimHistory` and `transaction`, whose `put` stamps the row and
   runs the app's own secret and link detection on the text. The merge rules and
   the cursor logic stay in the engine, so they are written once.
+- Optionally `iconSource` (a Mac: the png of an app by its name) or `iconSink`
+  (a phone: which names it lacks, and a place to keep one), and `maker`.
 
 The Mac transport is in `apps/desktop/backend/sync/`: it listens with
 `tjs.serve` on the first free of ports 47823 to 47827 and finds other devices
@@ -203,6 +218,9 @@ updated at the same moment as a newer one. So:
   handshake. Add fields only where the parsers already ignore unknown ones
   (`parseRecord` drops unknown record fields; frames and handshake messages are
   parsed by their `t`).
+- A new kind of frame that a device can do without goes behind a capability:
+  name it in `capabilities`, list it in `state`'s `caps`, and send the frame
+  only to a device that listed it. App icons work this way.
 - Anything older devices cannot understand needs a new `protocolVersion`, so
   they fail with a clear message instead of a protocol error.
 - Keep new code free of `tjs`, Node and DOM APIs, and run `bun test` here.

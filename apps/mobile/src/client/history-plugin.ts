@@ -88,9 +88,19 @@ export interface HistoryPlugin {
     },
   ): Promise<void>;
   resetTestDatabase(options: { database: string }): Promise<void>;
+  /** The icons of the Mac apps with these names, each a png data: URL; an
+   *  app the phone has no icon for is left out */
+  appIcons(options: {
+    names: string[];
+  }): Promise<{ icons: Record<string, string> }>;
   addListener(
     event: "historyChanged",
     listener: (event: { database: string }) => void,
+  ): Promise<PluginListenerHandle>;
+  /** Sync saved an icon for an app that had none */
+  addListener(
+    event: "appIconsChanged",
+    listener: () => void,
   ): Promise<PluginListenerHandle>;
 }
 

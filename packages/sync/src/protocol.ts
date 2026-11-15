@@ -1,6 +1,13 @@
 // Connection protocol, version 1. Two plain handshake messages (hello, proof)
 // are followed by encrypted frames. Messages are strings: JSON for the
 // handshake, base64 of the AES-GCM ciphertext of a JSON frame after it.
+//
+// The version has not changed since the first release, and a device closes a
+// connection over a frame it doesn't know. So what was added later is opt-in:
+// a device lists what it understands in its state frame's `caps`, and a frame
+// from after the first release is only sent to a device that listed it.
+// Fields added to the state frame are simply dropped by a device that doesn't
+// know them.
 import { isDeviceId } from "./hlc";
 
 export const protocolVersion = 1;
@@ -41,8 +48,40 @@ export interface StateFrame {
   epoch: string;
   name: string;
   platform: string;
+  /** Who made the device, such as "google": a phone says, so the others can
+   *  show its maker's logo. Absent from a device that doesn't say. */
+  maker?: string;
+  /** What the sender understands beyond the first release (see `capabilities`). */
+  caps?: string[];
   /** How far the sender has read the receiver's changes. */
   cursor: Cursor;
+}
+
+export const capabilities = {
+  /** Answers `icons-want` with the icons of the apps it knows */
+  appIcons: "app-icons",
+} as const;
+
+export const iconLimits = {
+  /** names in one `icons-want`, and icons in one `icons` */
+  count: 32,
+  /** one icon's png */
+  bytes: 64 * 1024,
+  /** an app's name, as in a record's sourceApp */
+  nameLength: 256,
+};
+
+/** Asks for the icons of the apps with these names. Sent only to a device
+ *  with the appIcons capability. */
+export interface IconsWantFrame {
+  t: "icons-want";
+  names: string[];
+}
+
+/** The icons asked for that the sender has; the others are left out. */
+export interface IconsFrame {
+  t: "icons";
+  icons: { name: string; /** base64 */ png: string }[];
 }
 
 export interface ChangesFrame {
@@ -63,7 +102,13 @@ export interface PongFrame {
   t: "pong";
 }
 
-export type Frame = StateFrame | ChangesFrame | PingFrame | PongFrame;
+export type Frame =
+  | StateFrame
+  | ChangesFrame
+  | IconsWantFrame
+  | IconsFrame
+  | PingFrame
+  | PongFrame;
 
 function parseJson(text: string): Record<string, unknown> | null {
   try {
@@ -114,13 +159,44 @@ export function parseFrame(text: string): Frame | null {
       if (typeof cursor !== "object" || cursor === null) return null;
       if (cursor.epoch !== null && !isShortText(cursor.epoch, 64)) return null;
       if (!isCount(cursor.seq)) return null;
+      // added after the first release: one that is missing or malformed is
+      // left out, never a reason to refuse the device
+      const caps = Array.isArray(m.caps)
+        ? m.caps.filter((cap) => isShortText(cap, 32)).slice(0, 32)
+        : [];
       return {
         t: "state",
         epoch: m.epoch,
         name: m.name,
         platform: m.platform,
+        ...(isShortText(m.maker, 64) ? { maker: m.maker } : {}),
+        ...(caps.length > 0 ? { caps } : {}),
         cursor: { epoch: cursor.epoch, seq: cursor.seq },
       };
+    }
+    case "icons-want": {
+      if (!Array.isArray(m.names) || m.names.length > iconLimits.count) {
+        return null;
+      }
+      if (!m.names.every((name) => isShortText(name, iconLimits.nameLength))) {
+        return null;
+      }
+      return { t: "icons-want", names: m.names as string[] };
+    }
+    case "icons": {
+      if (!Array.isArray(m.icons) || m.icons.length > iconLimits.count) {
+        return null;
+      }
+      const icons: IconsFrame["icons"] = [];
+      for (const icon of m.icons as unknown[]) {
+        if (typeof icon !== "object" || icon === null) return null;
+        const { name, png } = icon as Record<string, unknown>;
+        if (!isShortText(name, iconLimits.nameLength)) return null;
+        // base64 is four characters for every three bytes
+        if (!isShortText(png, Math.ceil(iconLimits.bytes / 3) * 4)) return null;
+        icons.push({ name, png });
+      }
+      return { t: "icons", icons };
     }
     case "changes": {
       if (!isShortText(m.epoch, 64) || !isCount(m.upTo)) return null;

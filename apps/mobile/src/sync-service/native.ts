@@ -34,6 +34,13 @@ export interface NativeSync extends NativeHistory {
   restartDiscovery(): void;
   /** What this phone is called to the other devices */
   deviceName(): string;
+  /** Who made this phone, in lower case ("google"), or "" when unknown */
+  deviceMaker(): string;
+  /** Which of these app names (a JSON array) the phone has no icon for, as a
+   *  JSON array (AppIcons.java) */
+  missingAppIcons(names: string): string;
+  /** Keep an app's icon, a png in base64. False when it isn't kept. */
+  saveAppIcon(name: string, png: string): boolean;
   /** Only a debug build shows what the page does with items */
   isDebuggable(): boolean;
 }

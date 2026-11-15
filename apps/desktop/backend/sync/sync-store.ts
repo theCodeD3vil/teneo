@@ -50,6 +50,7 @@ const newestUnpinnedQuery = `
 const peerFields = [
   "name",
   "platform",
+  "maker",
   "epoch",
   "receivedSeq",
   "lastAddress",

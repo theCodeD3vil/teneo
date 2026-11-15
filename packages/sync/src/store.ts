@@ -16,6 +16,9 @@ export interface PeerRecord {
   deviceId: string;
   name: string;
   platform: string;
+  /** Who made the device, as it said ("google"); empty or absent when it
+   *  didn't. A store that has no use for it need not keep it. */
+  maker?: string;
   /** The other store's epoch when `receivedSeq` was read. */
   epoch: string | null;
   /** How far this device has read the other's changes. */

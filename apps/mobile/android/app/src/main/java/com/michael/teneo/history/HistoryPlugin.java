@@ -1,12 +1,14 @@
 package com.michael.teneo.history;
 
 import android.content.pm.ApplicationInfo;
+import android.util.Base64;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -32,6 +34,35 @@ public class HistoryPlugin extends Plugin {
     // each open store's listener, by database name
     private final Map<String, HistoryStore> watched = new HashMap<>();
     private final Map<String, HistoryStore.Listener> listeners = new HashMap<>();
+
+    // an icon the sync service saves shows on the cards that were waiting for it
+    private final AppIcons.Listener iconsListener = () -> notifyListeners("appIconsChanged", new JSObject());
+
+    @Override
+    public void load() {
+        AppIcons.addListener(iconsListener);
+    }
+
+    /**
+     * The icons of the Mac apps with these `names`, each a png data: URL, by
+     * name; an app with none is left out. They are for every database alike.
+     */
+    @PluginMethod
+    public void appIcons(PluginCall call) {
+        JSArray names = call.getArray("names");
+        JSObject icons = new JSObject();
+        if (names != null) {
+            AppIcons saved = new AppIcons(new File(getContext().getFilesDir(), AppIcons.FOLDER));
+            for (int i = 0; i < names.length(); i++) {
+                String name = names.optString(i, null);
+                byte[] png = name == null ? null : saved.read(name);
+                if (png != null) icons.put(name, "data:image/png;base64," + Base64.encodeToString(png, Base64.NO_WRAP));
+            }
+        }
+        JSObject result = new JSObject();
+        result.put("icons", icons);
+        call.resolve(result);
+    }
 
     @PluginMethod
     public void list(PluginCall call) {
@@ -277,6 +308,7 @@ public class HistoryPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        AppIcons.removeListener(iconsListener);
         // each store outlives the web view, and must not call into a gone one
         for (Map.Entry<String, HistoryStore> entry : watched.entrySet()) {
             entry.getValue().removeListener(listeners.get(entry.getKey()));

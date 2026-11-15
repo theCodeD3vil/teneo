@@ -13,6 +13,7 @@ import { Database } from "tjs:sqlite";
 
 import {
   countClipboardItemsToDelete,
+  getClipboardItem,
   deleteClipboardItems,
   getSyncIdentity,
   initializeDatabase,
@@ -29,6 +30,7 @@ import { clearClipboardHistory } from "../history-limits";
 import { getSettings, loadSettings, updateSettings } from "../settings";
 import { all, run } from "../sqlite";
 import type { ClipboardItemToSave } from "../types/clipboard";
+import { appIconPng } from "./app-icon-source";
 import { pinStampFor, tombstoneLifetime } from "./records";
 import { check, finish, rejects, same, test } from "./runtime-test";
 import { backfillSyncColumns, syncEpoch, syncHead } from "./schema";
@@ -994,6 +996,61 @@ await test("a change made here tells the history listeners, until they are remov
   const after = heard;
   await saveClipboardItem(textItem("heard-4"), app);
   same(heard, after, "a removed listener heard another change");
+});
+
+await test("an item copied on a device that said who made it is listed with its maker", async () => {
+  reset();
+  await store.transaction(async (tx) => {
+    await tx.put(record("m-1", "copied on a phone"));
+    await tx.updatePeer(peerId, { name: "Pixel 9", platform: "android" });
+  });
+  await saveClipboardItem(textItem("copied here"), app);
+  const list = async () =>
+    (await listClipboardItems(app, { kind: "all", search: "", limit: 50 }))
+      .items;
+  same(
+    (await list()).map((item) => item.originMaker),
+    [null, null],
+    "a device that didn't say has none",
+  );
+  await store.transaction((tx) => tx.updatePeer(peerId, { maker: "google" }));
+  same((await store.getPeer(peerId))?.maker, "google", "the maker is kept");
+  const listed = await list();
+  same(
+    listed.find((item) => item.id === "m-1")?.originMaker,
+    "google",
+    "the phone's item has its maker",
+  );
+  same(
+    listed.find((item) => item.id !== "m-1")?.originMaker,
+    null,
+    "this Mac's own item has none",
+  );
+  same(
+    (await getClipboardItem("m-1", app))?.originMaker,
+    "google",
+    "and so has the item read whole",
+  );
+});
+
+await test("a phone that asks for an app's icon by name gets the one saved for it", async () => {
+  reset();
+  await saveClipboardItem(
+    textItem("from safari", { name: "Safari", bundleId: "com.apple.Safari" }),
+    app,
+  );
+  // an item that arrived from another Mac has a name and no app here
+  await saveClipboardItem(
+    textItem("from elsewhere", { name: "Elsewhere", bundleId: null }),
+    app,
+  );
+  // saved the first time the app was seen (app-icons.ts)
+  await tjs.makeDir(`${dataFolder}/icons`, { recursive: true });
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  await tjs.writeFile(`${dataFolder}/icons/com.apple.Safari.png`, png);
+  same([...((await appIconPng("Safari", app)) ?? [])], [...png], "its icon");
+  same(await appIconPng("Elsewhere", app), null, "no app here by that name");
+  same(await appIconPng("Never Copied", app), null, "an unknown name");
 });
 
 await tjs.remove(folder).catch(() => {});

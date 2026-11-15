@@ -21,6 +21,7 @@ import { useSettings } from "@/composables/useSettings";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { getClipboardData, getImageName } from "@/utils/clipboard-items";
 import { copyItemToClipboard } from "@/utils/copy-item";
+import { makerIcon } from "@/utils/device-makers";
 
 const props = defineProps<{
   itemDetails: ClipboardHistoryItem;
@@ -65,6 +66,8 @@ function getClipboardThemeClasses() {
 // the preview is a data: URL, or null when that file was moved or deleted since
 // it was copied; until it loads, the kind icon holds its place at the same size.
 const sourceAppBundleId = props.itemDetails.sourceApp?.bundleId;
+// An item copied on a phone is named after the phone, with its maker's logo
+const deviceMakerIcon = makerIcon(props.itemDetails.originMaker);
 const isImage = props.itemDetails.kind === "image";
 const isFiles = props.itemDetails.kind === "files";
 const firstPath = props.itemDetails.paths[0];
@@ -309,6 +312,12 @@ onUnmounted(() => {
                 ])
               " />
             {{ itemDetails.sourceApp?.name }}
+          </span>
+          <span
+            v-else-if="deviceMakerIcon && itemDetails.sourceApp?.name"
+            class="text-foreground/50 flex items-center gap-x-1 text-xs">
+            <component :is="deviceMakerIcon" class="size-3.5" />
+            {{ itemDetails.sourceApp.name }}
           </span>
           <template v-if="fileSize">
             <span class="text-foreground/50">·</span>
