@@ -17,13 +17,11 @@ export type UpdateState =
 export interface UpdaterOptions {
   /** The installed version */
   current: () => Promise<string>;
-  /** null in a browser: an update is only ever a download link there */
+  /** null in a browser, which can look for an update but not install one */
   plugin: UpdatePlugin | null;
   find?: (current: string) => Promise<Update | null>;
   storage?: Pick<Storage, "getItem" | "setItem">;
   now?: () => number;
-  /** Open a link in the phone's browser */
-  openUrl?: (url: string) => void;
 }
 
 const oneDayMs = 24 * 60 * 60 * 1000;
@@ -32,15 +30,13 @@ const dismissedKey = "teneo.updates.dismissed";
 
 /**
  * Looks for a newer Android release on GitHub and installs it: the app
- * downloads the APK and hands it to Android's installer, or, failing that,
- * the phone's browser downloads it from the same link.
+ * downloads the APK and hands it to Android's installer.
  */
 export class Updater {
   private readonly options: UpdaterOptions;
   private readonly find: (current: string) => Promise<Update | null>;
   private readonly storage: Pick<Storage, "getItem" | "setItem">;
   private readonly now: () => number;
-  private readonly openUrl: (url: string) => void;
   private readonly listeners = new Set<(state: UpdateState) => void>();
   private current: UpdateState = { kind: "idle" };
   private checking: Promise<Update | null> | null = null;
@@ -50,8 +46,6 @@ export class Updater {
     this.find = options.find ?? ((current) => findUpdate(current));
     this.storage = options.storage ?? localStorage;
     this.now = options.now ?? Date.now;
-    this.openUrl =
-      options.openUrl ?? ((url) => void window.open(url, "_blank"));
     const plugin = options.plugin;
     if (plugin) {
       void plugin.addListener("progress", ({ received }) => {
@@ -109,13 +103,17 @@ export class Updater {
     this.storage.setItem(dismissedKey, update.version);
   }
 
-  /** Download and install the update found, or open its link without native code */
+  /** Download and install the update found */
   async install(): Promise<void> {
     const update = this.update();
     if (!update || this.isBusy()) return;
     const plugin = this.options.plugin;
     if (!plugin) {
-      this.openInBrowser();
+      this.set({
+        kind: "failed",
+        update,
+        message: "Updates install in the Android app",
+      });
       return;
     }
     try {
@@ -145,12 +143,6 @@ export class Updater {
   async cancel(): Promise<void> {
     if (this.current.kind !== "downloading") return;
     await this.options.plugin?.cancel();
-  }
-
-  /** The browser downloads the APK; Android's installer opens it from there */
-  openInBrowser(): void {
-    const update = this.update();
-    if (update) this.openUrl(update.apkUrl);
   }
 
   private async runCheck(): Promise<Update | null> {

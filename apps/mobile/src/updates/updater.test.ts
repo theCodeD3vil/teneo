@@ -72,7 +72,6 @@ function updater(
     storage?: ReturnType<typeof memoryStorage>;
   } = {},
 ) {
-  const opened: string[] = [];
   const states: UpdateState["kind"][] = [];
   const instance = new Updater({
     current: async () => "0.1.0",
@@ -80,10 +79,9 @@ function updater(
     find: options.find ?? (async () => update),
     storage: options.storage ?? memoryStorage(),
     now: options.now ?? (() => 10 * day),
-    openUrl: (url) => opened.push(url),
   });
   instance.onChange((state) => states.push(state.kind));
-  return { instance, opened, states };
+  return { instance, states };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -241,7 +239,7 @@ describe("Updater", () => {
     const fake = fakePlugin({
       installFails: new Error("The download doesn't match the release"),
     });
-    const { instance, opened } = updater({ plugin: fake.plugin });
+    const { instance } = updater({ plugin: fake.plugin });
     await instance.check();
     await instance.install();
     expect(instance.state).toEqual({
@@ -249,8 +247,6 @@ describe("Updater", () => {
       update,
       message: "The download doesn't match the release",
     });
-    instance.openInBrowser();
-    expect(opened).toEqual([update.apkUrl]);
   });
 
   test("reports what Android's installer said", async () => {
@@ -267,12 +263,16 @@ describe("Updater", () => {
     });
   });
 
-  test("opens the download in the browser without the native plugin", async () => {
-    const { instance, opened } = updater({ plugin: null });
+  test("says an update can't be installed without the native plugin", async () => {
+    const { instance } = updater({ plugin: null });
     await instance.install();
-    expect(opened).toEqual([]);
+    expect(instance.state).toEqual({ kind: "idle" });
     await instance.check();
     await instance.install();
-    expect(opened).toEqual([update.apkUrl]);
+    expect(instance.state).toEqual({
+      kind: "failed",
+      update,
+      message: "Updates install in the Android app",
+    });
   });
 });

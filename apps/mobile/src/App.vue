@@ -13,7 +13,8 @@ import { useSheetDepth } from "./composables/useSheetDepth";
 const { currentState, direction } = useNavigation();
 
 // Behind an open sheet the page steps back a touch: it shrinks by a few
-// pixels on each side, over a black backdrop. Dragging the sheet down brings
+// pixels on each side, over a black backdrop. Its top edge stays put, so the
+// status bar keeps the page's colour behind it. Dragging the sheet down brings
 // it forward with the finger.
 // Only the transform animates, on the compositor and in step with the sheet
 // (the timings of sheet-in and sheet-out in style.css). The page keeps its own
@@ -59,7 +60,7 @@ const screenKey = computed(() =>
 <template>
   <div class="h-dvh overflow-hidden bg-black">
     <div
-      class="pt-safe pb-safe px-safe bg-background size-full overflow-hidden will-change-transform"
+      class="pt-safe pb-safe px-safe bg-background size-full origin-top overflow-hidden will-change-transform"
       :style="pageDepthStyle">
       <div class="relative flex size-full flex-col p-4">
         <!-- hidden, not unmounted, so the list keeps its tab, search and scroll -->
