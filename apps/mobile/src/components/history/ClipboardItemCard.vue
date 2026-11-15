@@ -218,7 +218,8 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
           </template>
           <template v-if="itemDetails.dateCopied">
             <span v-if="itemDetails.sourceApp || fileSize">·</span>
-            <span>{{ dateCopied }}</span>
+            <!-- a step under the line's size, which is 0.9375rem here -->
+            <span class="text-[0.8125rem]">{{ dateCopied }}</span>
           </template>
           <template v-if="secretLabels">
             <span>·</span>

@@ -331,7 +331,9 @@ onUnmounted(() => {
           </template> -->
           <template v-if="itemDetails.dateCopied">
             <span class="text-foreground/50">·</span>
-            <span class="text-foreground/50 text-xs">{{ dateCopied }}</span>
+            <span class="text-foreground/50 text-[0.6875rem]">{{
+              dateCopied
+            }}</span>
           </template>
           <template v-if="secretLabels">
             <span class="text-foreground/50">·</span>
