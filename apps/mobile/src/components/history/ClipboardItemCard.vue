@@ -8,7 +8,7 @@ import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { maskSecrets, type TextPart } from "@teneo/ui/utils/secrets";
 import { computed, onUnmounted, ref } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
-import OpenIcon from "~icons/tabler/arrow-up-right";
+import OpenIcon from "~icons/tabler/chevron-right";
 import ClipboardIcon from "~icons/tabler/clipboard";
 import FileIcon from "~icons/tabler/file";
 import KeyIcon from "~icons/tabler/key";
@@ -217,7 +217,7 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
       class="size-[2.25rem] rounded-[0.75rem] object-cover" />
     <span
       v-else-if="itemDetails.color"
-      class="border-card size-[2.25rem] rounded-[0.75rem] border-[3px]"
+      class="size-[2.25rem] rounded-[0.75rem]"
       :style="{ background: itemDetails.color }" />
     <span
       v-else
@@ -253,14 +253,26 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
         ">
         {{ tileTitle }}
       </p>
+      <!-- where it came from, with its icon, as on the list's cards -->
       <span
         :class="
           cn([
-            'truncate text-[0.8125rem] leading-[1.125rem]',
+            'flex min-w-0 items-center gap-1.5 text-[0.8125rem] leading-[1.125rem]',
             hasImageBackground ? 'text-foreground/80' : tint.sub,
           ])
         ">
-        {{ itemDetails.sourceApp?.name ?? dateCopied }}
+        <img
+          v-if="itemDetails.sourceApp && sourceAppIcon"
+          :src="sourceAppIcon"
+          alt=""
+          class="size-4 shrink-0 rounded" />
+        <component
+          :is="deviceMakerIcon"
+          v-else-if="itemDetails.sourceApp && deviceMakerIcon"
+          class="size-3 shrink-0" />
+        <span class="min-w-0 truncate">
+          {{ itemDetails.sourceApp?.name ?? dateCopied }}
+        </span>
       </span>
     </div>
     <div
@@ -300,7 +312,7 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
     <!-- a colour is its own icon -->
     <span
       v-else-if="itemDetails.color"
-      class="border-tint-mint size-[2.75rem] shrink-0 rounded-[0.875rem] border-4"
+      class="size-[2.75rem] shrink-0 rounded-[0.875rem]"
       :style="{ background: itemDetails.color }" />
     <div
       v-else
