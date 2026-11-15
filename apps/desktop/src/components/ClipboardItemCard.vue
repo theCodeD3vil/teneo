@@ -316,7 +316,7 @@ onUnmounted(() => {
           <span
             v-else-if="deviceMakerIcon && itemDetails.sourceApp?.name"
             class="text-foreground/50 flex items-center gap-x-1 text-xs">
-            <component :is="deviceMakerIcon" class="size-3.5" />
+            <component :is="deviceMakerIcon" class="size-3" />
             {{ itemDetails.sourceApp.name }}
           </span>
           <template v-if="fileSize">

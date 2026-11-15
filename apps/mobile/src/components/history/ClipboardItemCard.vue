@@ -208,7 +208,7 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
           <component
             :is="deviceMakerIcon"
             v-else-if="itemDetails.sourceApp && deviceMakerIcon"
-            class="-mr-1 size-3.5 shrink-0" />
+            class="-mr-1 size-3 shrink-0" />
           <span v-if="itemDetails.sourceApp" class="min-w-0 truncate">
             {{ itemDetails.sourceApp.name }}
           </span>
