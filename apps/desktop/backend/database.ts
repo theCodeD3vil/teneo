@@ -325,11 +325,14 @@ async function refreshDetection(
   if (changed) notifyClipboardHistoryChanged(app);
 }
 
-// A deleted text whose text is gone, or a deleted image whose file is: what
-// sync keeps so peers hear of the delete (see tombstones below). Deleted
-// before sync, a text keeps its value and an image its file.
+// The kinds whose value is a text that syncs: a colour travels as the text it
+// was copied as.
+const textKinds = `kind IN ('text', 'color')`;
+// A deleted text or colour whose value is gone, or a deleted image whose file
+// is: what sync keeps so peers hear of the delete (see tombstones below).
+// Deleted before sync, a text keeps its value and an image its file.
 const tombstoneRow = `(deletedAt IS NOT NULL AND (
-  (kind = 'text' AND value IS NULL) OR (kind = 'image' AND path IS NULL)
+  (${textKinds} AND value IS NULL) OR (kind = 'image' AND path IS NULL)
 ))`;
 // ...and one still young enough that it must stay: ?  is its cutoff (ms)
 const youngTombstone = `(${tombstoneRow} AND deletedAt >= ?)`;
@@ -380,7 +383,7 @@ export async function countClipboardItemsToDelete(
 const eraseText = ["value", "secrets", "linkUrl", "linkHost", "encrypted"]
   .map(
     (column) =>
-      `${column} = CASE WHEN kind = 'text' THEN NULL ELSE ${column} END`,
+      `${column} = CASE WHEN ${textKinds} THEN NULL ELSE ${column} END`,
   )
   .join(", ");
 
@@ -413,7 +416,7 @@ export async function deleteClipboardItems(
         `
           UPDATE "CLIPBOARD_ITEMS"
           SET deletedAt = ifnull(deletedAt, ?), pinnedAt = NULL, syncSeq = NULL, ${eraseText}
-          WHERE kind = 'text' AND NOT ${tombstoneRow} AND ${deletionCondition}
+          WHERE ${textKinds} AND NOT ${tombstoneRow} AND ${deletionCondition}
         `,
         Date.now(),
         ...values,

@@ -2,6 +2,7 @@
 // to merge and what to send; this reads and writes the rows, and keeps what
 // the engine needs of them: a counter that every write moves, and a cursor per
 // peer saved in the same transaction as the batch it covers.
+import { getCssColor } from "@teneo/shared/detection/colors";
 import { detectionVersion } from "@teneo/shared/detection/version";
 import type {
   ItemRecord,
@@ -30,6 +31,7 @@ import { measureImage } from "./image-store";
 import {
   type SyncRow,
   holdsSecret,
+  recordKind,
   recordToColumns,
   rowToRecord,
 } from "./records";
@@ -91,7 +93,7 @@ export class SqliteSyncStore implements SyncStore {
         database,
         `
           SELECT ${rowColumns}, syncSeq FROM "CLIPBOARD_ITEMS"
-          WHERE kind IN ('text', 'image') AND syncSeq > ? ORDER BY syncSeq LIMIT ?
+          WHERE kind IN ('text', 'image', 'color') AND syncSeq > ? ORDER BY syncSeq LIMIT ?
         `,
         cursor,
         asked,
@@ -213,7 +215,7 @@ class SqliteTransaction implements SyncTransaction {
 
   async get(id: string): Promise<ItemRecord | null> {
     const row = this.readRow(id);
-    if (!row || (row.kind !== "text" && row.kind !== "image")) return null;
+    if (!row || !recordKind(row.kind)) return null;
     const readable = await decryptRow(row, this.app);
     return readable && rowToRecord(readable, getSyncIdentity().deviceId);
   }
@@ -223,7 +225,7 @@ class SqliteTransaction implements SyncTransaction {
     const existing = this.readRow(record.id);
     // The id belongs to a copy of another kind (not a thing that happens with
     // random ids): leave it, rather than fail the whole batch.
-    if (existing && existing.kind !== record.kind) {
+    if (existing && recordKind(existing.kind) !== record.kind) {
       logError(
         `ignoring a change to ${record.id}: it is not a ${record.kind} here`,
         null,
@@ -242,6 +244,10 @@ class SqliteTransaction implements SyncTransaction {
     const textChanged =
       columns.value !== null && current?.value !== columns.value;
     const found = textChanged ? detectInText(columns.value) : null;
+    // A text that is exactly one colour is kept as a colour item, as one
+    // copied here is. Nothing is looked for in a colour.
+    const isColor =
+      columns.value !== null && getCssColor(columns.value) !== null;
     const encrypted =
       found !== null &&
       getSettings().encryptSecrets &&
@@ -262,9 +268,10 @@ class SqliteTransaction implements SyncTransaction {
             pinnedAt, pinnedStamp, deletedAt, createdAt, originDevice, syncSeq,
             encrypted, secrets, linkUrl, linkHost, detectorVersion
           )
-          VALUES (?, 'text', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         record.id,
+        isColor ? "color" : "text",
         storedValue,
         columns.dateCopied,
         columns.sourceAppName,
@@ -383,7 +390,7 @@ class SqliteTransaction implements SyncTransaction {
     const [row] = all<SyncRow>(this.database, newestUnpinnedQuery);
     // a file list is the newest copy: the same text before it is not a
     // repeat, as in the app's own check
-    if (!row || (row.kind !== "text" && row.kind !== "image")) return null;
+    if (!row || !recordKind(row.kind)) return null;
     const readable = await decryptRow(row, this.app);
     return readable && rowToRecord(readable, getSyncIdentity().deviceId);
   }

@@ -218,6 +218,15 @@ async function handle(line: string): Promise<void> {
       console.log(`ok from ${sourceApp.name}`);
       break;
     }
+    case "color": {
+      // as the app saves a copied text that is a colour
+      const item = await saveClipboardItem(
+        { ...textItem(""), kind: "color", text: null, color: argument },
+        app,
+      );
+      console.log(`ok color ${item.id}`);
+      break;
+    }
     case "image": {
       // a png file, copied in as the clipboard would hand one over
       const bytes = await tjs.readFile(argument);
@@ -262,7 +271,9 @@ async function handle(line: string): Promise<void> {
           `item ${item.id} ${item.pinned ? "pinned" : "-"} ${
             item.kind === "image"
               ? `image ${item.imageSize?.width}x${item.imageSize?.height} ${item.image}`
-              : JSON.stringify(item.text)
+              : item.kind === "color"
+                ? `color ${item.color}`
+                : JSON.stringify(item.text)
           }${item.originMaker ? ` maker=${item.originMaker}` : ""}`,
         );
       }

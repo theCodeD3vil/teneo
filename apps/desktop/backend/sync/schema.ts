@@ -137,6 +137,19 @@ export function backfillSyncColumns(
       deviceId,
     );
     restampRows(database, `syncSeq IS NULL`);
+    // Colours began to sync after the first release. The ones copied before
+    // have change numbers every peer has read past: they get new ones, once.
+    const [sent] = all(
+      database,
+      `SELECT 1 FROM "SYNC_META" WHERE key = 'colorsSync'`,
+    );
+    if (!sent) {
+      restampRows(database, `kind = 'color'`);
+      run(
+        database,
+        `INSERT INTO "SYNC_META" (key, value) VALUES ('colorsSync', 1)`,
+      );
+    }
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");

@@ -65,15 +65,24 @@ export function holdsSecret(
   return row.secrets !== null || row.encrypted === 1;
 }
 
-/** The record a row stands for, or null when it can't be one: not a text or
- *  an image, or a field a peer would refuse (a text over 1 MB is one, and so
+/** What a row is to sync. A colour travels as the text it was copied as: the
+ *  device that takes it finds the colour in it again, each in its own way
+ *  (a Mac keeps it as a colour item, a phone as a text it shows as one). */
+export function recordKind(kind: string): "text" | "image" | null {
+  if (kind === "text" || kind === "color") return "text";
+  return kind === "image" ? "image" : null;
+}
+
+/** The record a row stands for, or null when it can't be one: not a text, a
+ *  colour or an image, or a field a peer would refuse (a text over 1 MB is one, and so
  *  is an image whose file was never measured). A deleted row is always sent as
  *  a tombstone, even one deleted before sync, whose text is still here. */
 export function rowToRecord(row: SyncRow, deviceId: string): ItemRecord | null {
-  if (row.kind !== "text" && row.kind !== "image") return null;
+  const kind = recordKind(row.kind);
+  if (!kind) return null;
   const deleted = row.deletedAt !== null;
-  const image = row.kind === "image" && !deleted ? imageOfRow(row) : null;
-  if (row.kind === "image" && !deleted && !image) return null;
+  const image = kind === "image" && !deleted ? imageOfRow(row) : null;
+  if (kind === "image" && !deleted && !image) return null;
 
   let pinned: ItemRecord["pinned"] = null;
   if (row.pinnedAt !== null) {

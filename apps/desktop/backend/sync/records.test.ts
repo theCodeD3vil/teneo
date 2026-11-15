@@ -159,8 +159,20 @@ test("an image row becomes an image record once its file has been measured", () 
   expect(
     rowToRecord({ ...imageRow, imageType: "image/heic" }, device),
   ).toBeNull();
-  // a file list and a color are never a record
+  // a file list is never a record
   expect(rowToRecord({ ...imageRow, kind: "files" }, device)).toBeNull();
+});
+
+test("a colour row travels as the text it was copied as", () => {
+  const color = { ...row, kind: "color", value: "#1122AA" };
+  expect(rowToRecord(color, device)).toMatchObject({
+    kind: "text",
+    text: "#1122AA",
+    image: null,
+  });
+  expect(
+    rowToRecord({ ...color, value: null, deletedAt: 5000 }, device),
+  ).toMatchObject({ kind: "text", text: null, deletedAt: 5000 });
 });
 
 test("a deleted image row is a tombstone, measured or not", () => {

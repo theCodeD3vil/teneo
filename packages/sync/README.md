@@ -153,6 +153,9 @@ Two things came after the first release, without a new version:
   again on its next connection for any it still lacks. Image records and
   these frames are only sent to a device that listed the capability.
 
+A colour has no kind of its own on the wire: it travels as the text it was
+copied as, and each device finds the colour in it again.
+
 A device that closes for a protocol reason says which one (`auth`, `version`,
 `protocol`, `timeout`) as the close reason, so both sides show the same cause.
 
