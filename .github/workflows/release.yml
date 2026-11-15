@@ -63,9 +63,12 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      # From v0.72 the app's updater compares whole versions. Before it, only
+      # the three numbers were read, so a beta never saw a newer beta of the
+      # same release: 0.4.0-beta.3 took 0.4.0-beta.4 for itself.
       - name: Install tinyjs
         env:
-          TINYJS_VERSION: v0.66.2
+          TINYJS_VERSION: v0.72.1
         run: |
           curl -fsSL https://tinyjs.app/install | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH" # the installer's fallback link folder
