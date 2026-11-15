@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { appIdentities, releaseVariant, withIdentity } from "./app-identity";
 
@@ -26,12 +26,13 @@ test("the three apps have three names, ids and two update addresses", () => {
   );
 });
 
-test("an identity changes the name, the id and the update address only", () => {
+test("an identity changes the name, the id, the icon and the update address only", () => {
   const beta = withIdentity(config, "beta");
   expect(beta).toEqual({
     ...config,
     title: "Teneo Beta",
     id: "com.michael.teneo.beta",
+    icon: "icon-beta.png",
     update: { url: appIdentities.beta.updateUrl, auto: "daily" },
   });
   expect(withIdentity(beta, "production")).toEqual(config);
@@ -41,6 +42,15 @@ test("keepId renames the app and leaves its data where it is", () => {
   const debug = withIdentity(config, "debug", { keepId: true });
   expect(debug.title).toBe("Teneo Debug");
   expect(debug.id).toBe("com.michael.teneo");
+});
+
+test("each app's icon is a file beside tinyjs.json; the full release takes icon.png", () => {
+  expect(appIdentities.production.icon).toBeUndefined();
+  expect(existsSync(`${import.meta.dir}/../icon.png`)).toBe(true);
+  for (const variant of ["beta", "debug"] as const) {
+    const icon = appIdentities[variant].icon;
+    expect(icon && existsSync(`${import.meta.dir}/../${icon}`)).toBe(true);
+  }
 });
 
 test("tinyjs.json is formatted the way the scripts write it back", () => {

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Teneo Debug's icon: the two sheets in orange, with a wrench on the front one. It takes the place of the full release's (main/res/drawable) in a debug build; the Mac's is apps/desktop/icon-debug.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.3"
+        android:scaleY="1.3"
+        android:translateX="22.8"
+        android:translateY="22.8">
+        <group
+            android:pivotX="24"
+            android:pivotY="24"
+            android:rotation="12">
+            <path
+                android:fillColor="#F08C00"
+                android:pathData="M23,6h10a6,6 0,0 1,6 6v16a6,6 0,0 1,-6 6h-10a6,6 0,0 1,-6 -6v-16a6,6 0,0 1,6 -6z" />
+            <path
+                android:fillColor="#FFEDBE"
+                android:pathData="M15,14h10a6,6 0,0 1,6 6v16a6,6 0,0 1,-6 6h-10a6,6 0,0 1,-6 -6v-16a6,6 0,0 1,6 -6z" />
+            <!-- drawn on a 24dp grid, set in the middle of the front sheet -->
+            <group
+                android:scaleX="0.58"
+                android:scaleY="0.58"
+                android:translateX="13.04"
+                android:translateY="21.04">
+                <path
+                    android:pathData="M7,10h3v-3l-3.5,-3.5a6,6 0,0 1,8 8l6,6a2,2 0,0 1,-3 3l-6,-6a6,6 0,0 1,-8 -8l3.5,3.5"
+                    android:strokeColor="#7A5200"
+                    android:strokeLineCap="round"
+                    android:strokeLineJoin="round"
+                    android:strokeWidth="2.2" />
+            </group>
+        </group>
+    </group>
+</vector>

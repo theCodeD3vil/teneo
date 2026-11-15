@@ -1,6 +1,7 @@
 // Teneo is built as three apps, so a beta and a dev run install and run
 // beside the full release: each has its own name, and its own id, which is
-// what macOS keys its data folder, Keychain entries and permissions by. No
+// what macOS keys its data folder, Keychain entries and permissions by. Each
+// has its own icon too, so they are told apart in Finder and the Dock. No
 // globals in here, so the scripts and the tests can import it.
 export type AppVariant = "production" | "beta" | "debug";
 
@@ -9,6 +10,10 @@ interface AppIdentity {
   id: string;
   /** Where the app looks for its updates */
   updateUrl: string;
+  /** The app's icon, beside tinyjs.json. The full release has none named:
+   *  tinyjs takes icon.png. The beta's has a beaker on the front sheet, in
+   *  green; the dev run's a wrench, in orange (icon-beta.svg, icon-debug.svg). */
+  icon?: string;
 }
 
 const releases = "https://github.com/theCodeD3vil/teneo/releases";
@@ -30,12 +35,14 @@ export const appIdentities: Record<AppVariant, AppIdentity> = {
     title: "Teneo Beta",
     id: "com.michael.teneo.beta",
     updateUrl: `${releases}/download/${betaChannelTag}/manifest.json`,
+    icon: "icon-beta.png",
   },
   // a dev run never updates itself
   debug: {
     title: "Teneo Debug",
     id: "com.michael.teneo.debug",
     updateUrl: productionUpdateUrl,
+    icon: "icon-debug.png",
   },
 };
 
@@ -52,6 +59,7 @@ export function releaseVariant(version: string): "production" | "beta" {
 export interface TinyConfig {
   title?: string;
   id?: string;
+  icon?: string;
   update?: { url?: string };
   [key: string]: unknown;
 }
@@ -64,10 +72,13 @@ export function withIdentity<Config extends TinyConfig>(
   options: { keepId?: boolean } = {},
 ): Config {
   const identity = appIdentities[variant];
+  // the full release names no icon, so the key goes rather than stay empty
+  const { icon: _icon, ...rest } = config;
   return {
-    ...config,
+    ...rest,
     title: identity.title,
     id: options.keepId ? config.id : identity.id,
+    ...(identity.icon && { icon: identity.icon }),
     update: { ...config.update, url: identity.updateUrl },
-  };
+  } as Config;
 }
