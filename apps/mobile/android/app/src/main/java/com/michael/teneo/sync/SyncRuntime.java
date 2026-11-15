@@ -73,11 +73,18 @@ final class SyncRuntime {
 
     private volatile SyncNetwork network;
 
+    /** The phone's history, for the page; a change to it is news for the core */
+    private final SyncStoreBridge history;
+
     SyncRuntime(Context context, Host host, String recoveryCode, boolean dialOut) {
         this.context = context.getApplicationContext();
         this.host = host;
         this.recoveryCode = recoveryCode;
         this.dialOut = dialOut;
+        this.history = new SyncStoreBridge(
+            context,
+            () -> evaluate("window.teneoSyncPage && teneoSyncPage.localChanged && teneoSyncPage.localChanged()")
+        );
         this.debuggable = (context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 
@@ -168,6 +175,7 @@ final class SyncRuntime {
         if (closed) return;
         closed = true;
         releaseWaiting();
+        history.close();
         if (discovery != null) discovery.stop();
         SyncNetwork current = network;
         if (current != null) current.stopNow();
@@ -178,6 +186,7 @@ final class SyncRuntime {
         if (closed) return;
         closed = true;
         releaseWaiting();
+        history.close();
         SyncNetwork current = network;
         if (current != null) current.stop();
         destroyPage();
@@ -312,6 +321,64 @@ final class SyncRuntime {
         @JavascriptInterface
         public boolean isDebuggable() {
             return debuggable;
+        }
+
+        // --- the history: answers are JSON text, see SyncStoreBridge
+
+        @JavascriptInterface
+        public String historyDeviceId() {
+            return history.deviceId();
+        }
+
+        @JavascriptInterface
+        public String historyEpoch() {
+            return history.epoch();
+        }
+
+        @JavascriptInterface
+        public String historyChangesAfter(double after, int limit) {
+            return history.changesAfter((long) after, limit);
+        }
+
+        @JavascriptInterface
+        public String historyRow(String id) {
+            return history.row(id);
+        }
+
+        @JavascriptInterface
+        public String historyNewestUnpinned(String skipped) {
+            return history.newestUnpinned(skipped);
+        }
+
+        @JavascriptInterface
+        public String historyPeer(String deviceId) {
+            return history.peer(deviceId);
+        }
+
+        @JavascriptInterface
+        public String historyLatestStamp() {
+            return history.latestStamp();
+        }
+
+        @JavascriptInterface
+        public String historyCommit(String batch) {
+            return history.commit(batch);
+        }
+
+        @JavascriptInterface
+        public String historyTrim() {
+            return history.trimHistory();
+        }
+
+        @JavascriptInterface
+        public String historySaveDetections(String detections, int version) {
+            return history.saveDetections(detections, version);
+        }
+
+        /** Only a debug build may copy on the phone's behalf */
+        @JavascriptInterface
+        public String debugSaveText(String text) {
+            return debuggable ? history.debugSaveText(text) : "{\"error\":\"not a debug build\"}";
         }
 
         @JavascriptInterface

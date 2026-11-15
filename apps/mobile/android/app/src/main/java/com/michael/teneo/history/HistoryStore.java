@@ -22,9 +22,10 @@ import org.json.JSONObject;
 
 /**
  * The phone's clipboard history, as the Mac's database.ts keeps it: one store
- * per database file, shared by everything in the app process (the web view's
- * plugin now; the share screen and a sync service later). Each method is one
- * transaction, and one runs at a time.
+ * per database file, shared by everything in the app process: the app's web
+ * view (through its plugin), the share screen, and the sync page (through
+ * sync/SyncStoreBridge.java). Each method is one transaction, and one runs at a
+ * time.
  */
 public final class HistoryStore {
 
@@ -659,6 +660,159 @@ public final class HistoryStore {
             });
         }
         if (changed) notifyChanged();
+    }
+
+    // ---- sync: what the sync core reads and writes, through its page's bridge
+    // (sync/SyncStoreBridge.java). The core can't open this database, so it asks
+    // here. Reads are single calls, each from one snapshot: every writer holds
+    // this store's monitor, so nothing changes in the middle of one.
+
+    /** Made with the database: another one tells a peer that its cursor into this store means nothing */
+    public String syncEpoch() {
+        return metaString("epoch");
+    }
+
+    /** The highest change number handed out so far */
+    private long head() {
+        return longQuery("SELECT value FROM SYNC_META WHERE key = 'seq'", Collections.emptyList());
+    }
+
+    /**
+     * Rows with a change number above `after`, oldest change first, at most
+     * `limit`, and the highest change number, all from one moment. Stops early
+     * once their texts add up to `maxChars`, so an answer stays small: the core
+     * asks again from the last row.
+     */
+    public synchronized SyncRows.Changes syncChangesAfter(long after, int limit, long maxChars) {
+        int wanted = Math.max(1, limit);
+        List<SyncRows.Row> rows = new ArrayList<>();
+        boolean capped = false;
+        long chars = 0;
+        try (Cursor row = db.rawQuery(SyncQueries.CHANGES_AFTER, new String[] { String.valueOf(after), String.valueOf(wanted) })) {
+            while (row.moveToNext()) {
+                SyncRows.Row read = toSyncRow(row);
+                rows.add(read);
+                chars += read.value == null ? 0 : read.value.length();
+                if (chars >= maxChars && rows.size() < wanted) {
+                    capped = true;
+                    break;
+                }
+            }
+        }
+        return new SyncRows.Changes(rows, head(), capped);
+    }
+
+    /** One row, deleted or not, or null; and the highest change number then */
+    public synchronized SyncRows.Single syncRow(String id) {
+        try (Cursor row = db.rawQuery(SyncQueries.ROW, new String[] { id })) {
+            return new SyncRows.Single(row.moveToFirst() ? toSyncRow(row) : null, head());
+        }
+    }
+
+    /** The newest unpinned item that is not deleted, leaving out the rows in `skipped`; and the highest change number then */
+    public synchronized SyncRows.Single syncNewestUnpinned(List<String> skipped) {
+        try (Cursor row = db.rawQuery(SyncQueries.newestUnpinned(skipped.size()), skipped.toArray(new String[0]))) {
+            return new SyncRows.Single(row.moveToFirst() ? toSyncRow(row) : null, head());
+        }
+    }
+
+    public synchronized SyncRows.Peer syncPeer(String deviceId) {
+        try (Cursor row = db.rawQuery(SyncQueries.PEER, new String[] { deviceId })) {
+            if (!row.moveToFirst()) return null;
+            return new SyncRows.Peer(
+                string(row, "deviceId"),
+                string(row, "name"),
+                string(row, "platform"),
+                string(row, "epoch"),
+                longColumn(row, "receivedSeq"),
+                string(row, "lastAddress"),
+                longColumn(row, "lastSeenAt")
+            );
+        }
+    }
+
+    /** The largest pin stamp stored, or null: the core starts its clock past it */
+    public synchronized String syncLatestStamp() {
+        try (Cursor row = db.rawQuery(SyncQueries.LATEST_STAMP, null)) {
+            return row.moveToFirst() && !row.isNull(0) ? row.getString(0) : null;
+        }
+    }
+
+    /**
+     * Save what the core wrote in one of its transactions, all of it or none.
+     * Every row gets a change number of its own, so it travels on to the
+     * other devices. False, with nothing saved, when something else wrote to
+     * the history since the core read it (`expectedHead` is no longer the
+     * highest change number): what it decided from is out of date, so it reads
+     * again and decides again.
+     */
+    public boolean syncApply(SyncRows.Batch batch) {
+        boolean applied;
+        synchronized (this) {
+            applied = inTransaction(() -> {
+                if (batch.expectedHead != null && head() != batch.expectedHead) return false;
+                for (SyncRows.Row row : batch.puts) writeSyncRow(row);
+                for (Map.Entry<String, Map<String, Object>> peer : batch.peers.entrySet()) writePeer(peer.getKey(), peer.getValue());
+                return true;
+            });
+        }
+        if (applied && !batch.puts.isEmpty()) notifyChanged();
+        return applied;
+    }
+
+    /** Replaces the row's sync columns, or inserts it. A new row keeps who first copied it, and when. */
+    private void writeSyncRow(SyncRows.Row row) {
+        // pin stamps made elsewhere: a pin made here from now on has to beat them
+        if (row.pinnedStamp != null) clock.observe(row.pinnedStamp);
+        ContentValues values = new ContentValues();
+        values.put("value", row.value);
+        values.put("dateCopied", row.dateCopied);
+        values.put("sourceAppName", row.sourceAppName);
+        values.put("sourceAppBundleId", row.sourceAppBundleId);
+        values.put("pinnedAt", row.pinnedAt);
+        values.put("pinnedStamp", row.pinnedStamp);
+        values.put("deletedAt", row.deletedAt);
+        values.put("secrets", row.secrets);
+        values.put("linkUrl", row.linkUrl);
+        values.put("linkHost", row.linkHost);
+        values.put("detectorVersion", row.detectorVersion);
+        values.put("syncSeq", nextSyncSeq());
+        if (db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { row.id }) > 0) return;
+        values.put("id", row.id);
+        values.put("kind", "text");
+        values.put("createdAt", row.createdAt);
+        values.put("originDevice", row.originDevice);
+        db.insertOrThrow("CLIPBOARD_ITEMS", null, values);
+    }
+
+    private void writePeer(String deviceId, Map<String, Object> patch) {
+        db.execSQL(SyncQueries.CREATE_PEER, new Object[] { deviceId });
+        if (patch.isEmpty()) return;
+        List<String> fields = SyncQueries.peerFields(patch.keySet());
+        Object[] values = new Object[fields.size() + 1];
+        for (int i = 0; i < fields.size(); i++) values[i] = patch.get(fields.get(i));
+        values[fields.size()] = deviceId;
+        db.execSQL(SyncQueries.updatePeer(fields), values);
+    }
+
+    private static SyncRows.Row toSyncRow(Cursor row) {
+        return new SyncRows.Row(
+            string(row, "id"),
+            string(row, "value"),
+            longColumn(row, "dateCopied"),
+            string(row, "sourceAppName"),
+            string(row, "sourceAppBundleId"),
+            nullableLong(row, "pinnedAt"),
+            string(row, "pinnedStamp"),
+            nullableLong(row, "deletedAt"),
+            nullableLong(row, "createdAt"),
+            string(row, "originDevice"),
+            string(row, "secrets"),
+            string(row, "linkUrl"),
+            string(row, "linkHost"),
+            nullableInt(row, "detectorVersion"),
+            longColumn(row, "syncSeq")
+        );
     }
 
     // ---- helpers
