@@ -152,21 +152,33 @@ jobs:
             "$RUNNER_TEMP/Teneo-$VERSION.apk"
 
       # One release for everything the PR shipped: the Mac app's, with the
-      # APK beside the disk images. The Mac build runs beside this one and
-      # may finish later, so wait for its release. If it never comes, the Mac
-      # build failed: the Android release above is whole without it.
+      # APK beside the disk images. The Mac release is this PR's when it was
+      # made from this merge commit. It may not be there yet, as the Mac build
+      # runs beside this one, so wait for it if the Mac version had no tag
+      # when this run began. A run that waited its turn behind another finds
+      # the tag already made, which is why the commit is asked too. If the
+      # release never comes, the Mac build failed: the Android release above
+      # is whole without it.
       - name: Add the APK to the Mac release
-        if: needs.version.outputs.mac-is-new == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           MAC_VERSION: ${{ needs.version.outputs.mac-version }}
+          MAC_IS_NEW: ${{ needs.version.outputs.mac-is-new }}
+          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           for attempt in $(seq 1 90); do
-            if gh release view "v$MAC_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            target=$(gh release view "v$MAC_VERSION" --repo "$GITHUB_REPOSITORY" \
+              --json targetCommitish --jq .targetCommitish 2> /dev/null || true)
+            if [ "$target" = "$MERGE_COMMIT" ]; then
               gh release upload "v$MAC_VERSION" \
                 --repo "$GITHUB_REPOSITORY" \
                 --clobber \
                 "$RUNNER_TEMP/Teneo-$VERSION.apk"
+              exit 0
+            fi
+            # an earlier PR's release, or no Mac release due from this one
+            if [ -n "$target" ] || [ "$MAC_IS_NEW" != "true" ]; then
+              echo "This PR didn't release the Mac app: the APK is on the Teneo for Android $VERSION release only."
               exit 0
             fi
             sleep 20
