@@ -6,6 +6,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@teneo/ui/components/dropdown-menu";
+import {
+  type ColorFormats,
+  getColorFormats,
+  getColorShades,
+} from "@teneo/ui/utils/color-formats";
 import { computed } from "vue";
 import TickIcon from "~icons/tabler/check";
 import CopyIcon from "~icons/tabler/copy";
@@ -13,11 +18,6 @@ import CopyIcon from "~icons/tabler/copy";
 import { usePreviewCopy } from "@/composables/usePreviewCopy";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
 import { getClipboardData } from "@/utils/clipboard-items";
-import {
-  type ColorFormats,
-  getColorFormats,
-  getColorShades,
-} from "@/utils/color-formats";
 
 const props = defineProps<{
   item: ClipboardHistoryItem;
