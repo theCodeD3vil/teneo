@@ -1,3 +1,4 @@
+import { findSecrets } from "@teneo/shared/detection/secrets";
 import { textPreviewLength } from "@teneo/shared/types/clipboard";
 import type {
   ClipboardLink,
@@ -20,7 +21,6 @@ import {
 } from "./history-query";
 import { findLink } from "./link-previews";
 import { appPaths } from "./paths";
-import { findSecrets } from "./secret-detection";
 import {
   decryptText,
   deleteEncryptionKey,

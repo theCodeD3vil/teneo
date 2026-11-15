@@ -3,10 +3,12 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./detection/*": "./src/detection/*.ts",
     "./types/*": "./src/types/*.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "devDependencies": {
     "typescript": "catalog:"

@@ -10,5 +10,7 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // run by `bun test`, which has its own types
+  "exclude": ["src/**/*.test.ts"]
 }

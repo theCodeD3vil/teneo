@@ -142,7 +142,7 @@ Teneo is a [Bun](https://bun.sh) workspaces monorepo, with [Turborepo](https://t
 | `apps/site`       | The landing page.                                                                                                                                   |
 | `apps/mobile`     | The Android app (see [Android app](#android-app)).                                                                                                  |
 | `packages/ui`     | `@teneo/ui`: the UI components, theme and helpers that the Mac app, the site and the Android app share.                                             |
-| `packages/shared` | `@teneo/shared`: the types and constants the app's frontend and backend share. It ships TypeScript source, with no build step.                      |
+| `packages/shared` | `@teneo/shared`: the types, constants and pure rules (such as secret detection) the apps share. It ships TypeScript source, with no build step.     |
 | `packages/sync`   | `@teneo/sync`: the clipboard sync core (merge rules, protocol, engine), with no runtime of its own. Not turned on yet; its README has the protocol. |
 
 Run these from the repo root:

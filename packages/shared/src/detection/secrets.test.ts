@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { findSecrets } from "./secret-detection";
+import { findSecrets } from "./secrets";
 
 test("finds the password in a connection string", () => {
   const text = "postgres://user:pa55@db.example.com/app";
