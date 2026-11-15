@@ -11,26 +11,24 @@ import {
 } from "@teneo/ui/components/tooltip";
 import { detectCodeLanguage, highlightCode } from "@teneo/ui/utils/highlight";
 import { maskSecrets } from "@teneo/ui/utils/secrets";
-import { convertCase, type TextCase } from "@teneo/ui/utils/text-case";
-import { computedAsync } from "@vueuse/core";
 import {
-  type Component,
-  type ComponentPublicInstance,
-  computed,
-  onMounted,
-  ref,
-} from "vue";
+  findContact,
+  formatJson,
+  tidyText,
+} from "@teneo/ui/utils/text-actions";
+import { computedAsync } from "@vueuse/core";
+import { renderSVG } from "uqr";
+import { type ComponentPublicInstance, computed, onMounted, ref } from "vue";
 import ResetIcon from "~icons/tabler/arrow-back-up";
+import FormatIcon from "~icons/tabler/braces";
 import TickIcon from "~icons/tabler/check";
 import CopyIcon from "~icons/tabler/copy";
 import RevealIcon from "~icons/tabler/eye";
 import ConcealIcon from "~icons/tabler/eye-off";
-import CapitalizeIcon from "~icons/tabler/letter-case";
-import LowerCaseIcon from "~icons/tabler/letter-case-lower";
-import CamelCaseIcon from "~icons/tabler/letter-case-toggle";
-import UpperCaseIcon from "~icons/tabler/letter-case-upper";
-import KebabCaseIcon from "~icons/tabler/minus";
-import SnakeCaseIcon from "~icons/tabler/underline";
+import EmailIcon from "~icons/tabler/mail";
+import PhoneIcon from "~icons/tabler/phone";
+import QrIcon from "~icons/tabler/qrcode";
+import TidyIcon from "~icons/tabler/wand";
 
 import { usePreviewCopy } from "@/composables/usePreviewCopy";
 import { useSettings } from "@/composables/useSettings";
@@ -41,21 +39,9 @@ const props = defineProps<{
   item: ClipboardHistoryItem;
 }>();
 
-const caseActions = [
-  { textCase: "upper", label: "UPPERCASE", icon: UpperCaseIcon },
-  { textCase: "lower", label: "lowercase", icon: LowerCaseIcon },
-  { textCase: "capitalize", label: "Capitalize", icon: CapitalizeIcon },
-  { textCase: "camel", label: "camelCase", icon: CamelCaseIcon },
-  { textCase: "snake", label: "snake_case", icon: SnakeCaseIcon },
-  { textCase: "kebab", label: "kebab-case", icon: KebabCaseIcon },
-] as const satisfies ReadonlyArray<{
-  textCase: TextCase;
-  label: string;
-  icon: Component;
-}>;
-
 const { settings } = useSettings();
-const textCase = ref<TextCase | null>(null);
+// how the text is shown: as copied, tidied, or laid out as JSON
+const transform = ref<"tidy" | "json" | null>(null);
 const isRevealed = ref(false);
 
 const text = computed(() => props.item.text ?? "");
@@ -67,16 +53,61 @@ const secretLabels = computed(() =>
   [...new Set(props.item.secrets.map(({ label }) => label))].join(", "),
 );
 
-// Case actions only change what's shown here; copying takes what's shown.
-// Items with secrets get no case actions, so they always copy as copied.
+// The actions on offer depend on the text: each shows only when it has
+// something to do. Items with secrets get none, so they always copy as copied.
+const tidied = computed(() => tidyText(text.value));
+const formatted = computed(() => formatJson(text.value));
+const canTidy = computed(
+  () => !hasSecrets.value && tidied.value !== text.value,
+);
+const canFormat = computed(
+  () =>
+    !hasSecrets.value &&
+    formatted.value !== null &&
+    formatted.value !== text.value,
+);
+// a phone number or an email address in the text, to call or write to
+const contact = computed(() =>
+  hasSecrets.value ? null : findContact(text.value),
+);
+
+// Tidying and formatting only change what's shown here; copying takes what's
+// shown
 const shownText = computed(() => {
   if (isMasked.value) {
     return maskSecrets(text.value, props.item.secrets)
       .map((part) => part.text)
       .join("");
   }
-  return textCase.value ? convertCase(text.value, textCase.value) : text.value;
+  if (transform.value === "tidy") return tidied.value;
+  if (transform.value === "json") return formatted.value ?? text.value;
+  return text.value;
 });
+
+function toggleTransform(next: "tidy" | "json"): void {
+  transform.value = transform.value === next ? null : next;
+}
+
+// the Mac opens these in the mail app, or in FaceTime for a number
+function openContact(): void {
+  if (contact.value) void tiny.app.shell.open(contact.value.url);
+}
+
+// The text as a QR code, shown in place of the text, to hand it to a phone.
+// A long text makes a code too dense for a camera to read.
+const qrTextLimit = 500;
+const isQrShown = ref(false);
+const canShowQr = computed(
+  () =>
+    !hasSecrets.value &&
+    shownText.value.length > 0 &&
+    shownText.value.length <= qrTextLimit,
+);
+const qrCode = computed(() =>
+  isQrShown.value && canShowQr.value
+    ? renderSVG(shownText.value, { border: 2 })
+    : "",
+);
 
 // A copy can be megabytes of text. WebKit lays out and hit-tests all of the
 // text in the page, which made every click slow, so the preview shows at most
@@ -134,7 +165,7 @@ function measureRow(row: Element | ComponentPublicInstance | null): void {
   if (row instanceof Element) virtualizer.value.measureElement(row);
 }
 
-// Detected once from the copied text; a case change keeps the language
+// Detected once from the copied text; tidying or formatting keeps the language
 const language = computedAsync(() => detectCodeLanguage(text.value), null);
 const highlightedHtml = computedAsync(
   () =>
@@ -144,12 +175,8 @@ const highlightedHtml = computedAsync(
   null,
 );
 
-function toggleCase(nextCase: TextCase): void {
-  textCase.value = textCase.value === nextCase ? null : nextCase;
-}
-
 const { isCopied, copy } = usePreviewCopy(() =>
-  textCase.value ? { text: shownText.value } : getClipboardData(props.item),
+  transform.value ? { text: shownText.value } : getClipboardData(props.item),
 );
 </script>
 
@@ -158,21 +185,46 @@ const { isCopied, copy } = usePreviewCopy(() =>
     <div class="flex min-h-0 flex-1 flex-col gap-2">
       <div class="flex items-center gap-2">
         <ButtonGroup v-if="!hasSecrets">
-          <Tooltip v-for="action in caseActions" :key="action.textCase">
-            <TooltipTrigger as-child>
-              <Button
-                :variant="
-                  textCase === action.textCase ? 'secondary' : 'outline'
-                "
-                size="icon-sm"
-                :aria-label="action.label"
-                :aria-pressed="textCase === action.textCase"
-                @click="toggleCase(action.textCase)">
-                <component :is="action.icon" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{{ action.label }}</TooltipContent>
-          </Tooltip>
+          <Button
+            v-if="canTidy"
+            :variant="transform === 'tidy' ? 'secondary' : 'outline'"
+            size="sm"
+            class="text-xs"
+            :aria-pressed="transform === 'tidy'"
+            @click="toggleTransform('tidy')">
+            <TidyIcon />
+            Tidy
+          </Button>
+          <Button
+            v-if="canFormat"
+            :variant="transform === 'json' ? 'secondary' : 'outline'"
+            size="sm"
+            class="text-xs"
+            :aria-pressed="transform === 'json'"
+            @click="toggleTransform('json')">
+            <FormatIcon />
+            Format
+          </Button>
+          <Button
+            v-if="canShowQr"
+            :variant="isQrShown ? 'secondary' : 'outline'"
+            size="sm"
+            class="text-xs"
+            :aria-pressed="isQrShown"
+            @click="isQrShown = !isQrShown">
+            <QrIcon />
+            QR
+          </Button>
+          <Button
+            v-if="contact"
+            variant="outline"
+            size="sm"
+            class="text-xs"
+            @click="openContact">
+            <PhoneIcon v-if="contact.kind === 'phone'" />
+            <EmailIcon v-else />
+            {{ contact.kind === "phone" ? "Call" : "Email" }}
+          </Button>
         </ButtonGroup>
         <template v-else-if="settings.maskSecrets">
           <Button
@@ -188,13 +240,13 @@ const { isCopied, copy } = usePreviewCopy(() =>
             {{ secretLabels }}
           </span>
         </template>
-        <Tooltip v-if="textCase">
+        <Tooltip v-if="transform">
           <TooltipTrigger as-child>
             <Button
               variant="ghost"
               size="icon-sm"
               aria-label="Reset text"
-              @click="textCase = null">
+              @click="transform = null">
               <ResetIcon />
             </Button>
           </TooltipTrigger>
@@ -220,7 +272,19 @@ const { isCopied, copy } = usePreviewCopy(() =>
         </Tooltip>
       </div>
 
+      <!-- the QR code takes the text's place; it is always dark on white, so
+           a camera reads it in either theme -->
+      <div
+        v-if="qrCode"
+        class="bg-foreground/5 flex min-h-0 flex-1 items-center justify-center rounded-md p-6">
+        <div
+          class="aspect-square h-full max-h-64 overflow-hidden rounded-lg bg-white [&_svg]:size-full"
+          role="img"
+          aria-label="QR code of this text"
+          v-html="qrCode" />
+      </div>
       <ScrollArea
+        v-show="!qrCode"
         ref="scrollArea"
         class="bg-foreground/5 min-h-0 flex-1 rounded-md">
         <!-- only the rows on screen are in the page -->

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
-import { onUnmounted, ref, watch } from "vue";
+import { defineAsyncComponent, onUnmounted, ref, watch } from "vue";
 import TickIcon from "~icons/tabler/check";
 import BackIcon from "~icons/tabler/chevron-left";
 import CopyIcon from "~icons/tabler/copy";
@@ -12,9 +12,12 @@ import DeleteIcon from "~icons/tabler/trash";
 import { useClient } from "../../client";
 import { showCopiedNotice } from "../../composables/useCopiedNotice";
 import { shareItem } from "../../utils/share";
-import ColorPreview from "./ColorPreview.vue";
 import LinkPreview from "./LinkPreview.vue";
 import TextPreview from "./TextPreview.vue";
+
+// Loaded on the first colour preview: the colour library stays out of the
+// app's startup
+const ColorPreview = defineAsyncComponent(() => import("./ColorPreview.vue"));
 
 const props = defineProps<{
   item: ClipboardHistoryItem;
@@ -26,7 +29,8 @@ const emit = defineEmits<{
 
 const client = useClient();
 
-// The text as the preview shows it after a case change; null copies the item
+// The text as the preview shows it after tidying or formatting; null copies
+// the item
 const convertedText = ref<string | null>(null);
 watch(
   () => props.item.id,
@@ -75,7 +79,7 @@ onUnmounted(() => clearTimeout(copiedTimeout));
 </script>
 
 <template>
-  <!-- positioned, so a text's case buttons can sit in the top bar's free end -->
+  <!-- positioned, so a text's actions can sit in the top bar's free end -->
   <div class="relative flex min-h-0 flex-1 flex-col gap-4">
     <div class="flex shrink-0 items-center gap-[0.625rem]">
       <button

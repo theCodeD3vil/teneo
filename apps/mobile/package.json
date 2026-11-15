@@ -26,6 +26,7 @@
     "@teneo/ui": "workspace:*",
     "@vueuse/core": "catalog:",
     "tailwindcss": "catalog:",
+    "uqr": "^0.1.3",
     "vue": "catalog:"
   },
   "devDependencies": {

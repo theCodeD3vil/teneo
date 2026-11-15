@@ -3,40 +3,39 @@ import { useVirtualizer } from "@tanstack/vue-virtual";
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 import { detectCodeLanguage, highlightCode } from "@teneo/ui/utils/highlight";
 import { maskSecrets } from "@teneo/ui/utils/secrets";
-import { convertCase, type TextCase } from "@teneo/ui/utils/text-case";
+import {
+  findContact,
+  formatJson,
+  tidyText,
+} from "@teneo/ui/utils/text-actions";
 import { computedAsync } from "@vueuse/core";
+import { renderSVG } from "uqr";
 import { type ComponentPublicInstance, computed, ref, watch } from "vue";
+import FormatIcon from "~icons/tabler/braces";
 import RevealIcon from "~icons/tabler/eye";
 import ConcealIcon from "~icons/tabler/eye-off";
+import EmailIcon from "~icons/tabler/mail";
+import PhoneIcon from "~icons/tabler/phone";
+import QrIcon from "~icons/tabler/qrcode";
 import ResetIcon from "~icons/tabler/restore";
+import TidyIcon from "~icons/tabler/wand";
 
 import { useSettings } from "../../composables/useSettings";
+import BottomSheet from "../BottomSheet.vue";
 
 const props = defineProps<{
   item: ClipboardHistoryItem;
 }>();
 
-/** the shown text after a case change, for the Copy button; null without one */
+/** the shown text after tidying or formatting, for the Copy button; null
+ *  when it is shown as copied */
 const convertedText = defineModel<string | null>("convertedText", {
   default: null,
 });
 
-const caseActions = [
-  // each button shows its case in a few letters
-  { textCase: "upper", label: "UPPERCASE", glyph: "AA" },
-  { textCase: "lower", label: "lowercase", glyph: "aa" },
-  { textCase: "capitalize", label: "Capitalize", glyph: "Aa" },
-  { textCase: "camel", label: "camelCase", glyph: "aB" },
-  { textCase: "snake", label: "snake_case", glyph: "a_b" },
-  { textCase: "kebab", label: "kebab-case", glyph: "a-b" },
-] as const satisfies ReadonlyArray<{
-  textCase: TextCase;
-  label: string;
-  glyph: string;
-}>;
-
 const { settings } = useSettings();
-const textCase = ref<TextCase | null>(null);
+// how the text is shown: as copied, tidied, or laid out as JSON
+const transform = ref<"tidy" | "json" | null>(null);
 const isRevealed = ref(false);
 
 const text = computed(() => props.item.text ?? "");
@@ -48,22 +47,75 @@ const secretLabels = computed(() =>
   [...new Set(props.item.secrets.map(({ label }) => label))].join(", "),
 );
 
-// Case actions only change what's shown here; Copy takes what's shown.
-// Items with secrets get no case actions, so they always copy as copied.
+// The actions on offer depend on the text: each shows only when it has
+// something to do. Items with secrets get none, so they always copy as copied.
+const tidied = computed(() => tidyText(text.value));
+const formatted = computed(() => formatJson(text.value));
+const canTidy = computed(
+  () => !hasSecrets.value && tidied.value !== text.value,
+);
+const canFormat = computed(
+  () =>
+    !hasSecrets.value &&
+    formatted.value !== null &&
+    formatted.value !== text.value,
+);
+// a phone number or an email address in the text, to call or write to
+const contact = computed(() =>
+  hasSecrets.value ? null : findContact(text.value),
+);
+
+// Tidying and formatting only change what's shown here; Copy takes what's shown
 const shownText = computed(() => {
   if (isMasked.value) {
     return maskSecrets(text.value, props.item.secrets)
       .map((part) => part.text)
       .join("");
   }
-  return textCase.value ? convertCase(text.value, textCase.value) : text.value;
+  if (transform.value === "tidy") return tidied.value;
+  if (transform.value === "json") return formatted.value ?? text.value;
+  return text.value;
 });
 
 watch(
-  [textCase, shownText],
-  () => (convertedText.value = textCase.value ? shownText.value : null),
+  [transform, shownText],
+  () => (convertedText.value = transform.value ? shownText.value : null),
   { immediate: true },
 );
+
+function toggleTransform(next: "tidy" | "json"): void {
+  transform.value = transform.value === next ? null : next;
+}
+
+// Capacitor hands these to the phone's dialler or mail app
+function openContact(): void {
+  if (contact.value) window.location.href = contact.value.url;
+}
+
+// The text as a QR code, to hand it to another phone. A long text makes a
+// code too dense for a camera to read.
+const qrTextLimit = 500;
+const isQrOpen = ref(false);
+const canShowQr = computed(
+  () =>
+    !hasSecrets.value &&
+    shownText.value.length > 0 &&
+    shownText.value.length <= qrTextLimit,
+);
+const qrCode = computed(() =>
+  isQrOpen.value ? renderSVG(shownText.value, { border: 2 }) : "",
+);
+
+const hasActions = computed(
+  () =>
+    canTidy.value ||
+    canFormat.value ||
+    canShowQr.value ||
+    Boolean(contact.value),
+);
+const actionClass =
+  "flex h-[2.5rem] items-center gap-1.5 rounded-full px-3 text-[0.8125rem] font-semibold transition-colors [&_svg]:size-[1.125rem]";
+const activeActionClass = "bg-cta text-cta-foreground";
 
 // A copy can be megabytes of text. The preview shows at most this much, and
 // past longText renders only the rows on screen. Copying still takes all of it.
@@ -112,7 +164,7 @@ function measureRow(row: Element | ComponentPublicInstance | null): void {
   if (row instanceof Element) virtualizer.value.measureElement(row);
 }
 
-// Detected once from the copied text; a case change keeps the language
+// Detected once from the copied text; tidying or formatting keeps the language
 const language = computedAsync(() => detectCodeLanguage(text.value), null);
 const highlightedHtml = computedAsync(
   () =>
@@ -121,37 +173,57 @@ const highlightedHtml = computedAsync(
       : Promise.resolve(null),
   null,
 );
-
-function toggleCase(nextCase: TextCase): void {
-  textCase.value = textCase.value === nextCase ? null : nextCase;
-}
 </script>
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-4">
-    <!-- the case buttons sit in the screen's top bar, beside the back button:
+    <!-- the text's actions sit in the screen's top bar, beside the back button:
          placed against the screen, over the bar's free end -->
     <div
       class="absolute top-0 right-0 left-[3.625rem] flex h-[3rem] items-center justify-end gap-2">
       <div
-        v-if="!hasSecrets"
-        class="bg-card flex shrink-0 rounded-full p-[3px] font-mono">
+        v-if="!hasSecrets && hasActions"
+        class="bg-card flex shrink-0 rounded-full p-[3px]">
         <button
-          v-for="action in caseActions"
-          :key="action.textCase"
+          v-if="canTidy"
           type="button"
-          class="h-[2.5rem] w-[2.625rem] rounded-full text-[0.8125rem] font-medium transition-colors"
-          :class="textCase === action.textCase && 'bg-cta text-cta-foreground'"
-          :aria-label="action.label"
-          :aria-pressed="textCase === action.textCase"
-          @click="toggleCase(action.textCase)">
-          {{ action.glyph }}
+          :class="[actionClass, transform === 'tidy' && activeActionClass]"
+          :aria-pressed="transform === 'tidy'"
+          @click="toggleTransform('tidy')">
+          <TidyIcon />
+          Tidy
+        </button>
+        <button
+          v-if="canFormat"
+          type="button"
+          :class="[actionClass, transform === 'json' && activeActionClass]"
+          :aria-pressed="transform === 'json'"
+          @click="toggleTransform('json')">
+          <FormatIcon />
+          Format
+        </button>
+        <button
+          v-if="canShowQr"
+          type="button"
+          :class="actionClass"
+          @click="isQrOpen = true">
+          <QrIcon />
+          QR
+        </button>
+        <button
+          v-if="contact"
+          type="button"
+          :class="actionClass"
+          @click="openContact">
+          <PhoneIcon v-if="contact.kind === 'phone'" />
+          <EmailIcon v-else />
+          {{ contact.kind === "phone" ? "Call" : "Email" }}
         </button>
       </div>
       <template v-else-if="settings.hideSecrets">
         <button
           type="button"
-          class="pill-button"
+          class="pill-button border-transparent"
           @click="isRevealed = !isRevealed">
           <ConcealIcon v-if="isRevealed" />
           <RevealIcon v-else />
@@ -162,14 +234,14 @@ function toggleCase(nextCase: TextCase): void {
         </span>
       </template>
       <!-- it grows out of the bar's end and shrinks back into it, so the
-           case buttons slide over instead of jumping -->
+           actions slide over instead of jumping -->
       <Transition name="reset-button">
         <button
-          v-if="textCase"
+          v-if="transform"
           type="button"
           class="text-muted-foreground active:bg-muted grid h-[2.75rem] w-[2.75rem] shrink-0 place-items-center overflow-hidden rounded-full"
           aria-label="Reset text"
-          @click="textCase = null">
+          @click="transform = null">
           <ResetIcon class="size-[1.25rem]" />
         </button>
       </Transition>
@@ -210,6 +282,17 @@ function toggleCase(nextCase: TextCase): void {
         {{ language.name }}
       </span>
     </div>
+    <BottomSheet
+      v-model:open="isQrOpen"
+      title="QR code"
+      description="Scan it with another phone's camera to get this text.">
+      <!-- always dark on white, so a camera reads it in either theme -->
+      <div
+        class="mx-auto aspect-square w-full max-w-[18rem] overflow-hidden rounded-[1.5rem] bg-white [&_svg]:size-full"
+        role="img"
+        aria-label="QR code of this text"
+        v-html="qrCode" />
+    </BottomSheet>
     <p v-if="isCapped" class="text-muted-foreground text-xs">
       Showing the first {{ previewTextLimit.toLocaleString() }} of
       {{ shownText.length.toLocaleString() }} characters. Copy takes all of it.
