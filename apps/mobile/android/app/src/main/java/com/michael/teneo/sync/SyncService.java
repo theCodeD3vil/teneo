@@ -5,14 +5,17 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.service.notification.StatusBarNotification;
 import android.util.Base64;
 import android.util.Log;
+import com.michael.teneo.Notifications;
 import com.michael.teneo.R;
 import java.util.Arrays;
 import java.util.List;
@@ -30,6 +33,11 @@ import java.util.List;
  * storage each time it starts. With it off it runs only while the app is on
  * screen, with no notification.
  *
+ * Android lets the user swipe the notification away, so it is put back when
+ * that happens. And Android may refuse a start that comes with no window on
+ * screen: then a notice that sync is paused takes the notification's place,
+ * and a tap on it opens the app, which starts sync.
+ *
  * It rebuilds the runtime when the web view's process dies, waiting longer
  * each time it happens in a row and giving up after a few.
  */
@@ -40,7 +48,8 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
 
     private static final String TAG = SyncController.TAG;
     private static final String CHANNEL_ID = "sync";
-    private static final int NOTIFICATION_ID = 1;
+    /** The notification was swiped away: show it again */
+    private static final String ACTION_SHOW = "com.michael.teneo.sync.SHOW_NOTIFICATION";
 
     /** A web view that dies again and again is not worth restarting forever */
     private static final int MAX_QUICK_DEATHS = 5;
@@ -68,11 +77,37 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         super.onCreate();
         controller = SyncController.get(this);
         controller.serviceAttached(this);
-        NotificationManager notifications = getSystemService(NotificationManager.class);
-        NotificationChannel channel = new NotificationChannel(CHANNEL_ID, getString(R.string.sync_channel_name), NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription(getString(R.string.sync_channel_description));
+        createChannel(this);
+    }
+
+    private static NotificationManager createChannel(Context context) {
+        NotificationManager notifications = context.getSystemService(NotificationManager.class);
+        NotificationChannel channel = new NotificationChannel(CHANNEL_ID, context.getString(R.string.sync_channel_name), NotificationManager.IMPORTANCE_LOW);
+        channel.setDescription(context.getString(R.string.sync_channel_description));
         channel.setShowBadge(false);
         notifications.createNotificationChannel(channel);
+        return notifications;
+    }
+
+    /**
+     * Android refused to start sync in the background: say so where the sync
+     * notification would be. The next start replaces it.
+     */
+    static void showPaused(Context context) {
+        Notification paused = Notifications.builder(context, CHANNEL_ID)
+            .setContentTitle(context.getString(R.string.sync_paused_title))
+            .setContentText(context.getString(R.string.sync_paused_text))
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .build();
+        createChannel(context).notify(Notifications.SYNC, paused);
+    }
+
+    /** Sync is off, or runs only with the app: nothing is left to say */
+    static void clearNotification(Context context) {
+        context.getSystemService(NotificationManager.class).cancel(Notifications.SYNC);
     }
 
     @Override
@@ -100,10 +135,15 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
 
     /** Whether it is now as asked: becoming a foreground service can be refused */
     private boolean setForeground(boolean wanted) {
-        if (wanted == foreground) return true;
         if (!wanted) {
-            stopForeground(STOP_FOREGROUND_REMOVE);
+            if (foreground) stopForeground(STOP_FOREGROUND_REMOVE);
             foreground = false;
+            // and a notice that sync is paused, left by a start that was refused
+            clearNotification(this);
+            return true;
+        }
+        if (foreground) {
+            showAgainIfDismissed();
             return true;
         }
         if (!getSystemService(NotificationManager.class).areNotificationsEnabled()) {
@@ -111,31 +151,38 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
             Log.w(TAG, "notifications are off for Teneo, so the sync notification is hidden");
         }
         try {
-            startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+            startForeground(Notifications.SYNC, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
             foreground = true;
             return true;
         } catch (RuntimeException refused) {
             // not allowed to be a foreground service right now, or missing a permission
             Log.e(TAG, "could not start as a foreground service", refused);
             controller.problem("Android didn't let Teneo sync in the background. Open Teneo to sync again.");
+            showPaused(this);
             return false;
         }
     }
 
+    /** The user can swipe the notification away while the service runs on */
+    private void showAgainIfDismissed() {
+        NotificationManager notifications = getSystemService(NotificationManager.class);
+        for (StatusBarNotification shown : notifications.getActiveNotifications()) {
+            if (shown.getId() == Notifications.SYNC) return;
+        }
+        notifications.notify(Notifications.SYNC, notification());
+    }
+
     private Notification notification() {
-        Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_sync)
+        Notification.Builder builder = Notifications.builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.sync_notification_title))
             .setContentText(getString(R.string.sync_notification_text))
             .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false);
-        // tapping it opens the app
-        Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
-        if (launch != null) {
-            builder.setContentIntent(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE));
-        }
+        // swiped away, it comes back: this service is told, and shows it again
+        Intent show = new Intent(this, SyncService.class).setAction(ACTION_SHOW);
+        builder.setDeleteIntent(PendingIntent.getService(this, 0, show, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
         if (Build.VERSION.SDK_INT >= 31) {
             builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         }
