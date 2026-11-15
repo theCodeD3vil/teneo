@@ -1,3 +1,6 @@
+import { findLink } from "@teneo/shared/detection/links";
+import { findSecrets } from "@teneo/shared/detection/secrets";
+import { detectionVersion } from "@teneo/shared/detection/version";
 import type {
   ClipboardHistoryItem,
   ClipboardListPage,
@@ -14,6 +17,9 @@ import {
   type HistoryPlugin,
   type NativeItem,
 } from "./history-plugin";
+
+// texts looked at per round trip: few, as a text can be long
+const detectionBatch = 10;
 
 /** The item the app shows for one the native history handed over */
 export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
@@ -58,6 +64,8 @@ export class NativeClient implements TeneoClient {
   private historyListeners = new Set<() => void>();
   private sync = new FakeSync();
   private removeNativeListener: Promise<() => Promise<void>>;
+  private mayHaveUndetected = true;
+  private detecting: Promise<void> | null = null;
 
   constructor(plugin: HistoryPlugin, options: DatabaseOption = {}) {
     this.plugin = plugin;
@@ -65,7 +73,9 @@ export class NativeClient implements TeneoClient {
     this.databaseName = options.database ?? appDatabase;
     this.removeNativeListener = plugin
       .addListener("historyChanged", (event) => {
-        if (event.database === this.databaseName) this.notifyHistoryChanged();
+        if (event.database !== this.databaseName) return;
+        this.mayHaveUndetected = true;
+        this.notifyHistoryChanged();
       })
       .then((handle) => () => handle.remove());
   }
@@ -88,7 +98,57 @@ export class NativeClient implements TeneoClient {
     }
   }
 
+  /**
+   * Look for secrets and links in the texts native code saved without
+   * looking (the capture and the share sheet), or looked at with older
+   * rules. Done before the history is listed, so a secret is never shown
+   * unmasked first, and only after a change could have left one to do.
+   */
+  private detectNewTexts(): Promise<void> {
+    if (!this.mayHaveUndetected) return this.detecting ?? Promise.resolve();
+    this.detecting ??= this.detectUntilSettled().finally(() => {
+      this.detecting = null;
+    });
+    return this.detecting;
+  }
+
+  private async detectUntilSettled(): Promise<void> {
+    // a text saved while a round runs may be past what it read: look again
+    while (this.mayHaveUndetected) {
+      this.mayHaveUndetected = false;
+      try {
+        await this.detectAll();
+      } catch {
+        // the list still shows; the next one tries again
+        this.mayHaveUndetected = true;
+        return;
+      }
+    }
+  }
+
+  private async detectAll(): Promise<void> {
+    for (;;) {
+      const { items } = await this.plugin.undetected({
+        ...this.database,
+        detectorVersion: detectionVersion,
+        limit: detectionBatch,
+      });
+      if (items.length === 0) return;
+      await this.plugin.saveDetections({
+        ...this.database,
+        detectorVersion: detectionVersion,
+        items: items.map(({ id, text }) => ({
+          id,
+          secrets: findSecrets(text),
+          link: findLink(text),
+        })),
+      });
+      if (items.length < detectionBatch) return;
+    }
+  }
+
   async listItems(request: ClipboardListRequest): Promise<ClipboardListPage> {
+    await this.detectNewTexts();
     const page = await this.plugin.list({
       ...this.database,
       kind: request.kind,
@@ -104,6 +164,7 @@ export class NativeClient implements TeneoClient {
   }
 
   async getItem(id: string): Promise<ClipboardHistoryItem | null> {
+    await this.detectNewTexts();
     const { item } = await this.plugin.get({ ...this.database, id });
     return item ? toHistoryItem(item) : null;
   }

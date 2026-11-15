@@ -2,6 +2,7 @@
 // to merge and what to send; this reads and writes the rows, and keeps what
 // the engine needs of them: a counter that every write moves, and a cursor per
 // peer saved in the same transaction as the batch it covers.
+import { detectionVersion } from "@teneo/shared/detection/version";
 import type {
   ItemRecord,
   PeerPatch,
@@ -15,7 +16,6 @@ import type { Database } from "tjs:sqlite";
 import {
   decryptRow,
   detectInText,
-  detectionVersion,
   getSyncIdentity,
   initializeDatabase,
   serializeSecrets,

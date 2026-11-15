@@ -1,3 +1,6 @@
+import { findLink } from "@teneo/shared/detection/links";
+import { findSecrets } from "@teneo/shared/detection/secrets";
+import { detectionVersion } from "@teneo/shared/detection/version";
 import { textPreviewLength } from "@teneo/shared/types/clipboard";
 import type {
   ClipboardLink,
@@ -18,9 +21,7 @@ import {
   pageOrder,
   truncateTextPreview,
 } from "./history-query";
-import { findLink } from "./link-previews";
 import { appPaths } from "./paths";
-import { findSecrets } from "./secret-detection";
 import {
   decryptText,
   deleteEncryptionKey,
@@ -51,11 +52,6 @@ import { generateUUID } from "./utils/uuid-generator";
 export type { ClipboardHistoryItem } from "./types/clipboard";
 
 let databasePromise: Promise<Database> | null = null;
-
-// Secrets and links are found once, when a text is copied, and stored with
-// it. Bump this when findSecrets or findLink changes: at the next start every
-// older text is looked at again (see refreshDetectionMetadata).
-export const detectionVersion = 1;
 
 export function initializeDatabase(app: TinyApp): Promise<Database> {
   databasePromise ??= openDatabase(app);

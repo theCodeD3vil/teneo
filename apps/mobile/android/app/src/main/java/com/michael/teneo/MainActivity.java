@@ -3,6 +3,7 @@ package com.michael.teneo;
 import android.os.Bundle;
 import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
+import com.michael.teneo.capture.Capture;
 import com.michael.teneo.history.HistoryPlugin;
 
 public class MainActivity extends BridgeActivity {
@@ -25,5 +26,11 @@ public class MainActivity extends BridgeActivity {
                 }
             }
         });
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) Capture.onWindowFocused(this);
     }
 }

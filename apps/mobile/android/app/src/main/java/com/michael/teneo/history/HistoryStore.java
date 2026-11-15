@@ -119,6 +119,7 @@ public final class HistoryStore {
 
     private static final String SETTING_PREFIX = "setting.";
     private static final String LAST_WRITTEN_CLIP = "lastWrittenClip";
+    private static final String LAST_SEEN_CLIP = "lastSeenClip";
 
     // A text holding a secret is read whole, so the search can tell the
     // secret from the rest; any other only as far as the list shows it
@@ -486,6 +487,108 @@ public final class HistoryStore {
         try (Cursor row = db.rawQuery("SELECT value FROM APP_STATE WHERE key = ?", new String[] { LAST_WRITTEN_CLIP })) {
             return row.moveToFirst() && row.getString(0).equals(sha256(text));
         }
+    }
+
+    /** The time of the last clip the capture read, 0 for none */
+    public synchronized long seenClip() {
+        try (Cursor row = db.rawQuery("SELECT value FROM APP_STATE WHERE key = ?", new String[] { LAST_SEEN_CLIP })) {
+            if (!row.moveToFirst()) return 0;
+            try {
+                return Long.parseLong(row.getString(0));
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+    }
+
+    /** Note that the capture read the clip copied at `copiedAt`, so it isn't saved again */
+    public synchronized void rememberSeenClip(long copiedAt) {
+        writeState(LAST_SEEN_CLIP, String.valueOf(copiedAt));
+    }
+
+    // ---- what was found in each text
+
+    /** A text whose secrets and link haven't been looked for with the current rules */
+    public static final class Undetected {
+
+        public final String id;
+        public final String text;
+
+        Undetected(String id, String text) {
+            this.id = id;
+            this.text = text;
+        }
+    }
+
+    /** What the rules of one version found in a text */
+    public static final class Detection {
+
+        public final String id;
+        public final List<SecretSpan> secrets;
+        public final String linkUrl;
+        public final String linkHost;
+
+        public Detection(String id, List<SecretSpan> secrets, String linkUrl, String linkHost) {
+            this.id = id;
+            this.secrets = secrets;
+            this.linkUrl = linkUrl;
+            this.linkHost = linkHost;
+        }
+    }
+
+    /**
+     * Up to `limit` texts, newest first, that no rules of `version` have looked
+     * at: saved by the capture, which leaves the looking to the app, or looked
+     * at by older rules, as the Mac's refreshDetectionMetadata finds them.
+     */
+    public synchronized List<Undetected> undetected(int version, int limit) {
+        List<Undetected> texts = new ArrayList<>();
+        try (
+            Cursor row = db.rawQuery(
+                "SELECT id, value FROM CLIPBOARD_ITEMS " +
+                "WHERE kind = 'text' AND value IS NOT NULL AND deletedAt IS NULL " +
+                "AND (detectorVersion IS NULL OR detectorVersion < ?) " +
+                "ORDER BY dateCopied DESC, id DESC LIMIT ?",
+                new String[] { String.valueOf(version), String.valueOf(Math.max(1, limit)) }
+            )
+        ) {
+            while (row.moveToNext()) texts.add(new Undetected(row.getString(0), row.getString(1)));
+        }
+        return texts;
+    }
+
+    /**
+     * Store what the rules of `version` found. A text deleted since is left
+     * alone. Throws, saving none, if a secret lies outside its text.
+     */
+    public void saveDetections(List<Detection> detections, int version) {
+        boolean changed;
+        synchronized (this) {
+            changed = inTransaction(() -> {
+                boolean any = false;
+                for (Detection found : detections) {
+                    String text = null;
+                    try (Cursor row = db.rawQuery("SELECT value FROM CLIPBOARD_ITEMS WHERE id = ?", new String[] { found.id })) {
+                        if (row.moveToFirst() && !row.isNull(0)) text = row.getString(0);
+                    }
+                    if (text == null) continue;
+                    for (SecretSpan secret : found.secrets) {
+                        if (secret.start < 0 || secret.end > text.length() || secret.start >= secret.end) {
+                            throw new IllegalArgumentException("A secret is outside the text");
+                        }
+                    }
+                    boolean hasLink = found.linkUrl != null && found.linkHost != null;
+                    ContentValues values = new ContentValues();
+                    values.put("secrets", serializeSecrets(found.secrets));
+                    values.put("linkUrl", hasLink ? found.linkUrl : null);
+                    values.put("linkHost", hasLink ? found.linkHost : null);
+                    values.put("detectorVersion", version);
+                    any |= db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { found.id }) > 0;
+                }
+                return any;
+            });
+        }
+        if (changed) notifyChanged();
     }
 
     // ---- helpers

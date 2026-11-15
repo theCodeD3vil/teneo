@@ -148,4 +148,95 @@ describe("NativeClient", () => {
       "This item has no text to copy",
     );
   });
+
+  test("looks for secrets and links in new texts before listing, then not until a change", async () => {
+    const calls: string[] = [];
+    const saved: unknown[] = [];
+    let waiting = [
+      { id: "link", text: " https://www.example.org/x " },
+      { id: "secret", text: "postgres://user:pa55@db.example.com/app" },
+    ];
+    const { plugin, emit } = fakePlugin({
+      undetected: async (options) => {
+        calls.push(`undetected v${options.detectorVersion}`);
+        return { items: waiting };
+      },
+      saveDetections: async (options) => {
+        calls.push("saveDetections");
+        saved.push(options);
+        waiting = [];
+      },
+      list: async () => {
+        calls.push("list");
+        return { items: [], nextCursor: null, total: 0 };
+      },
+    });
+    const client = new NativeClient(plugin);
+    await Promise.resolve();
+    const request = { kind: "all" as const, search: "", limit: 10 };
+    await client.listItems(request);
+    expect(calls).toEqual(["undetected v1", "saveDetections", "list"]);
+    expect(saved).toEqual([
+      {
+        detectorVersion: 1,
+        items: [
+          {
+            id: "link",
+            secrets: [],
+            link: { url: "https://www.example.org/x", host: "example.org" },
+          },
+          {
+            id: "secret",
+            secrets: [{ start: 16, end: 20, label: "Password in URL" }],
+            link: null,
+          },
+        ],
+      },
+    ]);
+
+    calls.length = 0;
+    await client.listItems(request);
+    expect(calls).toEqual(["list"]);
+    emit({ database: "teneo.sqlite" });
+    await client.listItems(request);
+    expect(calls).toEqual(["list", "undetected v1", "list"]);
+  });
+
+  test("a text saved while it looks is looked at before the list", async () => {
+    const calls: string[] = [];
+    let rounds = 0;
+    const { plugin, emit } = fakePlugin({
+      undetected: async () => {
+        rounds++;
+        // the capture saves a text just after the first round read
+        if (rounds === 1) emit({ database: "teneo.sqlite" });
+        calls.push(`undetected ${rounds}`);
+        return { items: [] };
+      },
+      list: async () => {
+        calls.push("list");
+        return { items: [], nextCursor: null, total: 0 };
+      },
+    });
+    const client = new NativeClient(plugin);
+    await Promise.resolve();
+    await client.listItems({ kind: "all", search: "", limit: 10 });
+    expect(calls).toEqual(["undetected 1", "undetected 2", "list"]);
+  });
+
+  test("when looking fails the history still lists, and the next list looks again", async () => {
+    let looks = 0;
+    const { plugin } = fakePlugin({
+      undetected: async () => {
+        looks++;
+        throw new Error("The history couldn't be opened");
+      },
+      list: async () => ({ items: [nativeItem], nextCursor: null, total: 1 }),
+    });
+    const client = new NativeClient(plugin);
+    const request = { kind: "all" as const, search: "", limit: 10 };
+    expect((await client.listItems(request)).total).toBe(1);
+    await client.listItems(request);
+    expect(looks).toBe(2);
+  });
 });

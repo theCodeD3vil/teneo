@@ -10,7 +10,7 @@ public final class ClipboardWriter {
 
     // ClipDescription.EXTRA_IS_SENSITIVE, a constant from API 33 that older
     // versions ignore
-    private static final String EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE";
+    public static final String EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE";
 
     private ClipboardWriter() {}
 

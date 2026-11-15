@@ -179,6 +179,8 @@ TinyJS reads everything from the current folder, so run any `tinyjs` command (`d
 
 Screens only talk to the `TeneoClient` interface (`apps/mobile/src/client`). On a phone that is `NativeClient`: the history lives in a SQLite database the Android app owns (`android/app/src/main/java/com/michael/teneo/history`), so it outlives the app and a later background service can reach it. In a browser it is `FakeClient`, which keeps a seeded history in memory. Both still pretend to sync and pair.
 
+The phone saves what was copied on it in two ways (`android/app/src/main/java/com/michael/teneo/capture`): the clipboard when Teneo comes to the front, if "Save what's on the clipboard when Teneo opens" is on, and a text shared to "Save to Teneo". Native code saves the text as it is; `NativeClient` looks for secrets and links in it with the Mac's rules (`packages/shared/src/detection`) before the history is listed.
+
 Both clients pass the same tests (`client-contract.ts`): `bun run test` runs them against `FakeClient`, and `bun run --cwd apps/mobile android:contract` runs them on a phone against the native history, in a throwaway database. That needs the debug build from `bun run mobile:android:dev`, with `bun run mobile` serving. The native code's own unit tests run with `mise exec -- ./android/gradlew -p android :app:testDebugUnitTest` in `apps/mobile`.
 
 To build it for a phone you need:

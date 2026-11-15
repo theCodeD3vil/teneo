@@ -70,6 +70,21 @@ export interface HistoryPlugin {
     options: DatabaseOption & { changes: Partial<MobileSettings> },
   ): Promise<{ settings: Partial<MobileSettings> }>;
   saveText(options: TextToSave): Promise<{ id: string }>;
+  /** texts that no rules of `detectorVersion` have looked at, newest first */
+  undetected(
+    options: DatabaseOption & { detectorVersion: number; limit: number },
+  ): Promise<{ items: { id: string; text: string }[] }>;
+  /** store what the rules of `detectorVersion` found in each text */
+  saveDetections(
+    options: DatabaseOption & {
+      detectorVersion: number;
+      items: {
+        id: string;
+        secrets: SecretSpan[];
+        link: ClipboardLink | null;
+      }[];
+    },
+  ): Promise<void>;
   resetTestDatabase(options: { database: string }): Promise<void>;
   addListener(
     event: "historyChanged",

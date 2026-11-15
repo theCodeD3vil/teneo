@@ -1,3 +1,5 @@
+import { detectionVersion } from "@teneo/shared/detection/version";
+
 import {
   type ContractSeed,
   defineClientContract,
@@ -42,6 +44,8 @@ export async function runNativeContract(
         sourceAppName: item.sourceAppName ?? null,
         secrets: item.secrets ?? [],
         link: item.link ?? null,
+        // as found: the seed's secrets aren't all shaped as the rules want
+        detectorVersion: detectionVersion,
       });
       ids.push(id);
     }
@@ -107,6 +111,89 @@ export async function runNativeContract(
       });
       const shown = page.items.map((item) => item.text).join();
       if (shown !== "3,2") throw new Error(`history is ${shown}`);
+    },
+  });
+
+  tests.push({
+    name: "a text native code saved without looking gets its secrets and link before it's listed",
+    run: async () => {
+      const client = await make([]);
+      const now = Date.now();
+      const secret = "postgres://user:pa55@db.example.com/app";
+      const link = "https://www.example.org/page";
+      await plugin.saveText({ database, text: secret, dateCopied: now - 1 });
+      const saved = await plugin.saveText({
+        database,
+        text: link,
+        dateCopied: now,
+      });
+      const page = await client.listItems({
+        kind: "all",
+        search: "",
+        limit: 10,
+      });
+      const shown = page.items.map((item) => [item.secrets, item.link]);
+      const expected = [
+        [[], { url: link, host: "example.org" }],
+        [[{ start: 16, end: 20, label: "Password in URL" }], null],
+      ];
+      if (JSON.stringify(shown) !== JSON.stringify(expected)) {
+        throw new Error(`found ${JSON.stringify(shown)}`);
+      }
+      const item = await client.getItem(saved.id);
+      if (item?.link?.host !== "example.org") {
+        throw new Error("getItem has no link");
+      }
+      const left = await plugin.undetected({
+        database,
+        detectorVersion: detectionVersion,
+        limit: 10,
+      });
+      if (left.items.length !== 0) throw new Error("texts are left to look at");
+    },
+  });
+  tests.push({
+    name: "a text looked at with older rules is looked at again",
+    run: async () => {
+      const client = await make([]);
+      await plugin.saveText({
+        database,
+        text: "plain words",
+        dateCopied: Date.now(),
+        secrets: [{ start: 0, end: 5, label: "Old rule" }],
+        detectorVersion: detectionVersion - 1,
+      });
+      const page = await client.listItems({
+        kind: "all",
+        search: "",
+        limit: 10,
+      });
+      const secrets = JSON.stringify(page.items[0]?.secrets);
+      if (secrets !== "[]") throw new Error(`secrets are ${secrets}`);
+    },
+  });
+  tests.push({
+    name: "a secret outside its text is refused",
+    run: async () => {
+      await make([]);
+      const { id } = await plugin.saveText({
+        database,
+        text: "short",
+        dateCopied: Date.now(),
+      });
+      const refused = await plugin
+        .saveDetections({
+          database,
+          detectorVersion: detectionVersion,
+          items: [
+            { id, secrets: [{ start: 2, end: 9, label: "Key" }], link: null },
+          ],
+        })
+        .then(
+          () => false,
+          () => true,
+        );
+      if (!refused) throw new Error("it was stored");
     },
   });
 

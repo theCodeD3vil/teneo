@@ -195,6 +195,71 @@ public class HistoryPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /** Texts the app has to look for secrets and links in: see HistoryStore.undetected */
+    @PluginMethod
+    public void undetected(PluginCall call) {
+        HistoryStore store = store(call);
+        Integer version = call.getInt("detectorVersion");
+        if (store == null) return;
+        if (version == null) {
+            call.reject("No detectorVersion was given");
+            return;
+        }
+        JSArray items = new JSArray();
+        for (HistoryStore.Undetected text : store.undetected(version, call.getInt("limit", 10))) {
+            JSObject item = new JSObject();
+            item.put("id", text.id);
+            item.put("text", text.text);
+            items.put(item);
+        }
+        JSObject result = new JSObject();
+        result.put("items", items);
+        call.resolve(result);
+    }
+
+    /** Store the secrets and link the app found in each text */
+    @PluginMethod
+    public void saveDetections(PluginCall call) {
+        HistoryStore store = store(call);
+        Integer version = call.getInt("detectorVersion");
+        if (store == null) return;
+        if (version == null) {
+            call.reject("No detectorVersion was given");
+            return;
+        }
+        List<HistoryStore.Detection> detections = new ArrayList<>();
+        try {
+            JSArray items = call.getArray("items", new JSArray());
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.getJSONObject(i);
+                JSONObject link = item.optJSONObject("link");
+                detections.add(
+                    new HistoryStore.Detection(
+                        item.getString("id"),
+                        parseSecrets(item.optJSONArray("secrets")),
+                        link == null ? null : link.optString("url", null),
+                        link == null ? null : link.optString("host", null)
+                    )
+                );
+            }
+            store.saveDetections(detections, version);
+        } catch (JSONException | IllegalArgumentException error) {
+            call.reject("The detections are malformed", error);
+            return;
+        }
+        call.resolve();
+    }
+
+    private static List<SecretSpan> parseSecrets(JSONArray spans) throws JSONException {
+        List<SecretSpan> secrets = new ArrayList<>();
+        if (spans == null) return secrets;
+        for (int i = 0; i < spans.length(); i++) {
+            JSONObject span = spans.getJSONObject(i);
+            secrets.add(new SecretSpan(span.getInt("start"), span.getInt("end"), span.getString("label")));
+        }
+        return secrets;
+    }
+
     /** Delete a test database, so the next call opens it new */
     @PluginMethod
     public void resetTestDatabase(PluginCall call) {
