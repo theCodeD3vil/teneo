@@ -30,6 +30,9 @@ let pendingBacks = 0;
 // a screen opened while one of those is still to come: pushing it now would
 // get it popped by that back
 let queuedPush: NavigationState | null = null;
+// a screen swapped in while one is still to come: swapping now would change
+// the entry that back is about to drop, not the one it lands on
+let queuedReplace: NavigationState | null = null;
 let isInitialized = false;
 
 function pushEntry(state: NavigationState): void {
@@ -38,9 +41,20 @@ function pushEntry(state: NavigationState): void {
   window.history.pushState(state, "");
 }
 
+function replaceEntry(state: NavigationState): void {
+  direction.value = "forward";
+  currentState.value = state;
+  window.history.replaceState(state, "");
+}
+
 function handlePopState(event: PopStateEvent): void {
   if (pendingBacks > 0) {
     pendingBacks -= 1;
+    if (pendingBacks === 0 && queuedReplace) {
+      const state = queuedReplace;
+      queuedReplace = null;
+      replaceEntry(state);
+    }
     if (pendingBacks === 0 && queuedPush) {
       const state = queuedPush;
       queuedPush = null;
@@ -97,10 +111,9 @@ export function useNavigation() {
 
   /** Swap the screen without a history entry, e.g. leaving first-run setup */
   function replaceScreen(screen: ScreenName): void {
-    direction.value = "forward";
     const state = { screen, index: currentState.value.index };
-    currentState.value = state;
-    window.history.replaceState(state, "");
+    if (pendingBacks > 0) queuedReplace = state;
+    else replaceEntry(state);
   }
 
   function goBack(): void {
@@ -117,6 +130,30 @@ export function useNavigation() {
     openSetup: () => pushScreen("setup"),
     replaceScreen,
     goBack,
+  };
+}
+
+/**
+ * Hold the back gesture: the next one calls `onBack` instead of leaving the
+ * screen, such as a step back inside first-run setup. It holds one gesture;
+ * hold again for the next. The returned function lets go without a gesture,
+ * dropping the history entry the hold took.
+ */
+export function holdBack(onBack: () => void): () => void {
+  // a plain copy: history can't clone the reactive proxy
+  window.history.pushState({ ...currentState.value }, "");
+  let isHeld = true;
+  const entry = () => {
+    isHeld = false;
+    onBack();
+  };
+  openOverlays.push(entry);
+  return () => {
+    if (!isHeld) return;
+    isHeld = false;
+    openOverlays.splice(openOverlays.indexOf(entry), 1);
+    pendingBacks += 1;
+    window.history.back();
   };
 }
 
