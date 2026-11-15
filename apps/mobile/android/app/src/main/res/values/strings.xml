@@ -4,4 +4,8 @@
     <string name="title_activity_main">Teneo</string>
     <string name="package_name">com.michael.teneo</string>
     <string name="custom_url_scheme">com.michael.teneo</string>
+    <string name="share_target">Save to Teneo</string>
+    <string name="share_saved">Saved to Teneo</string>
+    <string name="share_failed">Couldn\'t save it to Teneo</string>
+    <string name="share_no_text">There was no text to save</string>
 </resources>

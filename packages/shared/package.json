@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./detection/*": "./src/detection/*.ts",
-    "./types/*": "./src/types/*.ts"
+    "./types/*": "./src/types/*.ts",
+    "./detection/*": "./src/detection/*.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

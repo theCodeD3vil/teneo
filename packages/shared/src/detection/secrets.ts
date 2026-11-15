@@ -1,8 +1,8 @@
-// Finds API keys and other secrets in copied text. It runs on this Mac only:
-// nothing is sent anywhere, and keys are never checked with their provider.
+// Finds API keys and other secrets in copied text. It runs on the device that
+// copied it: nothing is sent anywhere, and keys are never checked with their provider.
 // Rules follow gitleaks (MIT, github.com/gitleaks/gitleaks) and stick to keys
 // with a known shape, so ordinary text is rarely mistaken for one.
-import type { SecretSpan } from "@teneo/shared/types/clipboard";
+import type { SecretSpan } from "../types/clipboard";
 
 interface SecretRule {
   label: string;
@@ -111,7 +111,7 @@ const secretRules: SecretRule[] = [
   },
 ];
 
-// Longer text is only scanned this far, so a huge paste can't stall the backend
+// Longer text is only scanned this far, so a huge paste can't stall the app
 const maximumScannedLength = 100_000;
 
 /** Where the secrets in `text` are, in order and never overlapping. */

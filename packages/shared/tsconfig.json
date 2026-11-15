@@ -3,7 +3,8 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
+    // DOM for URL, which every app's runtime has
+    "lib": ["ES2022", "DOM"],
     "types": [],
     "strict": true,
     "noEmit": true,

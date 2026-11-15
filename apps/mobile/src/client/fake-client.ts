@@ -9,6 +9,15 @@ import { textPreviewLength } from "@teneo/shared/types/clipboard";
 import type { PairResult, TeneoClient } from "../types/client";
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
+import { FakeSync } from "./fake-sync";
+import {
+  compareListKeys,
+  copiedBefore,
+  isAfterCursor,
+  type ListKey,
+  searchableText,
+  truncateText,
+} from "./history-rules";
 import { createSeedItems } from "./seed-data";
 
 /** Puts text on the clipboard, rejecting if it can't */
@@ -21,12 +30,16 @@ const writeToBrowserClipboard: WriteText = async (text) => {
   await navigator.clipboard.writeText(text);
 };
 
+/** The history in memory, for the app in a browser and for tests. It lists,
+ *  searches and trims as the phone's native history does. */
 export class FakeClient implements TeneoClient {
   private items: ClipboardHistoryItem[];
+  // when each pinned item was pinned; an item pinned from the start counts
+  // as pinned when it was copied
+  private pinnedAt = new Map<string, number>();
   private settings: MobileSettings;
-  private syncStatus: SyncStatus;
+  private sync = new FakeSync();
   private historyListeners = new Set<() => void>();
-  private syncListeners = new Set<(status: SyncStatus) => void>();
   private readonly writeText: WriteText;
 
   constructor(
@@ -35,24 +48,25 @@ export class FakeClient implements TeneoClient {
   ) {
     this.writeText = writeText;
     this.items = initialItems ? [...initialItems] : createSeedItems();
+    for (const item of this.items) {
+      if (item.pinned) this.pinnedAt.set(item.id, item.dateCopied);
+    }
     this.sortItems();
     this.settings = { ...defaultSettings };
-    this.syncStatus = {
-      state: "not_paired",
-      devices: [],
+  }
+
+  private listKey(item: ClipboardHistoryItem): ListKey {
+    return {
+      pinnedAt: this.pinnedAt.get(item.id) ?? null,
+      dateCopied: item.dateCopied,
+      id: item.id,
     };
   }
 
   private sortItems(): void {
-    this.items.sort((a, b) => {
-      if (a.pinned !== b.pinned) {
-        return a.pinned ? -1 : 1;
-      }
-      if (b.dateCopied !== a.dateCopied) {
-        return b.dateCopied - a.dateCopied;
-      }
-      return b.id.localeCompare(a.id);
-    });
+    this.items.sort((a, b) =>
+      compareListKeys(this.listKey(a), this.listKey(b)),
+    );
   }
 
   private notifyHistoryChanged(): void {
@@ -65,124 +79,56 @@ export class FakeClient implements TeneoClient {
     }
   }
 
-  private notifySyncStatusChanged(): void {
-    const status = {
-      ...this.syncStatus,
-      devices: [...this.syncStatus.devices],
-    };
-    for (const listener of this.syncListeners) {
-      try {
-        listener(status);
-      } catch {
-        // Ignore listener error
-      }
-    }
+  private matches(item: ClipboardHistoryItem, query: string): boolean {
+    const text = searchableText(
+      item.text ?? "",
+      item.secrets,
+      this.settings.hideSecrets,
+    );
+    return (
+      text.toLowerCase().includes(query) ||
+      (item.sourceApp?.name?.toLowerCase().includes(query) ?? false) ||
+      (item.link?.host.toLowerCase().includes(query) ?? false) ||
+      item.secrets.some((secret) => secret.label.toLowerCase().includes(query))
+    );
   }
 
   async listItems(request: ClipboardListRequest): Promise<ClipboardListPage> {
     const query = request.search?.trim().toLowerCase() ?? "";
+    const matched = this.items.filter(
+      (item) =>
+        (request.kind === "all" || item.kind === request.kind) &&
+        (!query || this.matches(item, query)),
+    );
+    const cursor = request.cursor;
+    const after = cursor
+      ? matched.filter((item) => isAfterCursor(this.listKey(item), cursor))
+      : matched;
 
-    // 1. Filter by kind and search term
-    const matched = this.items.filter((item) => {
-      if (request.kind !== "all" && item.kind !== request.kind) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      const textMatch = item.text?.toLowerCase().includes(query) ?? false;
-      const appMatch =
-        item.sourceApp?.name?.toLowerCase().includes(query) ?? false;
-      const urlMatch = item.sourceURL?.toLowerCase().includes(query) ?? false;
-      const hostMatch = item.link?.host?.toLowerCase().includes(query) ?? false;
-      const secretMatch = item.secrets.some((s) =>
-        s.label.toLowerCase().includes(query),
-      );
-
-      return textMatch || appMatch || urlMatch || hostMatch || secretMatch;
-    });
-
-    // 2. Filter items after cursor if cursor is present
-    let afterCursorItems = matched;
-    if (request.cursor) {
-      const cursor = request.cursor;
-      const isCursorPinned = cursor.pinnedAt !== null;
-
-      afterCursorItems = matched.filter((item) => {
-        if (isCursorPinned) {
-          if (!item.pinned) {
-            return true;
-          }
-          if (item.dateCopied < cursor.dateCopied) {
-            return true;
-          }
-          if (
-            item.dateCopied === cursor.dateCopied &&
-            item.id.localeCompare(cursor.id) < 0
-          ) {
-            return true;
-          }
-          return false;
-        } else {
-          if (item.pinned) {
-            return false;
-          }
-          if (item.dateCopied < cursor.dateCopied) {
-            return true;
-          }
-          if (
-            item.dateCopied === cursor.dateCopied &&
-            item.id.localeCompare(cursor.id) < 0
-          ) {
-            return true;
-          }
-          return false;
-        }
-      });
-    }
-
-    // 3. Slice page
     const limit = Math.max(1, request.limit);
-    const pageItems = afterCursorItems.slice(0, limit);
-    const hasMore = afterCursorItems.length > limit;
-
-    let nextCursor: ClipboardListCursor | null = null;
-    if (hasMore && pageItems.length > 0) {
-      const last = pageItems[pageItems.length - 1];
-      nextCursor = {
-        pinnedAt: last.pinned ? last.dateCopied : null,
-        dateCopied: last.dateCopied,
-        id: last.id,
-      };
-    }
-
-    // 4. Truncate long preview texts for list view
-    const transformedItems = pageItems.map((item) => {
-      if (item.text && item.text.length > textPreviewLength) {
-        return {
-          ...item,
-          text: item.text.slice(0, textPreviewLength),
-          isTruncated: true,
-        };
-      }
-      return { ...item };
-    });
+    const pageItems = after.slice(0, limit);
+    const last = pageItems.at(-1);
+    const nextCursor: ClipboardListCursor | null =
+      after.length > limit && last ? this.listKey(last) : null;
 
     return {
-      items: transformedItems,
+      items: pageItems.map((item) => {
+        if (item.text === null) return { ...item };
+        const preview = truncateText(
+          item.text,
+          item.secrets,
+          textPreviewLength,
+        );
+        return { ...item, ...preview };
+      }),
       nextCursor,
-      total: request.cursor ? null : matched.length,
+      total: cursor ? null : matched.length,
     };
   }
 
   async getItem(id: string): Promise<ClipboardHistoryItem | null> {
     const item = this.items.find((i) => i.id === id);
-    if (!item) {
-      return null;
-    }
-    return { ...item };
+    return item ? { ...item } : null;
   }
 
   async setPinned(id: string, pinned: boolean): Promise<void> {
@@ -192,6 +138,8 @@ export class FakeClient implements TeneoClient {
     }
 
     item.pinned = pinned;
+    if (pinned) this.pinnedAt.set(id, Date.now());
+    else this.pinnedAt.delete(id);
     this.sortItems();
     this.notifyHistoryChanged();
   }
@@ -203,6 +151,7 @@ export class FakeClient implements TeneoClient {
     }
 
     this.items.splice(idx, 1);
+    this.pinnedAt.delete(id);
     this.notifyHistoryChanged();
   }
 
@@ -235,61 +184,43 @@ export class FakeClient implements TeneoClient {
     changes: Partial<MobileSettings>,
   ): Promise<MobileSettings> {
     this.settings = { ...this.settings, ...changes };
+    if ("historyRetentionDays" in changes || "maxItems" in changes) {
+      this.applyLimits(Date.now());
+    }
     return { ...this.settings };
   }
 
-  async getSyncStatus(): Promise<SyncStatus> {
-    return { ...this.syncStatus, devices: [...this.syncStatus.devices] };
+  /** Delete the unpinned items "Keep history for" and "Maximum items" no longer keep */
+  private applyLimits(now: number): void {
+    const before = copiedBefore(now, this.settings.historyRetentionDays);
+    const maxItems = this.settings.maxItems;
+    let unpinned = 0;
+    const kept = this.items.filter((item) => {
+      if (this.pinnedAt.has(item.id)) return true;
+      // items are in list order, so the unpinned ones come newest first
+      unpinned += 1;
+      return (
+        item.dateCopied >= before && (maxItems <= 0 || unpinned <= maxItems)
+      );
+    });
+    if (kept.length === this.items.length) return;
+    this.items = kept;
+    this.notifyHistoryChanged();
+  }
+
+  getSyncStatus(): Promise<SyncStatus> {
+    return this.sync.getSyncStatus();
   }
 
   onSyncStatusChanged(listener: (status: SyncStatus) => void): () => void {
-    this.syncListeners.add(listener);
-    return () => {
-      this.syncListeners.delete(listener);
-    };
+    return this.sync.onSyncStatusChanged(listener);
   }
 
-  async pair(code: string): Promise<PairResult> {
-    const trimmed = code.trim();
-
-    // The QR code's link (teneo://pair?v=1&k=<key>, then the Mac's addresses
-    // and anything a later version adds) or a recovery code
-    const isTeneoUri = /^teneo:\/\/pair\?v=1&k=[a-zA-Z0-9_-]+(&\S*)?$/.test(
-      trimmed,
-    );
-    const isRecoveryCode =
-      /^[A-Za-z0-9]{4}(-[A-Za-z0-9]{4}){2,5}$/.test(trimmed) ||
-      /^[a-fA-F0-9]{32,64}$/.test(trimmed);
-
-    if (!isTeneoUri && !isRecoveryCode) {
-      return {
-        ok: false,
-        error:
-          "Invalid pairing code. Expected a Teneo QR code or formatted recovery code.",
-      };
-    }
-
-    this.syncStatus = {
-      state: "connected",
-      devices: [
-        {
-          id: "mac-host-01",
-          name: "MacBook Pro",
-          model: "MacBookPro18,1",
-          lastSeen: Date.now(),
-        },
-      ],
-    };
-
-    this.notifySyncStatusChanged();
-    return { ok: true, deviceName: "MacBook Pro" };
+  pair(code: string): Promise<PairResult> {
+    return this.sync.pair(code);
   }
 
-  async unpair(): Promise<void> {
-    this.syncStatus = {
-      state: "not_paired",
-      devices: [],
-    };
-    this.notifySyncStatusChanged();
+  unpair(): Promise<void> {
+    return this.sync.unpair();
   }
 }
