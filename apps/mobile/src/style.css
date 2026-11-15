@@ -95,6 +95,45 @@
   }
 }
 
+/* A bottom sheet slides up as the page behind it dims. Each animation moves
+   one property the compositor can animate by itself, so it stays smooth while
+   the page is busy mounting the sheet. The slide and fade the sheet comes with
+   (tw-animate-css) also animate a blur filter, which keeps them on the main
+   thread. These rules are unlayered, so they win over those utilities.
+   App.vue moves the page behind in step with these timings. */
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-dim-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sheet-dim-out {
+  to {
+    opacity: 0;
+  }
+}
+[data-slot="sheet-content"][data-side="bottom"][data-state="open"] {
+  animation: sheet-in 250ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-slot="sheet-content"][data-side="bottom"][data-state="closed"] {
+  animation: sheet-out 200ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-slot="sheet-overlay"][data-state="open"] {
+  animation: sheet-dim-in 250ms ease-out;
+}
+[data-slot="sheet-overlay"][data-state="closed"] {
+  animation: sheet-dim-out 200ms ease-out forwards;
+}
+
 /* Illustrations draw themselves in: the backdrop swells, the subject rises,
    then the details pop. --illus-delay staggers the parts. CSS transforms
    would replace an SVG element's own transform attribute, so these go on

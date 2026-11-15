@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { SystemBars, SystemBarsStyle, SystemBarType } from "@capacitor/core";
 import { computed, ref, watch } from "vue";
 
 import HistoryScreen from "./components/history/HistoryScreen.vue";
@@ -13,49 +12,25 @@ import { useSheetDepth } from "./composables/useSheetDepth";
 
 const { currentState, direction } = useNavigation();
 
-// Behind an open sheet the page steps back, as on iOS: it shrinks a little,
-// drops below the status bar and rounds its corners over a black backdrop.
-// Dragging the sheet down brings it forward with the finger.
+// Behind an open sheet the page steps back a touch: it shrinks by a few
+// pixels on each side, over a black backdrop. Dragging the sheet down brings
+// it forward with the finger.
 // Only the transform animates, on the compositor and in step with the sheet
-// (its open and close timings). The page keeps its own layer, so nothing is
-// re-rasterised as the animation starts or ends; the corners round at once
-// rather than animating, which would repaint the whole page every frame.
+// (the timings of sheet-in and sheet-out in style.css). The page keeps its own
+// layer, so nothing is repainted as the animation starts or ends.
 const { depth, isDragging } = useSheetDepth();
 const sheetEasing = "cubic-bezier(0.32, 0.72, 0, 1)";
-const pageScale = 0.04;
-const pageDuration = ref(300);
-const hasRoundCorners = ref(false);
-let cornersTimeout: ReturnType<typeof setTimeout> | undefined;
+const pageScale = 0.02;
+const pageDuration = ref(250);
 watch(depth, (value, previous) => {
-  pageDuration.value = value >= previous ? 300 : 200;
-  clearTimeout(cornersTimeout);
-  if (value > 0) hasRoundCorners.value = true;
-  else
-    cornersTimeout = setTimeout(
-      () => (hasRoundCorners.value = false),
-      pageDuration.value,
-    );
+  pageDuration.value = value >= previous ? 250 : 200;
 });
-const pageDepthStyle = computed(() => {
-  const value = depth.value;
-  return {
-    transition: isDragging.value
-      ? "none"
-      : `transform ${pageDuration.value}ms ${sheetEasing}`,
-    transform: `translateY(calc((var(--safe-area-inset-top, env(safe-area-inset-top)) + 0.5rem) * ${value})) scale(${1 - pageScale * value})`,
-    borderRadius: hasRoundCorners.value ? "1rem" : undefined,
-  };
-});
-// the status bar sits on the black backdrop then: light icons, whatever the theme
-watch(
-  () => depth.value > 0,
-  (isSteppedBack) => {
-    void SystemBars.setStyle({
-      style: isSteppedBack ? SystemBarsStyle.Dark : SystemBarsStyle.Default,
-      bar: SystemBarType.StatusBar,
-    }).catch(() => undefined);
-  },
-);
+const pageDepthStyle = computed(() => ({
+  transition: isDragging.value
+    ? "none"
+    : `transform ${pageDuration.value}ms ${sheetEasing}`,
+  transform: `scale(${1 - pageScale * depth.value})`,
+}));
 
 // A screen opened pushes in from the right while the one under it slides out
 // left, and back the other way, as the desktop preview does. The leaving
@@ -84,7 +59,7 @@ const screenKey = computed(() =>
 <template>
   <div class="h-dvh overflow-hidden bg-black">
     <div
-      class="pt-safe pb-safe px-safe bg-background size-full origin-top overflow-hidden will-change-transform"
+      class="pt-safe pb-safe px-safe bg-background size-full overflow-hidden will-change-transform"
       :style="pageDepthStyle">
       <div class="relative flex size-full flex-col p-4">
         <!-- hidden, not unmounted, so the list keeps its tab, search and scroll -->
