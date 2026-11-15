@@ -38,10 +38,19 @@
   --text-xl--line-height: 2rem;
   --text-2xl: 1.75rem;
   --text-2xl--line-height: 2.25rem;
-  /* thin strokes blur on a phone screen: normal is the lightest weight */
-  --font-weight-thin: 400;
-  --font-weight-extralight: 400;
-  --font-weight-light: 400;
+  /* Open Sans reads thin on a phone at the weights the desktop classes name,
+     so each class is one step heavier here: body text is medium (500),
+     font-medium semibold (600), font-semibold bold (700). Nothing is lighter
+     than body text: thin strokes blur on a phone screen. */
+  --font-weight-thin: 500;
+  --font-weight-extralight: 500;
+  --font-weight-light: 500;
+  --font-weight-normal: 500;
+  --font-weight-medium: 600;
+  --font-weight-semibold: 700;
+  --font-weight-bold: 800;
+  --font-weight-extrabold: 800;
+  --font-weight-black: 800;
 
   /* dashes travelling along a line, for the sync link in setup */
   --animate-dash-flow: dash-flow 1s linear infinite;
@@ -75,7 +84,7 @@
   /* Native-app feel: a long press doesn't select the page, and taps don't
      flash a highlight. Fields stay selectable so typing still works. */
   body {
-    @apply bg-background text-foreground font-sans select-none;
+    @apply bg-background text-foreground font-sans font-normal select-none;
     -webkit-tap-highlight-color: transparent;
     overscroll-behavior: none;
   }
@@ -235,5 +244,5 @@
   font-style: italic;
 }
 .hljs-strong {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
