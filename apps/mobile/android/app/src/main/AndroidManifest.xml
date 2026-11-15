@@ -26,6 +26,25 @@
 
         </activity>
 
+        <!-- "Save to Teneo" in the share sheet: saves the text and finishes,
+             with no screen of its own and outside Teneo's task -->
+        <activity
+            android:name=".capture.ShareActivity"
+            android:label="@string/share_target"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+        </activity>
+
         <!-- Play installs Google's code scanner along with the app, so the
              first scan doesn't wait on a download -->
         <meta-data

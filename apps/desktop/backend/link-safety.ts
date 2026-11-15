@@ -1,6 +1,6 @@
 // What a copied link may be fetched for: never this Mac or the local network,
 // and the copied page itself only when opening it is unlikely to do anything.
-import { findSecrets } from "./secret-detection";
+import { findSecrets } from "@teneo/shared/detection/secrets";
 
 // Words in links that act when opened, matched as whole words: "auth" but not "author"
 const oneTimeLinkWords =

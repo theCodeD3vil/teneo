@@ -130,7 +130,7 @@ Here's what's planned next. More will be added over time.
 - **Previews (in progress, beta).** Open any item in your history to see it in full, and do more with it than copy and paste. A first version is out to try; see [Features](#features).
 - **Landing page (done).** A proper home for Teneo, where you can explore what it does and download it.
 - **Sync engine.** Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).
-- **Android app (in progress).** Sync your clipboard history between your Android phone and your Mac. Its screens are built and running on sample data; saving your history on the phone and syncing it come next.
+- **Android app (in progress).** Sync your clipboard history between your Android phone and your Mac. It keeps its own history on the phone; syncing it comes next.
 
 ## Development
 
@@ -177,7 +177,11 @@ TinyJS reads everything from the current folder, so run any `tinyjs` command (`d
 
 `apps/mobile` is the Android app: Vue and Tailwind on the shared `@teneo/ui` components, wrapped with [Capacitor](https://capacitorjs.com). The native project in `apps/mobile/android` is committed.
 
-For now the app runs on sample data. `FakeClient` (`apps/mobile/src/client`) keeps a seeded history in memory and pretends to sync and pair. Screens only talk to the `TeneoClient` interface, so a real client can take its place without changing them.
+Screens only talk to the `TeneoClient` interface (`apps/mobile/src/client`). On a phone that is `NativeClient`: the history lives in a SQLite database the Android app owns (`android/app/src/main/java/com/michael/teneo/history`), so it outlives the app and a later background service can reach it. In a browser it is `FakeClient`, which keeps a seeded history in memory. Both still pretend to sync and pair.
+
+The phone saves what was copied on it in two ways (`android/app/src/main/java/com/michael/teneo/capture`): the clipboard when Teneo comes to the front, if "Save what's on the clipboard when Teneo opens" is on, and a text shared to "Save to Teneo". Native code saves the text as it is; `NativeClient` looks for secrets and links in it with the Mac's rules (`packages/shared/src/detection`) before the history is listed.
+
+Both clients pass the same tests (`client-contract.ts`): `bun run test` runs them against `FakeClient`, and `bun run --cwd apps/mobile android:contract` runs them on a phone against the native history, in a throwaway database. That needs the debug build from `bun run mobile:android:dev`, with `bun run mobile` serving. The native code's own unit tests run with `mise exec -- ./android/gradlew -p android :app:testDebugUnitTest` in `apps/mobile`.
 
 To build it for a phone you need:
 
