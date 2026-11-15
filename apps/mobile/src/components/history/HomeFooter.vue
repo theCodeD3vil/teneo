@@ -18,7 +18,8 @@ const { openSettings } = useNavigation();
 <template>
   <div class="flex items-center justify-between gap-4 p-1">
     <span class="text-foreground/60 text-xs">
-      {{ clipboardItemsCount }} items
+      {{ clipboardItemsCount }}
+      {{ clipboardItemsCount === 1 ? "item" : "items" }}
     </span>
 
     <Transition
