@@ -9,6 +9,7 @@
 // Fields added to the state frame are simply dropped by a device that doesn't
 // know them.
 import { isDeviceId } from "./hlc";
+import { maxImageBytes } from "./record";
 
 export const protocolVersion = 1;
 
@@ -60,7 +61,38 @@ export interface StateFrame {
 export const capabilities = {
   /** Answers `icons-want` with the icons of the apps it knows */
   appIcons: "app-icons",
+  /** Takes image records, and sends and asks for their bytes in blob frames */
+  images: "images",
 } as const;
+
+/** The bytes of one piece of an image. Small enough that a frame, in base64
+ *  and encrypted, stays well under what one message may hold. */
+export const blobChunkBytes = 192 * 1024;
+
+/** Asks for the bytes of the image with this hash. Sent only to a device
+ *  with the images capability. */
+export interface BlobWantFrame {
+  t: "blob-want";
+  hash: string;
+}
+
+/** One piece of an image, in order from offset 0. The last one ends at
+ *  `total`. */
+export interface BlobFrame {
+  t: "blob";
+  hash: string;
+  offset: number;
+  total: number;
+  /** base64, at most blobChunkBytes */
+  data: string;
+}
+
+/** The answer to a `blob-want` for an image the sender doesn't hold, or can
+ *  no longer read. */
+export interface BlobNoneFrame {
+  t: "blob-none";
+  hash: string;
+}
 
 export const iconLimits = {
   /** names in one `icons-want`, and icons in one `icons` */
@@ -107,6 +139,9 @@ export type Frame =
   | ChangesFrame
   | IconsWantFrame
   | IconsFrame
+  | BlobWantFrame
+  | BlobFrame
+  | BlobNoneFrame
   | PingFrame
   | PongFrame;
 
@@ -123,6 +158,9 @@ function parseJson(text: string): Record<string, unknown> | null {
 
 const isCount = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const isHash = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 
 const isShortText = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length >= 1 && value.length <= max;
@@ -208,6 +246,24 @@ export function parseFrame(text: string): Frame | null {
         items: m.items,
         upTo: m.upTo,
         more: m.more,
+      };
+    }
+    case "blob-want":
+    case "blob-none":
+      return isHash(m.hash) ? { t: m.t, hash: m.hash } : null;
+    case "blob": {
+      if (!isHash(m.hash) || !isCount(m.offset) || !isCount(m.total)) {
+        return null;
+      }
+      if (m.total < 1 || m.total > maxImageBytes) return null;
+      // base64 is four characters for every three bytes
+      if (!isShortText(m.data, Math.ceil(blobChunkBytes / 3) * 4)) return null;
+      return {
+        t: "blob",
+        hash: m.hash,
+        offset: m.offset,
+        total: m.total,
+        data: m.data,
       };
     }
     default:

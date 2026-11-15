@@ -1,7 +1,8 @@
 // A SyncStore in memory, with the local writes an app makes (copy, pin,
 // delete). Tests drive the engine with it, and the Mac's SQLite store has to
 // behave the same way.
-import { randomBytes, toHex } from "../crypto";
+import { type Bytes, randomBytes, toHex } from "../crypto";
+import type { ImageStore } from "../engine";
 import type { Hlc } from "../hlc";
 import type { ItemRecord } from "../record";
 import type {
@@ -25,6 +26,15 @@ export interface CopyOptions {
   sourceApp?: string | null;
 }
 
+export interface ImageOptions {
+  type?: string;
+  sourceApp?: string | null;
+}
+
+async function sha256(bytes: Bytes): Promise<string> {
+  return toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
 export class MemoryStore implements SyncStore {
   readonly epochId = toHex(randomBytes(8));
   /** Every cursor saved for a peer, in order: one per applied batch. */
@@ -44,6 +54,55 @@ export class MemoryStore implements SyncStore {
   private seq = 0;
   private lock: Promise<unknown> = Promise.resolve();
   private idCounter = 0;
+  /** The bytes of the images this device holds, by hash. */
+  readonly blobs = new Map<string, Bytes>();
+  /** Images that are arriving: the pieces so far. */
+  private readonly arriving = new Map<string, Bytes[]>();
+  /** Every piece written, to see how an image travelled. */
+  readonly piecesWritten: { hash: string; offset: number; length: number }[] =
+    [];
+
+  /** The device's ImageStore, as an app implements it over files. */
+  readonly images: ImageStore = {
+    missing: async () => [
+      ...new Set(
+        [...this.rows.values()].flatMap(({ record }) =>
+          record.image && !this.blobs.has(record.image.hash)
+            ? [record.image.hash]
+            : [],
+        ),
+      ),
+    ],
+    size: async (hash) => this.blobs.get(hash)?.length ?? null,
+    read: async (hash, offset, length) =>
+      this.blobs.get(hash)?.slice(offset, offset + length) ?? null,
+    write: async (hash, offset, total, piece) => {
+      this.piecesWritten.push({ hash, offset, length: piece.length });
+      const wanted = [...this.rows.values()].some(
+        ({ record }) => record.image?.hash === hash,
+      );
+      if (!wanted || this.blobs.has(hash)) return "refused";
+      if (offset === 0) this.arriving.set(hash, []);
+      const pieces = this.arriving.get(hash);
+      const received = pieces?.reduce((sum, part) => sum + part.length, 0);
+      if (!pieces || received !== offset || offset + piece.length > total) {
+        this.arriving.delete(hash);
+        return "refused";
+      }
+      pieces.push(piece);
+      if (offset + piece.length < total) return "more";
+      this.arriving.delete(hash);
+      const whole = new Uint8Array(total);
+      let at = 0;
+      for (const part of pieces) {
+        whole.set(part, at);
+        at += part.length;
+      }
+      if ((await sha256(whole)) !== hash) return "refused";
+      this.blobs.set(hash, whole);
+      return "done";
+    },
+  };
 
   constructor(
     deviceId: string,
@@ -85,6 +144,7 @@ export class MemoryStore implements SyncStore {
         id,
         kind: "text",
         text,
+        image: null,
         createdAt: time,
         origin: this.deviceId,
         dateCopied: time,
@@ -93,6 +153,36 @@ export class MemoryStore implements SyncStore {
         deletedAt: null,
       },
       options.secret ?? false,
+    );
+    return id;
+  }
+
+  /** A picture copied here: its record, and its bytes kept beside it. */
+  async copyImage(bytes: Bytes, options: ImageOptions = {}): Promise<string> {
+    const hash = await sha256(bytes);
+    this.blobs.set(hash, bytes);
+    const time = this.now();
+    const id = `${this.idPrefix}-${++this.idCounter}`;
+    this.write(
+      {
+        id,
+        kind: "image",
+        text: null,
+        image: {
+          hash,
+          bytes: bytes.length,
+          width: 4,
+          height: 3,
+          type: options.type ?? "image/png",
+        },
+        createdAt: time,
+        origin: this.deviceId,
+        dateCopied: time,
+        sourceApp: options.sourceApp ?? null,
+        pinned: null,
+        deletedAt: null,
+      },
+      false,
     );
     return id;
   }
@@ -110,7 +200,10 @@ export class MemoryStore implements SyncStore {
 
   remove(id: string): void {
     const { record, secret } = this.row(id);
-    this.write({ ...record, text: null, deletedAt: this.now() }, secret);
+    this.write(
+      { ...record, text: null, image: null, deletedAt: this.now() },
+      secret,
+    );
   }
 
   /** Rows of a kind that never syncs, such as images, still take a syncSeq,
@@ -140,7 +233,7 @@ export class MemoryStore implements SyncStore {
 
   liveTexts(): string[] {
     return this.snapshot().flatMap((r) =>
-      r.deletedAt === null ? [r.text!] : [],
+      r.deletedAt === null && r.kind === "text" ? [r.text!] : [],
     );
   }
 

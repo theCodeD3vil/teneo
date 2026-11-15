@@ -3,7 +3,9 @@ import { expect, test } from "bun:test";
 import {
   type ItemRecord,
   collapseSameText,
+  hasSameContent,
   isSameRecord,
+  maxImageBytes,
   maxTextBytes,
   mergeRecords,
   parseRecord,
@@ -43,6 +45,7 @@ function randomVersion(random: () => number): ItemRecord {
   return {
     id: "item-1",
     kind: "text",
+    image: null,
     text: deleted ? null : "hello",
     createdAt: 1000,
     origin: device,
@@ -166,6 +169,7 @@ test("the same text on two devices keeps the smaller id, with the later copy", (
 const valid = {
   id: "abc-1",
   kind: "text",
+  image: null,
   text: "hello",
   createdAt: 1,
   origin: device,
@@ -218,8 +222,86 @@ test("malformed records are refused field by field", () => {
   for (const field of Object.keys(valid)) {
     const without = { ...missing };
     delete without[field];
-    expect(parseRecord(without)).toBeNull();
+    // a text from a Teneo of before images has no `image`: it is one still
+    if (field === "image") expect(parseRecord(without)).toEqual(valid);
+    else expect(parseRecord(without)).toBeNull();
   }
+});
+
+// --- images
+
+const picture = {
+  hash: "ab".repeat(32),
+  bytes: 1234,
+  width: 640,
+  height: 480,
+  type: "image/png",
+};
+const image: ItemRecord = {
+  ...valid,
+  id: "img-1",
+  kind: "image",
+  text: null,
+  image: picture,
+};
+
+test("an image record names its picture, and carries no text", () => {
+  expect(parseRecord({ ...image, extra: 1 })).toEqual(image);
+  const deleted = { ...image, image: null, deletedAt: 9 };
+  expect(parseRecord(deleted)).toEqual(deleted);
+  // a tombstone's picture is dropped, whatever it says
+  expect(parseRecord({ ...image, deletedAt: 9 })).toEqual(deleted);
+  const bad = [
+    { ...image, text: "words" },
+    { ...image, image: null },
+    { ...image, image: { ...picture, hash: "AB".repeat(32) } },
+    { ...image, image: { ...picture, hash: "ab" } },
+    { ...image, image: { ...picture, bytes: 0 } },
+    { ...image, image: { ...picture, bytes: maxImageBytes + 1 } },
+    { ...image, image: { ...picture, width: 0 } },
+    { ...image, image: { ...picture, height: 1.5 } },
+    { ...image, image: { ...picture, type: "image/svg+xml" } },
+    { ...image, image: { ...picture, type: "image/heic" } },
+    { ...image, kind: "files", image: picture },
+  ];
+  for (const record of bad) expect(parseRecord(record)).toBeNull();
+  // a text never carries a picture
+  expect(parseRecord({ ...valid, image: picture })).toEqual(valid);
+});
+
+test("an image merges as a text does, and a delete drops its picture", () => {
+  const later = { ...image, dateCopied: 50, sourceApp: "Preview" };
+  expect(mergeRecords(image, later)).toEqual(later);
+  expect(mergeRecords(later, image)).toEqual(later);
+  const deleted = { ...image, image: null, deletedAt: 9 };
+  expect(mergeRecords(image, deleted)).toEqual({ ...deleted });
+  expect(mergeRecords(deleted, later)).toEqual({
+    ...deleted,
+    dateCopied: 50,
+    sourceApp: "Preview",
+  });
+});
+
+test("the same picture is the same content, the same words are, and a picture is never a text", () => {
+  const other = { ...image, id: "img-2" };
+  expect(hasSameContent(image, other)).toBe(true);
+  expect(
+    hasSameContent(image, {
+      ...other,
+      image: { ...picture, hash: "cd".repeat(32) },
+    }),
+  ).toBe(false);
+  expect(hasSameContent(valid, { ...valid, id: "abc-2" })).toBe(true);
+  expect(hasSameContent(valid, image)).toBe(false);
+  // two deleted items have nothing in common
+  const gone = { ...image, image: null, deletedAt: 9 };
+  expect(hasSameContent(gone, { ...gone, id: "img-2" })).toBe(false);
+  expect(
+    hasSameContent(
+      { ...valid, text: null, deletedAt: 9 },
+      { ...valid, id: "abc-2", text: null, deletedAt: 9 },
+    ),
+  ).toBe(false);
 });
 
 test("text is limited to 1 MB, counted in bytes", () => {

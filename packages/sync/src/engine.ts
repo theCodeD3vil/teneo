@@ -18,6 +18,10 @@ import {
 import type { Hlc } from "./hlc";
 import {
   batchLimits,
+  blobChunkBytes,
+  type BlobFrame,
+  type BlobNoneFrame,
+  type BlobWantFrame,
   capabilities,
   type ChangesFrame,
   type Frame,
@@ -29,9 +33,12 @@ import {
 import {
   type ItemRecord,
   collapseSameText,
+  hasSameContent,
+  imageTypes,
   isSameItem,
   isSameRecord,
   isTombstone,
+  maxImageBytes,
   maxTextBytes,
   mergeRecords,
   parseRecord,
@@ -59,6 +66,31 @@ export interface AppIconSink {
   save(name: string, png: Bytes): Promise<void>;
 }
 
+/** Where a device keeps the bytes of its image items. An image record says
+ *  only the picture's hash and size; the bytes are asked for by hash, and a
+ *  device that holds them hands them to any device that asks. */
+export interface ImageStore {
+  /** The hashes of the images in the history, not deleted, whose bytes this
+   *  device does not hold yet. */
+  missing(): Promise<string[]>;
+  /** How long the image with this hash is, or null when this device does
+   *  not hold all of it. */
+  size(hash: string): Promise<number | null>;
+  /** A piece of it, or null when it can't be read (it was deleted since). */
+  read(hash: string, offset: number, length: number): Promise<Bytes | null>;
+  /** Keep a piece of an image that is arriving. Pieces come in order from
+   *  offset 0, and one at offset 0 starts over. "done" once the last piece
+   *  is in and the whole has the hash it was asked for by; "refused" for a
+   *  piece out of order, an image nobody needs, or a whole that is not what
+   *  its hash says, which is then dropped. */
+  write(
+    hash: string,
+    offset: number,
+    total: number,
+    piece: Bytes,
+  ): Promise<"more" | "done" | "refused">;
+}
+
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /** An icon from another device is untrusted: a png, and a small one. */
@@ -82,6 +114,9 @@ export interface EngineOptions {
   iconSource?: AppIconSource;
   /** This device asks for the icons of the apps in the items it receives. */
   iconSink?: AppIconSink;
+  /** This device syncs images: it keeps their bytes here. Without it, image
+   *  items are neither sent nor taken. */
+  images?: ImageStore;
   vaultKey: Bytes;
   store: SyncStore;
   /** Items holding detected secrets travel only while this says true. */
@@ -122,6 +157,16 @@ interface Link {
   /** App names this device has asked the peer's icon for, on this connection:
    *  it answers with what it has, so none is asked for twice. */
   askedIcons: Set<string>;
+  /** Image hashes asked of the peer on this connection, answered or not. */
+  askedBlobs: Set<string>;
+  /** Hashes still to ask the peer for, one at a time. */
+  blobQueue: string[];
+  /** The image arriving from the peer now. */
+  fetching: string | null;
+  /** The images the peer asked for are sent one after another. */
+  serving: Promise<void>;
+  /** How many of those are not sent yet. */
+  servingCount: number;
   /** The peer's store epoch: null until its state frame arrives. */
   epoch: string | null;
   /** The peer has everything up to here. Null until its state frame arrives. */
@@ -214,7 +259,8 @@ export class SyncEngine {
     return (
       this.attaching === 0 &&
       [...this.links.values()].every(
-        (link) => !link.pumping && link.session.idle(),
+        (link) =>
+          !link.pumping && link.servingCount === 0 && link.session.idle(),
       )
     );
   }
@@ -263,6 +309,11 @@ export class SyncEngine {
       maker: "",
       caps: [],
       askedIcons: new Set(),
+      askedBlobs: new Set(),
+      blobQueue: [],
+      fetching: null,
+      serving: Promise.resolve(),
+      servingCount: 0,
       epoch: null,
       sentUpTo: null,
       pumping: false,
@@ -278,7 +329,7 @@ export class SyncEngine {
       name: this.options.name,
       platform: this.options.platform,
       ...(this.options.maker ? { maker: this.options.maker } : {}),
-      ...(this.options.iconSource ? { caps: [capabilities.appIcons] } : {}),
+      ...(this.ownCaps().length > 0 ? { caps: this.ownCaps() } : {}),
       cursor: { epoch: known?.epoch ?? null, seq: known?.receivedSeq ?? 0 },
     });
     return link;
@@ -293,7 +344,10 @@ export class SyncEngine {
     if (frame.t === "state") await this.handleState(link, frame);
     else if (frame.t === "changes") await this.handleChanges(link, frame);
     else if (frame.t === "icons-want") await this.handleIconsWant(link, frame);
-    else await this.handleIcons(link, frame);
+    else if (frame.t === "icons") await this.handleIcons(link, frame);
+    else if (frame.t === "blob-want") this.handleBlobWant(link, frame);
+    else if (frame.t === "blob") await this.handleBlob(link, frame);
+    else await this.handleBlobNone(link, frame);
   }
 
   private async handleState(link: Link, frame: StateFrame): Promise<void> {
@@ -322,6 +376,10 @@ export class SyncEngine {
     );
     this.options.onPeersChanged?.();
     this.pump(link);
+    // images whose bytes never arrived, from this device or another
+    await this.askForImages(link).catch((error: unknown) =>
+      this.options.onError?.(error),
+    );
   }
 
   private async handleChanges(link: Link, frame: ChangesFrame): Promise<void> {
@@ -334,7 +392,10 @@ export class SyncEngine {
     const records: ItemRecord[] = [];
     for (const item of frame.items) {
       const record = parseRecord(item);
-      if (record) records.push(record);
+      // an image is only taken by a device that can keep its bytes
+      if (record && (record.kind === "text" || this.options.images)) {
+        records.push(record);
+      }
     }
 
     const { store } = this.options;
@@ -353,10 +414,15 @@ export class SyncEngine {
       });
       return changed;
     });
-    // the batch is saved whatever becomes of its icons
+    // the batch is saved whatever becomes of its icons and its images' bytes
     await this.askForIcons(link, records).catch((error: unknown) =>
       this.options.onError?.(error),
     );
+    if (records.some((record) => record.image !== null)) {
+      await this.askForImages(link).catch((error: unknown) =>
+        this.options.onError?.(error),
+      );
+    }
     if (!changed) return;
 
     await store.trimHistory();
@@ -384,7 +450,7 @@ export class SyncEngine {
       !isTombstone(incoming) &&
       (incoming.pinned === null || incoming.pinned.at === null);
     const newest = isPlainCopy ? await tx.newestUnpinned() : null;
-    if (newest && newest.text === incoming.text) {
+    if (newest && hasSameContent(newest, incoming)) {
       const { kept, dropped } = collapseSameText(newest, incoming, this.now());
       for (const record of [kept, dropped]) {
         if (record.id !== newest.id || !isSameRecord(record, newest))
@@ -455,6 +521,111 @@ export class SyncEngine {
     if (saved) this.options.onIconsChanged?.();
   }
 
+  // --- images: a record names its picture by hash, and the bytes are asked
+  // for apart from it, a piece at a time, so no message is ever large
+
+  private ownCaps(): string[] {
+    return [
+      ...(this.options.iconSource ? [capabilities.appIcons] : []),
+      ...(this.options.images ? [capabilities.images] : []),
+    ];
+  }
+
+  private sharesImages(link: Link): boolean {
+    return (
+      this.options.images !== undefined &&
+      link.caps.includes(capabilities.images)
+    );
+  }
+
+  /** Ask the peer for the bytes of every image this device lacks, one image
+   *  at a time. */
+  private async askForImages(link: Link): Promise<void> {
+    const { images } = this.options;
+    if (!images || !this.sharesImages(link)) return;
+    for (const hash of await images.missing()) {
+      if (link.askedBlobs.has(hash)) continue;
+      link.askedBlobs.add(hash);
+      link.blobQueue.push(hash);
+    }
+    await this.fetchNextImage(link);
+  }
+
+  private async fetchNextImage(link: Link): Promise<void> {
+    if (link.fetching !== null) return;
+    const hash = link.blobQueue.shift();
+    if (hash === undefined) return;
+    link.fetching = hash;
+    await this.sendOrClosed(link, { t: "blob-want", hash });
+  }
+
+  /** The peer asked for an image: send it in pieces, after the ones it asked
+   *  for before. Not awaited by the caller, so the peer's other frames (a
+   *  ping among them) are read meanwhile. */
+  private handleBlobWant(link: Link, frame: BlobWantFrame): void {
+    link.servingCount += 1;
+    link.serving = link.serving
+      .then(() => this.sendImage(link, frame.hash))
+      .catch((error: unknown) => this.options.onError?.(error))
+      .finally(() => {
+        link.servingCount -= 1;
+      });
+  }
+
+  private async sendImage(link: Link, hash: string): Promise<void> {
+    const { images } = this.options;
+    const total = (await images?.size(hash).catch(() => null)) ?? null;
+    if (!images || total === null || total < 1 || total > maxImageBytes) {
+      await this.sendOrClosed(link, { t: "blob-none", hash });
+      return;
+    }
+    for (let offset = 0; offset < total; offset += blobChunkBytes) {
+      const length = Math.min(blobChunkBytes, total - offset);
+      const piece = await images.read(hash, offset, length).catch(() => null);
+      if (!piece || piece.length !== length) {
+        // gone since it was asked for: the peer stops waiting for the rest
+        await this.sendOrClosed(link, { t: "blob-none", hash });
+        return;
+      }
+      await this.sendOrClosed(link, {
+        t: "blob",
+        hash,
+        offset,
+        total,
+        data: toBase64(piece),
+      });
+    }
+  }
+
+  private async handleBlob(link: Link, frame: BlobFrame): Promise<void> {
+    const { images } = this.options;
+    // only the image that was asked for, and is still awaited
+    if (!images || link.fetching !== frame.hash) return;
+    const piece = fromBase64(frame.data);
+    const result = piece
+      ? await images
+          .write(frame.hash, frame.offset, frame.total, piece)
+          .catch((error: unknown) => {
+            this.options.onError?.(error);
+            return "refused" as const;
+          })
+      : "refused";
+    if (result === "more") return;
+    link.fetching = null;
+    if (result === "done") this.options.onItemsChanged?.();
+    await this.fetchNextImage(link);
+  }
+
+  private async handleBlobNone(
+    link: Link,
+    frame: BlobNoneFrame,
+  ): Promise<void> {
+    if (link.fetching !== frame.hash) return;
+    // another device may hold it: it is asked again on the next connection
+    link.fetching = null;
+    await this.fetchNextImage(link);
+  }
+
   /** A connection that closed mid-send is an ordinary disconnect */
   private async sendOrClosed(link: Link, frame: Frame): Promise<void> {
     try {
@@ -488,8 +659,23 @@ export class SyncEngine {
     })();
   }
 
-  private isEligible(change: StoredChange, allowSecrets: boolean): boolean {
+  private isEligible(
+    change: StoredChange,
+    allowSecrets: boolean,
+    link: Link,
+  ): boolean {
     const { record } = change;
+    if (record.kind === "image") {
+      // an older Teneo, or a device that keeps no images, never gets one
+      if (!this.sharesImages(link)) return false;
+      if (isTombstone(record)) return true;
+      const image = record.image;
+      return (
+        image !== null &&
+        image.bytes <= maxImageBytes &&
+        imageTypes.includes(image.type)
+      );
+    }
     if (isTombstone(record)) return true;
     if (change.hasSecret && !allowSecrets) return false;
     return utf8Length(record.text!) <= maxTextBytes;
@@ -510,7 +696,7 @@ export class SyncEngine {
       scan: while (true) {
         const { changes, head } = await store.changesAfter(scanned, scanPage);
         for (const change of changes) {
-          if (this.isEligible(change, allowSecrets)) {
+          if (this.isEligible(change, allowSecrets, link)) {
             const size = utf8Length(change.record.text ?? "") + 256;
             const full =
               items.length >= batchLimits.items ||

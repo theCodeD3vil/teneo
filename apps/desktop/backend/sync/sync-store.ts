@@ -22,9 +22,11 @@ import {
 } from "../database";
 import { logError } from "../files";
 import { trimClipboardHistory } from "../history-limits";
+import { appPaths } from "../paths";
 import { encryptText } from "../secret-encryption";
 import { getSettings } from "../settings";
 import { all, exclusive, run } from "../sqlite";
+import { measureImage } from "./image-store";
 import {
   type SyncRow,
   holdsSecret,
@@ -35,7 +37,8 @@ import { nextSyncSeq, syncEpoch, syncHead } from "./schema";
 
 const rowColumns = `
   id, kind, value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt,
-  pinnedStamp, deletedAt, createdAt, originDevice, secrets, encrypted
+  pinnedStamp, deletedAt, createdAt, originDevice, secrets, encrypted,
+  path, imageSize, imageHash, imageBytes, imageType
 `;
 
 type StoredRow = SyncRow & { syncSeq: number };
@@ -88,7 +91,7 @@ export class SqliteSyncStore implements SyncStore {
         database,
         `
           SELECT ${rowColumns}, syncSeq FROM "CLIPBOARD_ITEMS"
-          WHERE kind = 'text' AND syncSeq > ? ORDER BY syncSeq LIMIT ?
+          WHERE kind IN ('text', 'image') AND syncSeq > ? ORDER BY syncSeq LIMIT ?
         `,
         cursor,
         asked,
@@ -98,7 +101,8 @@ export class SqliteSyncStore implements SyncStore {
         cursor = row.syncSeq;
         // left out when the Keychain can't be read: it was logged by decryptRow
         const readable = await decryptRow(row, this.app);
-        const record = readable && rowToRecord(readable, deviceId);
+        const record =
+          readable && rowToRecord(await this.withImage(readable), deviceId);
         if (record) {
           changes.push({
             seq: row.syncSeq,
@@ -110,6 +114,16 @@ export class SqliteSyncStore implements SyncStore {
       if (rows.length < asked) break;
     }
     return { changes, head };
+  }
+
+  /** An image copied here is measured the first time it is sent: a record
+   *  needs its file's hash and length. */
+  private async withImage<Row extends SyncRow>(row: Row): Promise<Row> {
+    if (row.kind !== "image" || row.deletedAt !== null || row.imageHash) {
+      return row;
+    }
+    const measured = await measureImage(row, this.app);
+    return measured ? { ...row, ...measured } : row;
   }
 
   async getPeer(deviceId: string): Promise<PeerRecord | null> {
@@ -152,8 +166,11 @@ export class SqliteSyncStore implements SyncStore {
     return exclusive(async () => {
       database.exec("BEGIN IMMEDIATE");
       try {
-        const result = await work(new SqliteTransaction(database, this.app));
+        const transaction = new SqliteTransaction(database, this.app);
+        const result = await work(transaction);
         database.exec("COMMIT");
+        // the files of images deleted by the batch go after their rows
+        await transaction.removeFiles();
         return result;
       } catch (error) {
         try {
@@ -175,14 +192,28 @@ class SqliteTransaction implements SyncTransaction {
   private readonly database: Database;
   private readonly app: TinyApp;
 
+  /** The files of images this transaction deleted, as their rows kept them */
+  private readonly removedPaths: string[] = [];
+
   constructor(database: Database, app: TinyApp) {
     this.database = database;
     this.app = app;
   }
 
+  async removeFiles(): Promise<void> {
+    if (this.removedPaths.length === 0) return;
+    const { data } = await appPaths(this.app);
+    for (const path of this.removedPaths) {
+      if (path.startsWith("/") || path.includes("..")) continue;
+      await tjs
+        .remove(`${data}/${path}`)
+        .catch((error: unknown) => logError(`deleting ${path} failed:`, error));
+    }
+  }
+
   async get(id: string): Promise<ItemRecord | null> {
     const row = this.readRow(id);
-    if (!row || row.kind !== "text") return null;
+    if (!row || (row.kind !== "text" && row.kind !== "image")) return null;
     const readable = await decryptRow(row, this.app);
     return readable && rowToRecord(readable, getSyncIdentity().deviceId);
   }
@@ -190,17 +221,21 @@ class SqliteTransaction implements SyncTransaction {
   async put(record: ItemRecord): Promise<void> {
     const { database, app } = this;
     const existing = this.readRow(record.id);
-    // The id belongs to a copy that isn't text (not a thing that happens with
+    // The id belongs to a copy of another kind (not a thing that happens with
     // random ids): leave it, rather than fail the whole batch.
-    if (existing && existing.kind !== "text") {
+    if (existing && existing.kind !== record.kind) {
       logError(
-        `ignoring a change to ${record.id}: it is not a text here`,
+        `ignoring a change to ${record.id}: it is not a ${record.kind} here`,
         null,
       );
       return;
     }
 
     const columns = recordToColumns(record, existing);
+    if (record.kind === "image") {
+      this.putImage(record, existing, columns);
+      return;
+    }
     // The text itself is rewritten only when it changed: the row already has
     // it, found for and encrypted as this device is set to.
     const current = existing && (await decryptRow(existing, app));
@@ -285,11 +320,70 @@ class SqliteTransaction implements SyncTransaction {
     );
   }
 
+  /** An image row: its file comes later, through the image store, so a new
+   *  one has no path yet and isn't listed until its bytes are in. */
+  private putImage(
+    record: ItemRecord,
+    existing: SyncRow | null,
+    columns: ReturnType<typeof recordToColumns>,
+  ): void {
+    const { database } = this;
+    const seq = nextSyncSeq(database);
+    if (!existing) {
+      run(
+        database,
+        `
+          INSERT INTO "CLIPBOARD_ITEMS" (
+            id, kind, imageSize, imageHash, imageBytes, imageType, dateCopied,
+            sourceAppName, sourceAppBundleId, pinnedAt, pinnedStamp, deletedAt,
+            createdAt, originDevice, syncSeq
+          )
+          VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        record.id,
+        columns.imageSize,
+        columns.imageHash,
+        columns.imageBytes,
+        columns.imageType,
+        columns.dateCopied,
+        columns.sourceAppName,
+        columns.sourceAppBundleId,
+        columns.pinnedAt,
+        columns.pinnedStamp,
+        columns.deletedAt,
+        record.createdAt,
+        record.origin,
+        seq,
+      );
+      return;
+    }
+    // a tombstone: the file goes, once the batch is saved
+    const isDeleted = columns.deletedAt !== null;
+    if (isDeleted && existing.path) this.removedPaths.push(existing.path);
+    run(
+      database,
+      `
+        UPDATE "CLIPBOARD_ITEMS" SET ${isDeleted ? "path = NULL," : ""}
+          dateCopied = ?, sourceAppName = ?, sourceAppBundleId = ?,
+          pinnedAt = ?, pinnedStamp = ?, deletedAt = ?, syncSeq = ?
+        WHERE id = ?
+      `,
+      columns.dateCopied,
+      columns.sourceAppName,
+      columns.sourceAppBundleId,
+      columns.pinnedAt,
+      columns.pinnedStamp,
+      columns.deletedAt,
+      seq,
+      record.id,
+    );
+  }
+
   async newestUnpinned(): Promise<ItemRecord | null> {
     const [row] = all<SyncRow>(this.database, newestUnpinnedQuery);
-    // an image or a file list is the newest copy: the same text before it
-    // is not a repeat, as in the app's own check
-    if (!row || row.kind !== "text") return null;
+    // a file list is the newest copy: the same text before it is not a
+    // repeat, as in the app's own check
+    if (!row || (row.kind !== "text" && row.kind !== "image")) return null;
     const readable = await decryptRow(row, this.app);
     return readable && rowToRecord(readable, getSyncIdentity().deviceId);
   }

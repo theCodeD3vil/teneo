@@ -21,6 +21,38 @@ export interface SyncRow {
   originDevice: string | null;
   secrets: string | null;
   encrypted: number | null;
+  // an image: where its file is (null while its bytes are on their way, and
+  // in a tombstone), its size as JSON, and what a record says of its bytes
+  path?: string | null;
+  imageSize?: string | null;
+  imageHash?: string | null;
+  imageBytes?: number | null;
+  imageType?: string | null;
+}
+
+/** The picture an image row holds, as a record says it; null when the row
+ *  doesn't know all of it yet (its file was never measured). */
+function imageOfRow(row: SyncRow): ItemRecord["image"] {
+  if (!row.imageHash || !row.imageBytes || !row.imageType) return null;
+  try {
+    const size = JSON.parse(row.imageSize ?? "null") as {
+      width?: unknown;
+      height?: unknown;
+    } | null;
+    if (typeof size?.width !== "number" || typeof size.height !== "number") {
+      return null;
+    }
+    return {
+      hash: row.imageHash,
+      bytes: row.imageBytes,
+      // a clipboard may report a size in fractions of a point
+      width: Math.round(size.width),
+      height: Math.round(size.height),
+      type: row.imageType,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** The stamp of a pin made before sync existed. It comes from when the pin was
@@ -36,12 +68,15 @@ export function holdsSecret(
   return row.secrets !== null || row.encrypted === 1;
 }
 
-/** The record a row stands for, or null when it can't be one: not text, or a
- *  field a peer would refuse (a text over 1 MB is one). A deleted row is always
- *  sent as a tombstone, even one deleted before sync, whose text is still here. */
+/** The record a row stands for, or null when it can't be one: not a text or
+ *  an image, or a field a peer would refuse (a text over 1 MB is one, and so
+ *  is an image whose file was never measured). A deleted row is always sent as
+ *  a tombstone, even one deleted before sync, whose text is still here. */
 export function rowToRecord(row: SyncRow, deviceId: string): ItemRecord | null {
-  if (row.kind !== "text") return null;
+  if (row.kind !== "text" && row.kind !== "image") return null;
   const deleted = row.deletedAt !== null;
+  const image = row.kind === "image" && !deleted ? imageOfRow(row) : null;
+  if (row.kind === "image" && !deleted && !image) return null;
 
   let pinned: ItemRecord["pinned"] = null;
   if (row.pinnedAt !== null) {
@@ -55,8 +90,9 @@ export function rowToRecord(row: SyncRow, deviceId: string): ItemRecord | null {
 
   return parseRecord({
     id: row.id,
-    kind: "text",
-    text: deleted ? null : row.value,
+    kind: row.kind,
+    text: deleted || row.kind === "image" ? null : row.value,
+    image,
     createdAt: row.createdAt ?? row.dateCopied,
     origin: row.originDevice ?? deviceId,
     dateCopied: row.dateCopied,
@@ -76,6 +112,12 @@ export interface RecordColumns {
   pinnedAt: number | null;
   pinnedStamp: string | null;
   deletedAt: number | null;
+  /** an image's size as the row keeps it, and what the record says of its
+   *  bytes; all null for a text and a tombstone */
+  imageSize: string | null;
+  imageHash: string | null;
+  imageBytes: number | null;
+  imageType: string | null;
 }
 
 /** `existing` is the row being replaced, if any: its bundle id stays while the
@@ -95,5 +137,14 @@ export function recordToColumns(
     pinnedAt: record.deletedAt === null ? (record.pinned?.at ?? null) : null,
     pinnedStamp: record.pinned?.stamp ?? null,
     deletedAt: record.deletedAt,
+    imageSize: record.image
+      ? JSON.stringify({
+          width: record.image.width,
+          height: record.image.height,
+        })
+      : null,
+    imageHash: record.image?.hash ?? null,
+    imageBytes: record.image?.bytes ?? null,
+    imageType: record.image?.type ?? null,
   };
 }

@@ -2,17 +2,23 @@
 // key and one clock that moves forward on every reading, so a run is the same
 // every time.
 import { type MemoryPair, memoryChannelPair } from "../channel";
-import { randomBytes } from "../crypto";
+import { type Bytes, randomBytes } from "../crypto";
 import { type AppIconSink, type AppIconSource, SyncEngine } from "../engine";
 import { Hlc } from "../hlc";
 import type { SyncError } from "../session";
-import { type CopyOptions, MemoryStore } from "./memory-store";
+import {
+  type CopyOptions,
+  type ImageOptions,
+  MemoryStore,
+} from "./memory-store";
 
 export interface DeviceOptions {
   name?: string;
   maker?: string;
   iconSource?: AppIconSource;
   iconSink?: AppIconSink;
+  /** False for a device that keeps no images, as an older Teneo */
+  images?: boolean;
   historyLimit?: number;
   /** What the ids of items made here start with. */
   idPrefix?: string;
@@ -40,6 +46,7 @@ export class TestDevice {
       maker: options.maker,
       iconSource: options.iconSource,
       iconSink: options.iconSink,
+      images: options.images === false ? undefined : this.store.images,
       onIconsChanged: () => {
         this.iconsChanged += 1;
       },
@@ -55,6 +62,12 @@ export class TestDevice {
       },
       onError: (error) => network.errors.push(error),
     });
+  }
+
+  async copyImage(bytes: Bytes, options?: ImageOptions): Promise<string> {
+    const id = await this.store.copyImage(bytes, options);
+    this.engine.localChanged();
+    return id;
   }
 
   copy(text: string, options?: CopyOptions): string {
