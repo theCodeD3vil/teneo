@@ -71,6 +71,8 @@ export interface WireRow {
   linkHost: string | null;
   /** which detection rules found the secrets and link; null if none looked */
   detectorVersion: number | null;
+  /** the text itself when it is exactly one CSS colour; found with the rest */
+  color?: string | null;
   /** The row's change number. Read, never written: native code hands out its own. */
   syncSeq: number;
   /** "image" for an image; a text when absent */
@@ -97,6 +99,7 @@ export interface Detection {
   id: string;
   secrets: SecretSpan[];
   link: ClipboardLink | null;
+  color: string | null;
 }
 
 interface Answer<T> {

@@ -168,7 +168,8 @@ final class SyncStoreBridge {
                         item.getString("id"),
                         secrets,
                         link == null ? null : link.optString("url", null),
-                        link == null ? null : link.optString("host", null)
+                        link == null ? null : link.optString("host", null),
+                        item.isNull("color") ? null : item.optString("color", null)
                     )
                 );
             }
@@ -236,7 +237,8 @@ final class SyncStoreBridge {
             .put("imageSize", orNull(row.image.size))
             .put("imageHash", orNull(row.image.hash))
             .put("imageBytes", orNull(row.image.bytes))
-            .put("imageType", orNull(row.image.type));
+            .put("imageType", orNull(row.image.type))
+            .put("color", orNull(row.color));
     }
 
     private static JSONObject json(SyncRows.Single single) throws JSONException {
@@ -277,7 +279,8 @@ final class SyncStoreBridge {
             0,
             // a page from before images says no kind: its rows are texts
             "image".equals(row.optString("kind")) ? "image" : "text",
-            new SyncRows.Image(string(row, "imageSize"), string(row, "imageHash"), number(row, "imageBytes"), string(row, "imageType"))
+            new SyncRows.Image(string(row, "imageSize"), string(row, "imageHash"), number(row, "imageBytes"), string(row, "imageType")),
+            row.has("color") ? string(row, "color") : null
         );
     }
 

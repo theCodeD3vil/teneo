@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 
-import { detectionVersion } from "@teneo/shared/detection/version";
 import {
   type ItemRecord,
   type MemoryPair,
@@ -9,6 +8,7 @@ import {
 } from "@teneo/sync";
 import { TestNetwork } from "@teneo/sync/testing";
 
+import { phoneDetectionVersion as detectionVersion } from "../client/detection";
 import { FakeHistory } from "./fake-history";
 import { HistoryBridge, type WireRow } from "./history-bridge";
 import { NativeSyncStore } from "./native-store";

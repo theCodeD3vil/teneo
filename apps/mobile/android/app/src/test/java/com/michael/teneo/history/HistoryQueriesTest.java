@@ -40,9 +40,21 @@ public class HistoryQueriesTest {
         assertEquals(Collections.emptyList(), HistoryQueries.listConditions("all", "", null).values);
 
         HistoryQueries.Condition where = HistoryQueries.listConditions("text", "a_b", new HistoryQueries.ListCursor(null, 3, "b"));
-        assertTrue(where.sql.startsWith("deletedAt IS NULL AND NOT (kind = 'image' AND path IS NULL) AND kind = ? AND (value LIKE ? ESCAPE '\\'"));
+        // a text that is a colour is with the colours, not the texts
+        assertTrue(
+            where.sql.startsWith(
+                "deletedAt IS NULL AND NOT (kind = 'image' AND path IS NULL) AND kind = 'text' AND color IS NULL AND (value LIKE ? ESCAPE '\\'"
+            )
+        );
+        assertEquals(
+            "deletedAt IS NULL AND NOT (kind = 'image' AND path IS NULL) AND color IS NOT NULL",
+            HistoryQueries.listConditions("color", "", null).sql
+        );
+        HistoryQueries.Condition images = HistoryQueries.listConditions("image", "", null);
+        assertEquals("deletedAt IS NULL AND NOT (kind = 'image' AND path IS NULL) AND kind = ?", images.sql);
+        assertEquals(Collections.singletonList("image"), images.values);
         assertTrue(where.sql.endsWith("AND (pinnedAt IS NULL AND (dateCopied, id) < (?, ?))"));
-        assertEquals(Arrays.asList("text", "%a\\_b%", "%a\\_b%", "%a\\_b%", "%a\\_b%", 3L, "b"), where.values);
+        assertEquals(Arrays.asList("%a\\_b%", "%a\\_b%", "%a\\_b%", "%a\\_b%", 3L, "b"), where.values);
     }
 
     @Test

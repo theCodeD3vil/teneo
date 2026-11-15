@@ -13,6 +13,8 @@ export interface NativeItem {
   id: string;
   /** an image when it says so; a text otherwise */
   kind?: "text" | "image";
+  /** the text itself when it is exactly one CSS colour: shown as a colour */
+  color?: string | null;
   /** an image's file on the phone, and its width and height */
   imagePath?: string | null;
   imageSize?: { width: number; height: number } | null;
@@ -92,6 +94,7 @@ export interface HistoryPlugin {
         id: string;
         secrets: SecretSpan[];
         link: ClipboardLink | null;
+        color?: string | null;
       }[];
     },
   ): Promise<void>;

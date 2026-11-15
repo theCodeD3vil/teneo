@@ -14,8 +14,8 @@ import java.security.SecureRandom;
 public final class HistoryDatabase extends SQLiteOpenHelper {
 
     public static final String NAME = "teneo.sqlite";
-    /** 2: SYNC_PEERS has a maker. 3: an item may be an image. */
-    private static final int VERSION = 3;
+    /** 2: SYNC_PEERS has a maker. 3: an item may be an image. 4: a text that is a colour says so. */
+    private static final int VERSION = 4;
 
     /** The columns of an item before images, in the order they are copied over */
     private static final String TEXT_COLUMNS =
@@ -25,7 +25,8 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
     // An image has no value: `path` is its file's name in the images folder
     // (NULL while its bytes are on their way from another device, and once it
     // is deleted), `imageSize` its width and height as JSON, and imageHash,
-    // imageBytes and imageType what a sync record says of the file.
+    // imageBytes and imageType what a sync record says of the file. `color` is
+    // set on a text that is exactly one CSS colour: the app shows it as one.
     private static final String ITEMS_TABLE =
         """
         CREATE TABLE CLIPBOARD_ITEMS (
@@ -50,7 +51,8 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
           imageSize TEXT,
           imageHash TEXT,
           imageBytes INTEGER,
-          imageType TEXT
+          imageType TEXT,
+          color TEXT
         )""";
 
     HistoryDatabase(Context context, String name) {
@@ -133,6 +135,9 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
         // who made a device ("google"), as it said: its logo shows by the items copied on it
         if (oldVersion < 2) db.execSQL("ALTER TABLE SYNC_PEERS ADD COLUMN maker TEXT NOT NULL DEFAULT ''");
         if (oldVersion < 3) allowImages(db);
+        // a text that is exactly one CSS colour, found with the secrets and the link; an
+        // upgrade from before images made the column with the table
+        else if (oldVersion < 4) db.execSQL("ALTER TABLE CLIPBOARD_ITEMS ADD COLUMN color TEXT");
     }
 
     private static String randomHex(int bytes) {

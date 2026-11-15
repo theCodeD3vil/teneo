@@ -38,6 +38,8 @@ public final class SyncRows {
         /** "text" or "image" */
         public final String kind;
         public final Image image;
+        /** set on a text that is exactly one CSS colour, found with the secrets and the link */
+        public final String color;
 
         public final String id;
         /** null in a tombstone, and for a text too long for sync to send */
@@ -75,10 +77,12 @@ public final class SyncRows {
             Integer detectorVersion,
             long syncSeq,
             String kind,
-            Image image
+            Image image,
+            String color
         ) {
             this.kind = kind;
             this.image = image;
+            this.color = color;
             this.id = id;
             this.value = value;
             this.dateCopied = dateCopied;

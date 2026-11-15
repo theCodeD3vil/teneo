@@ -25,7 +25,7 @@ public final class SyncQueries {
         MAX_TEXT_BYTES +
         " THEN NULL ELSE value END AS value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, " +
         "pinnedStamp, deletedAt, createdAt, originDevice, secrets, linkUrl, linkHost, detectorVersion, syncSeq, " +
-        "kind, imageSize, imageHash, imageBytes, imageType";
+        "kind, imageSize, imageHash, imageBytes, imageType, color";
 
     /** Texts, images and tombstones after a change number, oldest change first: `?` is the number, then the most rows */
     public static final String CHANGES_AFTER =

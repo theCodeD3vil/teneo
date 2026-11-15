@@ -279,7 +279,8 @@ public class HistoryPlugin extends Plugin {
                         item.getString("id"),
                         parseSecrets(item.optJSONArray("secrets")),
                         link == null ? null : link.optString("url", null),
-                        link == null ? null : link.optString("host", null)
+                        link == null ? null : link.optString("host", null),
+                        item.isNull("color") ? null : item.optString("color", null)
                     )
                 );
             }
@@ -410,6 +411,7 @@ public class HistoryPlugin extends Plugin {
             }
         }
         json.put("imageSize", imageSize);
+        json.put("color", orNull(item.color));
         json.put("dateCopied", item.dateCopied);
         json.put("text", orNull(item.text));
         json.put("sourceAppName", orNull(item.sourceAppName));

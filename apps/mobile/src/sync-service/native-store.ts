@@ -4,9 +4,6 @@
 // follows its rules: a row becomes a record by records.ts, a text with a
 // secret is told apart, a deleted row is a tombstone, a cursor is saved with
 // the batch it covers.
-import { findLink } from "@teneo/shared/detection/links";
-import { findSecrets } from "@teneo/shared/detection/secrets";
-import { detectionVersion } from "@teneo/shared/detection/version";
 import type {
   ItemRecord,
   PeerPatch,
@@ -16,6 +13,10 @@ import type {
   SyncTransaction,
 } from "@teneo/sync";
 
+import {
+  detectIn,
+  phoneDetectionVersion as detectionVersion,
+} from "../client/detection";
 import {
   type Detection,
   type HistoryBridge,
@@ -43,17 +44,17 @@ const asSyncRow = (row: WireRow): SyncRow => ({
 
 type Found = Pick<
   WireRow,
-  "secrets" | "linkUrl" | "linkHost" | "detectorVersion"
+  "secrets" | "linkUrl" | "linkHost" | "detectorVersion" | "color"
 >;
 
 /** What is stored of the secrets and link in a text, as the Mac's detectInText
  *  finds them. Throws if the rules do. */
 function detect(text: string): { detection: Detection; found: Found } {
-  const secrets = findSecrets(text);
-  const link = findLink(text);
+  const { secrets, link, color } = detectIn(text);
   return {
-    detection: { id: "", secrets, link },
+    detection: { id: "", secrets, link, color },
     found: {
+      color,
       // as the Mac stores them: JSON of the spans, or NULL for none
       secrets: secrets.length > 0 ? JSON.stringify(secrets) : null,
       linkUrl: link?.url ?? null,
@@ -246,6 +247,7 @@ class NativeTransaction implements SyncTransaction {
     // The text is looked at only when it is new to the row: the row already
     // has what was found in the text it holds.
     let found: Found = {
+      color: null,
       secrets: null,
       linkUrl: null,
       linkHost: null,
@@ -287,6 +289,7 @@ class NativeTransaction implements SyncTransaction {
       linkUrl: found.linkUrl,
       linkHost: found.linkHost,
       detectorVersion: found.detectorVersion,
+      color: found.color ?? null,
       syncSeq: 0,
       // an image: native code gives it a file once its bytes have arrived
       kind: record.kind,

@@ -1,7 +1,4 @@
 import { Capacitor } from "@capacitor/core";
-import { findLink } from "@teneo/shared/detection/links";
-import { findSecrets } from "@teneo/shared/detection/secrets";
-import { detectionVersion } from "@teneo/shared/detection/version";
 import type {
   ClipboardHistoryItem,
   LinkPreviewImage,
@@ -13,6 +10,10 @@ import type { LinkPreviews } from "../previews/link-previews";
 import type { PairResult, TeneoClient } from "../types/client";
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
+import {
+  detectIn,
+  phoneDetectionVersion as detectionVersion,
+} from "./detection";
 import {
   appDatabase,
   type DatabaseOption,
@@ -39,8 +40,9 @@ type Detection = Parameters<
  */
 function detected(
   item: NativeItem,
-): Pick<ClipboardHistoryItem, "secrets" | "link"> {
+): Pick<ClipboardHistoryItem, "secrets" | "link" | "color"> {
   const stored = {
+    color: item.color ?? null,
     secrets: item.secrets,
     link:
       item.linkUrl && item.linkHost
@@ -51,10 +53,10 @@ function detected(
     item.detectorVersion !== null && item.detectorVersion >= detectionVersion;
   if (isLookedAt || item.text === null) return stored;
   try {
-    return {
-      secrets: findSecrets(item.text),
-      link: item.isTruncated ? stored.link : findLink(item.text),
-    };
+    // a link and a colour are the whole text or nothing, so a cut text keeps
+    // what is stored
+    const found = detectIn(item.text);
+    return item.isTruncated ? { ...stored, secrets: found.secrets } : found;
   } catch {
     return stored;
   }
@@ -63,19 +65,22 @@ function detected(
 /** The item the app shows for one the native history handed over */
 export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
   const isImage = item.kind === "image" && Boolean(item.imagePath);
+  const found = detected(item);
+  // a text that is a colour is shown as one, as the Mac shows its own; the
+  // row keeps the text, so a copy still gives it
+  const isColor = !isImage && found.color !== null;
   return {
     id: item.id,
     dateCopied: item.dateCopied,
-    kind: isImage ? "image" : "text",
+    kind: isImage ? "image" : isColor ? "color" : "text",
     changeCount: item.dateCopied,
-    text: item.text,
+    text: isColor ? null : item.text,
     html: null,
     paths: [],
     // the web view reads a file of the app's through an address Capacitor
     // makes for it
     image: isImage ? Capacitor.convertFileSrc(item.imagePath!) : null,
     imageSize: isImage ? (item.imageSize ?? null) : null,
-    color: null,
     concealed: false,
     sourceApp:
       item.sourceAppName === null && item.sourceAppBundleId === null
@@ -86,7 +91,7 @@ export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
     pinned: item.pinned,
     pasteAsFile: false,
     fileSize: null,
-    ...detected(item),
+    ...found,
     isTruncated: item.isTruncated,
   };
 }
@@ -194,7 +199,7 @@ export class NativeClient implements TeneoClient {
       for (const { id, text } of items) {
         if (this.unsavable.has(id)) continue;
         try {
-          found.push({ id, secrets: findSecrets(text), link: findLink(text) });
+          found.push({ id, ...detectIn(text) });
         } catch {
           this.unsavable.add(id);
         }

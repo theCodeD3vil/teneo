@@ -100,7 +100,12 @@ public final class HistoryQueries {
         List<Object> values = new ArrayList<>();
         conditions.add("deletedAt IS NULL");
         conditions.add("NOT " + WAITING_IMAGE);
-        if (!"all".equals(kind)) {
+        // a text that is a colour is listed with the colours, not the texts
+        if ("color".equals(kind)) {
+            conditions.add("color IS NOT NULL");
+        } else if ("text".equals(kind)) {
+            conditions.add("kind = 'text' AND color IS NULL");
+        } else if (!"all".equals(kind)) {
             conditions.add("kind = ?");
             values.add(kind);
         }

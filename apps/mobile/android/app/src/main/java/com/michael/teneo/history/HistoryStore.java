@@ -60,6 +60,8 @@ public final class HistoryStore {
         /** an image's file, and its width and height as JSON; null for a text */
         public final File imageFile;
         public final String imageSize;
+        /** set when the text is exactly one CSS colour */
+        public final String color;
 
         Item(
             String id,
@@ -76,8 +78,10 @@ public final class HistoryStore {
             Integer detectorVersion,
             String kind,
             File imageFile,
-            String imageSize
+            String imageSize,
+            String color
         ) {
+            this.color = color;
             this.kind = kind;
             this.imageFile = imageFile;
             this.imageSize = imageSize;
@@ -159,14 +163,14 @@ public final class HistoryStore {
     // A text holding a secret is read whole, so the search can tell the
     // secret from the rest; any other only as far as the list shows it
     private static final String LIST_COLUMNS =
-        "id, kind, path, imageSize, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
+        "id, kind, path, imageSize, color, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
         ORIGIN_MAKER +
         ", " +
         "CASE WHEN secrets IS NOT NULL THEN value ELSE substr(value, 1, " +
         HistoryText.PREVIEW_LENGTH +
         ") END AS value, length(value) AS valueLength";
     private static final String ITEM_COLUMNS =
-        "id, kind, path, imageSize, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
+        "id, kind, path, imageSize, color, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
         ORIGIN_MAKER +
         ", value, length(value) AS valueLength";
 
@@ -392,7 +396,7 @@ public final class HistoryStore {
                 values.put("deletedAt", System.currentTimeMillis());
                 values.putNull("pinnedAt");
                 values.put("syncSeq", nextSyncSeq());
-                for (String column : new String[] { "value", "secrets", "linkUrl", "linkHost", "encrypted", "path" }) {
+                for (String column : new String[] { "value", "secrets", "linkUrl", "linkHost", "encrypted", "path", "color" }) {
                     values.putNull(column);
                 }
                 return db.update("CLIPBOARD_ITEMS", values, "id = ? AND deletedAt IS NULL", new String[] { id }) > 0;
@@ -676,8 +680,11 @@ public final class HistoryStore {
         public final List<SecretSpan> secrets;
         public final String linkUrl;
         public final String linkHost;
+        /** the text itself, when it is exactly one CSS colour; else null */
+        public final String color;
 
-        public Detection(String id, List<SecretSpan> secrets, String linkUrl, String linkHost) {
+        public Detection(String id, List<SecretSpan> secrets, String linkUrl, String linkHost, String color) {
+            this.color = color;
             this.id = id;
             this.secrets = secrets;
             this.linkUrl = linkUrl;
@@ -721,9 +728,10 @@ public final class HistoryStore {
                     String text = null;
                     String oldSecrets = null;
                     String oldLinkUrl = null;
+                    String oldColor = null;
                     try (
                         Cursor row = db.rawQuery(
-                            "SELECT value, secrets, linkUrl FROM CLIPBOARD_ITEMS WHERE id = ?",
+                            "SELECT value, secrets, linkUrl, color FROM CLIPBOARD_ITEMS WHERE id = ?",
                             new String[] { found.id }
                         )
                     ) {
@@ -731,6 +739,7 @@ public final class HistoryStore {
                             text = row.getString(0);
                             oldSecrets = row.isNull(1) ? null : row.getString(1);
                             oldLinkUrl = row.isNull(2) ? null : row.getString(2);
+                            oldColor = row.isNull(3) ? null : row.getString(3);
                         }
                     }
                     if (text == null) continue;
@@ -746,9 +755,11 @@ public final class HistoryStore {
                     values.put("secrets", newSecrets);
                     values.put("linkUrl", newLinkUrl);
                     values.put("linkHost", hasLink ? found.linkHost : null);
+                    values.put("color", found.color);
                     values.put("detectorVersion", version);
                     boolean saved = db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { found.id }) > 0;
-                    any |= saved && !(Objects.equals(oldSecrets, newSecrets) && Objects.equals(oldLinkUrl, newLinkUrl));
+                    boolean isSame = Objects.equals(oldSecrets, newSecrets) && Objects.equals(oldLinkUrl, newLinkUrl) && Objects.equals(oldColor, found.color);
+                    any |= saved && !isSame;
                 }
                 return any;
             });
@@ -877,6 +888,7 @@ public final class HistoryStore {
         values.put("secrets", row.secrets);
         values.put("linkUrl", row.linkUrl);
         values.put("linkHost", row.linkHost);
+        values.put("color", row.color);
         values.put("detectorVersion", row.detectorVersion);
         values.put("syncSeq", nextSyncSeq());
         if (db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { row.id }) > 0) return;
@@ -1170,7 +1182,8 @@ public final class HistoryStore {
             nullableInt(row, "detectorVersion"),
             longColumn(row, "syncSeq"),
             string(row, "kind"),
-            new SyncRows.Image(string(row, "imageSize"), string(row, "imageHash"), nullableLong(row, "imageBytes"), string(row, "imageType"))
+            new SyncRows.Image(string(row, "imageSize"), string(row, "imageHash"), nullableLong(row, "imageBytes"), string(row, "imageType")),
+            string(row, "color")
         );
     }
 
@@ -1254,7 +1267,8 @@ public final class HistoryStore {
             nullableInt(row, "detectorVersion"),
             string(row, "kind"),
             images.file(string(row, "path")),
-            string(row, "imageSize")
+            string(row, "imageSize"),
+            string(row, "color")
         );
     }
 
