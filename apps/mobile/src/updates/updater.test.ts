@@ -48,6 +48,10 @@ function fakePlugin(
       });
       fail?.(error);
     },
+    requestNotifications: async () => {
+      calls.push("requestNotifications");
+      return { granted: true };
+    },
     addListener: async (event: string, listener: (event: never) => void) => {
       listeners.set(event, listener);
       return { remove: async () => undefined };
@@ -61,6 +65,8 @@ function fakePlugin(
     status: (status: InstallStatus) =>
       listeners.get("installStatus")?.(status as never),
     handedOver: () => release?.(),
+    openedFromNotification: () =>
+      (listeners.get("openedFromNotification") as (() => void) | undefined)?.(),
   };
 }
 
@@ -261,6 +267,31 @@ describe("Updater", () => {
       update,
       message: "Android blocked the update",
     });
+  });
+
+  test("asks to show notifications only once", async () => {
+    const fake = fakePlugin();
+    const storage = memoryStorage();
+    const first = updater({ plugin: fake.plugin, storage });
+    await first.instance.askToNotify();
+    await first.instance.askToNotify();
+    await updater({ plugin: fake.plugin, storage }).instance.askToNotify();
+    expect(fake.calls).toEqual(["requestNotifications"]);
+  });
+
+  test("tells of an open from the notification, even one before anything listened", async () => {
+    const fake = fakePlugin();
+    const { instance } = updater({ plugin: fake.plugin });
+    await flush();
+    fake.openedFromNotification();
+    let opens = 0;
+    const stop = instance.onOpenedFromNotification(() => opens++);
+    expect(opens).toBe(1);
+    fake.openedFromNotification();
+    expect(opens).toBe(2);
+    stop();
+    instance.onOpenedFromNotification(() => opens++);
+    expect(opens).toBe(2);
   });
 
   test("says an update can't be installed without the native plugin", async () => {

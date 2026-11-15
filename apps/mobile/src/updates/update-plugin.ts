@@ -28,6 +28,11 @@ export interface UpdatePlugin {
   }): Promise<void>;
   /** Stop a download; `install` rejects with the code "cancelled" */
   cancel(): Promise<void>;
+  /**
+   * Ask Android to let Teneo show notifications, for the one that says an
+   * update is available. Android asks the user only the first time or two.
+   */
+  requestNotifications(): Promise<{ granted: boolean }>;
   addListener(
     event: "progress",
     listener: (progress: { received: number; total: number }) => void,
@@ -35,5 +40,10 @@ export interface UpdatePlugin {
   addListener(
     event: "installStatus",
     listener: (status: InstallStatus) => void,
+  ): Promise<PluginListenerHandle>;
+  /** The app was opened from the notification that says an update is available */
+  addListener(
+    event: "openedFromNotification",
+    listener: () => void,
   ): Promise<PluginListenerHandle>;
 }

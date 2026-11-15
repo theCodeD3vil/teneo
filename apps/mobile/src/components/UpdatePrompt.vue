@@ -14,7 +14,16 @@ import UpdateProgress from "./UpdateProgress.vue";
  *  for updates" is on; the Mac opens its update window the same way. */
 const client = useClient();
 const { currentState } = useNavigation();
-const { state, checkIfDue, install, cancel, dismiss } = useUpdates();
+const {
+  state,
+  check,
+  checkIfDue,
+  install,
+  cancel,
+  dismiss,
+  askToNotify,
+  onOpenedFromNotification,
+} = useUpdates();
 
 const offered = ref<Update | null>(null);
 const isOpen = ref(false);
@@ -26,19 +35,34 @@ async function lookIfDue(): Promise<void> {
   } catch {
     return;
   }
+  // first-run setup has enough to say, and to ask
+  const isSettingUp = () => currentState.value.screen === "setup";
+  // updates found while the app is closed are said in a notification
+  if (!isSettingUp()) void askToNotify();
   const update = await checkIfDue();
-  // first-run setup has enough to say
-  if (!update || currentState.value.screen === "setup") return;
+  if (!update || isSettingUp()) return;
   offered.value = update;
   isOpen.value = true;
 }
 
+// A tap on the notification that says an update is available: show it,
+// whether or not it was offered before
+async function showUpdate(): Promise<void> {
+  const update = await check();
+  if (!update) return;
+  offered.value = update;
+  isOpen.value = true;
+}
+
+let stopListening: (() => void) | undefined;
 onMounted(() => {
   void lookIfDue();
   document.addEventListener("visibilitychange", lookIfDue);
+  stopListening = onOpenedFromNotification(() => void showUpdate());
 });
 onUnmounted(() => {
   document.removeEventListener("visibilitychange", lookIfDue);
+  stopListening?.();
 });
 
 // Android's installer takes over from here
