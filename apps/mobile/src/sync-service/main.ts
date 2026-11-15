@@ -119,8 +119,20 @@ const page: SyncPage = {
      *  history tells the core, which sends it on. */
     copy(text) {
       if (!debuggable || !run) return;
-      native.debugSaveText(text);
-      log(`copied here "${text.slice(0, 40)}"`);
+      // native code answers in JSON and never throws: a failure is in the answer
+      const answer = native.debugSaveText(text);
+      const failure = (() => {
+        try {
+          return (JSON.parse(answer) as { error?: string }).error;
+        } catch {
+          return "no answer";
+        }
+      })();
+      log(
+        failure
+          ? `the copy was not saved: ${failure}`
+          : `copied here "${text.slice(0, 40)}"`,
+      );
     },
   },
 };

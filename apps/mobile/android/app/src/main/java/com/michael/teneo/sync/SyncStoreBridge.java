@@ -50,14 +50,23 @@ final class SyncStoreBridge {
     }
 
     /** The history, opened on first use. Opening can take a moment, so not on the main thread. */
-    private synchronized HistoryStore store() {
-        if (closed) throw new IllegalStateException("The page is gone");
-        if (store == null) {
-            store = HistoryStore.get(context);
-            listener = localChanged::run;
-            store.addListener(listener);
+    private HistoryStore store() {
+        synchronized (this) {
+            if (closed) throw new IllegalStateException("The page is gone");
+            if (store != null) return store;
         }
-        return store;
+        // Not under the lock: `close` runs on the main thread and must never
+        // wait for a database to open
+        HistoryStore opened = HistoryStore.get(context);
+        synchronized (this) {
+            if (closed) throw new IllegalStateException("The page is gone");
+            if (store == null) {
+                store = opened;
+                listener = localChanged::run;
+                store.addListener(listener);
+            }
+            return store;
+        }
     }
 
     /** The page is gone: stop hearing of changes */

@@ -49,8 +49,9 @@ export function loggedStore(
             await tx.put(record);
             const pin = record.pinned?.at != null ? " pinned" : "";
             const gone = record.deletedAt !== null ? " deleted" : "";
+            // never the text: it may hold a secret, and a log can be read
             saved.push(
-              `${record.id.slice(0, 8)} "${(record.text ?? "").slice(0, 40)}"${pin}${gone}`,
+              `${record.id.slice(0, 8)} (${(record.text ?? "").length} characters)${pin}${gone}`,
             );
           },
         });

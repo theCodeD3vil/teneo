@@ -515,6 +515,46 @@ describe("pin stamps", () => {
   });
 });
 
+test("a text nobody has looked at yet is looked at when sync writes its row", async () => {
+  const { history, store } = setup();
+  // saved by the capture, which leaves the looking to others
+  const id = history.copy("postgres://user:pa55@db.example.com/app");
+  expect(history.rows.get(id)!.detectorVersion).toBeNull();
+
+  // a pin arrives for it from another device: the row is written with the same text
+  await store.transaction(async (tx) => {
+    const record = (await tx.get(id))!;
+    await tx.put({ ...record, dateCopied: record.dateCopied + 1 });
+  });
+  const row = history.rows.get(id)!;
+  expect(row.detectorVersion).not.toBeNull();
+  expect(row.secrets).toContain("Password in URL");
+});
+
+test("the newest unpinned item is asked for once however many copies a batch writes", async () => {
+  const { history, store } = setup();
+  history.copy("already here");
+  let asked = 0;
+  const newestUnpinned = history.newestUnpinned.bind(history);
+  history.newestUnpinned = (skipped) => {
+    asked += 1;
+    return newestUnpinned(skipped);
+  };
+  await store.transaction(async (tx) => {
+    const base = (await tx.newestUnpinned())!;
+    for (let i = 0; i < 5; i++) {
+      await tx.put({
+        ...base,
+        id: `new-${i}`,
+        text: `copy ${i}`,
+        dateCopied: base.dateCopied + 1 + i,
+      });
+      expect((await tx.newestUnpinned())!.id).toBe(`new-${i}`);
+    }
+  });
+  expect(asked).toBe(1);
+});
+
 test("trimming applies the history's limits", async () => {
   const { history, store } = setup();
   await store.trimHistory();

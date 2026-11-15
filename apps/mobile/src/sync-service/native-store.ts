@@ -31,6 +31,7 @@ import {
 
 /** A transaction that kept finding the history changed under it gives up */
 const maxAttempts = 8;
+const retryWaitMs = 25;
 
 /** Phone rows never carry the Mac's `encrypted` flag, and are all text */
 const asSyncRow = (row: WireRow): SyncRow => ({
@@ -190,6 +191,10 @@ export class NativeSyncStore implements SyncStore {
       if (attempt >= maxAttempts) {
         throw new Error("The history kept changing, so a change was not saved");
       }
+      // the app is writing: give it a moment, longer each time, to finish
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(retryWaitMs * attempt, 250)),
+      );
     }
   }
 
@@ -206,6 +211,8 @@ class NativeTransaction implements SyncTransaction {
   /** The rows as they will be written, by id: what the transaction reads sees them */
   private readonly written = new Map<string, WireRow>();
   private readonly peers = new Map<string, PeerPatch>();
+  /** The newest unpinned row in the database that isn't written here */
+  private storedNewest: { row: WireRow | null } | null = null;
 
   constructor(history: HistoryBridge, deviceId: string) {
     this.history = history;
@@ -241,7 +248,15 @@ class NativeTransaction implements SyncTransaction {
       detectorVersion: null,
     };
     if (columns.value !== null) {
-      if (existing && existing.value === columns.value) {
+      // Only what today's rules found is kept. A row nobody has looked at
+      // yet, or that older rules looked at, is looked at now: the app may be
+      // saving its own look at this moment, which this write would undo.
+      const isLookedAt =
+        existing !== null &&
+        existing.value === columns.value &&
+        existing.detectorVersion !== null &&
+        existing.detectorVersion >= detectionVersion;
+      if (isLookedAt) {
         found = existing;
       } else {
         try {
@@ -273,11 +288,21 @@ class NativeTransaction implements SyncTransaction {
   }
 
   async newestUnpinned(): Promise<ItemRecord | null> {
-    // what was written here is not saved yet: native code leaves those rows
-    // out, and they are weighed against what it found
-    const stored = this.seen(
-      this.history.newestUnpinned([...this.written.keys()]),
-    ).row;
+    // What was written here is not saved yet: native code leaves those rows
+    // out, and they are weighed against what it found. The engine asks once
+    // for every new copy in a batch, and the answer only changes when the row
+    // found has itself been written here since, so it is asked for again only
+    // then.
+    if (
+      !this.storedNewest ||
+      (this.storedNewest.row && this.written.has(this.storedNewest.row.id))
+    ) {
+      this.storedNewest = {
+        row: this.seen(this.history.newestUnpinned([...this.written.keys()]))
+          .row,
+      };
+    }
+    const stored = this.storedNewest.row;
     let newest = stored;
     for (const row of this.written.values()) {
       if (isUnpinned(row) && (newest === null || isNewer(row, newest)))
