@@ -35,11 +35,12 @@ public class HistoryQueriesTest {
 
     @Test
     public void aListRequestFiltersDeletedItemsKindSearchAndCursor() {
-        assertEquals("deletedAt IS NULL", HistoryQueries.listConditions("all", "", null).sql);
+        // an image whose file has not arrived yet is not listed
+        assertEquals("deletedAt IS NULL AND NOT (kind = 'image' AND path IS NULL)", HistoryQueries.listConditions("all", "", null).sql);
         assertEquals(Collections.emptyList(), HistoryQueries.listConditions("all", "", null).values);
 
         HistoryQueries.Condition where = HistoryQueries.listConditions("text", "a_b", new HistoryQueries.ListCursor(null, 3, "b"));
-        assertTrue(where.sql.startsWith("deletedAt IS NULL AND kind = ? AND (value LIKE ? ESCAPE '\\'"));
+        assertTrue(where.sql.startsWith("deletedAt IS NULL AND NOT (kind = 'image' AND path IS NULL) AND kind = ? AND (value LIKE ? ESCAPE '\\'"));
         assertTrue(where.sql.endsWith("AND (pinnedAt IS NULL AND (dateCopied, id) < (?, ?))"));
         assertEquals(Arrays.asList("text", "%a\\_b%", "%a\\_b%", "%a\\_b%", "%a\\_b%", 3L, "b"), where.values);
     }

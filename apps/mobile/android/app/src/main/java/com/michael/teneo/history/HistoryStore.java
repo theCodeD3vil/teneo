@@ -5,6 +5,9 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.Build;
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -52,6 +55,11 @@ public final class HistoryStore {
         public final boolean isTruncated;
         /** which detection rules found the secrets and link; null if none looked */
         public final Integer detectorVersion;
+        /** "text" or "image" */
+        public final String kind;
+        /** an image's file, and its width and height as JSON; null for a text */
+        public final File imageFile;
+        public final String imageSize;
 
         Item(
             String id,
@@ -65,8 +73,14 @@ public final class HistoryStore {
             String linkUrl,
             String linkHost,
             boolean isTruncated,
-            Integer detectorVersion
+            Integer detectorVersion,
+            String kind,
+            File imageFile,
+            String imageSize
         ) {
+            this.kind = kind;
+            this.imageFile = imageFile;
+            this.imageSize = imageSize;
             this.id = id;
             this.dateCopied = dateCopied;
             this.text = text;
@@ -145,27 +159,35 @@ public final class HistoryStore {
     // A text holding a secret is read whole, so the search can tell the
     // secret from the rest; any other only as far as the list shows it
     private static final String LIST_COLUMNS =
-        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
+        "id, kind, path, imageSize, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
         ORIGIN_MAKER +
         ", " +
         "CASE WHEN secrets IS NOT NULL THEN value ELSE substr(value, 1, " +
         HistoryText.PREVIEW_LENGTH +
         ") END AS value, length(value) AS valueLength";
     private static final String ITEM_COLUMNS =
-        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
+        "id, kind, path, imageSize, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
         ORIGIN_MAKER +
         ", value, length(value) AS valueLength";
 
     private static final Map<String, HistoryStore> stores = new HashMap<>();
+
+    /** The folder, inside the app's files, that holds the history's images */
+    public static final String IMAGES_FOLDER = "images";
 
     private final HistoryDatabase helper;
     private final SQLiteDatabase db;
     private final Hlc clock;
     private final String deviceId;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
+    private final ImageFiles images;
+    /** The files of images a sync batch deleted: removed once the batch is saved */
+    private final List<String> removedImages = new ArrayList<>();
 
-    private HistoryStore(HistoryDatabase helper) {
+    private HistoryStore(HistoryDatabase helper, File imagesFolder) {
         this.helper = helper;
+        images = new ImageFiles(imagesFolder);
+        images.forgetArriving();
         db = helper.getWritableDatabase();
         deviceId = metaString("deviceId");
         clock = new Hlc(deviceId, System::currentTimeMillis);
@@ -188,7 +210,10 @@ public final class HistoryStore {
     public static synchronized HistoryStore get(Context context, String name) {
         HistoryStore store = stores.get(name);
         if (store == null) {
-            store = new HistoryStore(new HistoryDatabase(context.getApplicationContext(), name));
+            Context app = context.getApplicationContext();
+            // a test database keeps its images apart from the history's
+            File imagesFolder = new File(app.getFilesDir(), HistoryDatabase.NAME.equals(name) ? IMAGES_FOLDER : IMAGES_FOLDER + "-" + name);
+            store = new HistoryStore(new HistoryDatabase(app, name), imagesFolder);
             stores.put(name, store);
             store.applyLimits(System.currentTimeMillis());
         }
@@ -360,16 +385,19 @@ public final class HistoryStore {
     public boolean deleteItem(String id) {
         boolean changed;
         synchronized (this) {
+            // an image's file goes with it, after its row
+            String imagePath = pathOf(id);
             changed = inTransaction(() -> {
                 ContentValues values = new ContentValues();
                 values.put("deletedAt", System.currentTimeMillis());
                 values.putNull("pinnedAt");
                 values.put("syncSeq", nextSyncSeq());
-                for (String column : new String[] { "value", "secrets", "linkUrl", "linkHost", "encrypted" }) {
+                for (String column : new String[] { "value", "secrets", "linkUrl", "linkHost", "encrypted", "path" }) {
                     values.putNull(column);
                 }
                 return db.update("CLIPBOARD_ITEMS", values, "id = ? AND deletedAt IS NULL", new String[] { id }) > 0;
             });
+            if (changed) images.remove(imagePath);
         }
         if (changed) notifyChanged();
         return changed;
@@ -484,7 +512,9 @@ public final class HistoryStore {
             Settings.count(settings, Settings.HISTORY_RETENTION_DAYS, Settings.DEFAULT_HISTORY_RETENTION_DAYS)
         );
         long keepNewest = HistoryQueries.keepNewest(Settings.count(settings, Settings.MAX_ITEMS, Settings.DEFAULT_MAX_ITEMS));
-        return inTransaction(() -> {
+        // the files of the images the limits delete, removed after their rows
+        List<String> imagePaths = new ArrayList<>();
+        boolean changed = inTransaction(() -> {
             // Tombstones past their 30 days go first: "Maximum items" keeps the
             // newest N rows that are not young tombstones, and an old one left
             // in would take a live item's place among them. They are already
@@ -497,10 +527,20 @@ public final class HistoryStore {
             int deleted = 0;
             if (HistoryQueries.limitsHistory(copiedBefore, keepNewest)) {
                 Object[] values = HistoryQueries.deletionValues(now, copiedBefore, keepNewest);
+                try (
+                    Cursor row = db.rawQuery(
+                        "SELECT path FROM CLIPBOARD_ITEMS WHERE path IS NOT NULL AND " + HistoryQueries.DELETION_CONDITION,
+                        args(java.util.Arrays.asList(values))
+                    )
+                ) {
+                    while (row.moveToNext()) imagePaths.add(row.getString(0));
+                }
                 deleted += db.delete("CLIPBOARD_ITEMS", HistoryQueries.DELETION_CONDITION, args(java.util.Arrays.asList(values)));
             }
             return deleted > 0;
         });
+        for (String path : imagePaths) images.remove(path);
+        return changed;
     }
 
     // ---- settings
@@ -803,12 +843,16 @@ public final class HistoryStore {
     public boolean syncApply(SyncRows.Batch batch) {
         boolean applied;
         synchronized (this) {
+            removedImages.clear();
             applied = inTransaction(() -> {
                 if (batch.expectedHead != null && head() != batch.expectedHead) return false;
                 for (SyncRows.Row row : batch.puts) writeSyncRow(row);
                 for (Map.Entry<String, Map<String, Object>> peer : batch.peers.entrySet()) writePeer(peer.getKey(), peer.getValue());
                 return true;
             });
+            // the files of images the batch deleted go after their rows
+            if (applied) for (String path : removedImages) images.remove(path);
+            removedImages.clear();
         }
         if (applied && !batch.puts.isEmpty()) notifyChanged();
         return applied;
@@ -818,6 +862,10 @@ public final class HistoryStore {
     private void writeSyncRow(SyncRows.Row row) {
         // pin stamps made elsewhere: a pin made here from now on has to beat them
         if (row.pinnedStamp != null) clock.observe(row.pinnedStamp);
+        if ("image".equals(row.kind)) {
+            writeSyncImage(row);
+            return;
+        }
         ContentValues values = new ContentValues();
         values.put("value", row.value);
         values.put("dateCopied", row.dateCopied);
@@ -837,6 +885,261 @@ public final class HistoryStore {
         values.put("createdAt", row.createdAt);
         values.put("originDevice", row.originDevice);
         db.insertOrThrow("CLIPBOARD_ITEMS", null, values);
+    }
+
+    /**
+     * An image row from another device. A new one has no file: its bytes come
+     * after it (imageWrite), and it isn't listed until they have. A deleted
+     * one loses its file.
+     */
+    private void writeSyncImage(SyncRows.Row row) {
+        ContentValues values = new ContentValues();
+        values.put("dateCopied", row.dateCopied);
+        values.put("sourceAppName", row.sourceAppName);
+        values.put("sourceAppBundleId", row.sourceAppBundleId);
+        values.put("pinnedAt", row.pinnedAt);
+        values.put("pinnedStamp", row.pinnedStamp);
+        values.put("deletedAt", row.deletedAt);
+        values.put("syncSeq", nextSyncSeq());
+        if (row.deletedAt != null) {
+            String path = pathOf(row.id);
+            if (path != null) removedImages.add(path);
+            values.putNull("path");
+        }
+        if (db.update("CLIPBOARD_ITEMS", values, "id = ? AND kind = 'image'", new String[] { row.id }) > 0) return;
+        values.put("id", row.id);
+        values.put("kind", "image");
+        values.put("createdAt", row.createdAt);
+        values.put("originDevice", row.originDevice);
+        if (row.image != null && row.deletedAt == null) {
+            values.put("imageSize", row.image.size);
+            values.put("imageHash", row.image.hash);
+            values.put("imageBytes", row.image.bytes);
+            values.put("imageType", row.image.type);
+        }
+        db.insertOrThrow("CLIPBOARD_ITEMS", null, values);
+    }
+
+    /** The name of an item's image file, or null: it is no image, or has no file */
+    private String pathOf(String id) {
+        try (Cursor row = db.rawQuery("SELECT path FROM CLIPBOARD_ITEMS WHERE id = ?", new String[] { id })) {
+            return row.moveToFirst() && !row.isNull(0) ? row.getString(0) : null;
+        }
+    }
+
+    // ---- images: their bytes, for sync (the sync core's ImageStore) and for copies made here
+
+    private static final String WAITING_FOR = "kind = 'image' AND deletedAt IS NULL AND path IS NULL AND imageHash = ?";
+
+    /** A file this phone holds whose bytes have this hash, or null */
+    private File holderOf(String hash) {
+        try (
+            Cursor row = db.rawQuery(
+                "SELECT path, imageBytes FROM CLIPBOARD_ITEMS WHERE kind = 'image' AND deletedAt IS NULL AND path IS NOT NULL AND imageHash = ?",
+                new String[] { hash }
+            )
+        ) {
+            while (row.moveToNext()) {
+                File file = images.file(row.getString(0));
+                if (file != null && file.isFile() && file.length() == row.getLong(1)) return file;
+            }
+        }
+        return null;
+    }
+
+    /** Give every row that waits for this hash a copy of `source`, each its own: a row's file goes when the row does. */
+    private boolean hand(String hash, File source) {
+        List<String[]> waiting = new ArrayList<>();
+        try (Cursor row = db.rawQuery("SELECT id, imageType FROM CLIPBOARD_ITEMS WHERE " + WAITING_FOR, new String[] { hash })) {
+            while (row.moveToNext()) waiting.add(new String[] { row.getString(0), row.getString(1) });
+        }
+        boolean handed = false;
+        for (String[] row : waiting) {
+            try {
+                String name = images.keep(source, row[1]);
+                ContentValues values = new ContentValues();
+                values.put("path", name);
+                if (db.update("CLIPBOARD_ITEMS", values, "id = ? AND path IS NULL AND deletedAt IS NULL", new String[] { row[0] }) > 0) {
+                    handed = true;
+                } else {
+                    images.remove(name);
+                }
+            } catch (IOException unwritable) {
+                // asked for again on the next connection
+            }
+        }
+        return handed;
+    }
+
+    /** The hashes of the images in the history whose bytes this phone does not hold yet */
+    public List<String> imagesMissing() {
+        List<String> missing = new ArrayList<>();
+        boolean handed = false;
+        synchronized (this) {
+            List<String> hashes = new ArrayList<>();
+            try (
+                Cursor row = db.rawQuery(
+                    "SELECT DISTINCT imageHash FROM CLIPBOARD_ITEMS WHERE kind = 'image' AND deletedAt IS NULL AND path IS NULL AND imageHash IS NOT NULL",
+                    null
+                )
+            ) {
+                while (row.moveToNext()) hashes.add(row.getString(0));
+            }
+            for (String hash : hashes) {
+                // the same picture is already here, under another item
+                File held = holderOf(hash);
+                if (held != null) handed = hand(hash, held) || handed;
+                else missing.add(hash);
+            }
+        }
+        if (handed) notifyChanged();
+        return missing;
+    }
+
+    /** How long the image with this hash is, or -1 when this phone does not hold it */
+    public synchronized long imageSize(String hash) {
+        File held = ImageFiles.isHash(hash) ? holderOf(hash) : null;
+        return held == null ? -1 : held.length();
+    }
+
+    /** A piece of it, or null when it can't be read */
+    public synchronized byte[] imageRead(String hash, long offset, int length) {
+        File held = ImageFiles.isHash(hash) ? holderOf(hash) : null;
+        if (held == null || offset < 0 || length < 1 || offset + length > held.length()) return null;
+        try (RandomAccessFile file = new RandomAccessFile(held, "r")) {
+            byte[] piece = new byte[length];
+            file.seek(offset);
+            file.readFully(piece);
+            return piece;
+        } catch (IOException unreadable) {
+            return null;
+        }
+    }
+
+    /**
+     * Keep a piece of an image that is arriving from another device. Pieces
+     * come in order from offset 0. "done" once the last is in and the whole is
+     * what was asked for: the rows that waited for it get their file. Anything
+     * else is "refused" and dropped: bytes nobody waits for, a piece out of
+     * order, or a whole that has another hash or is no image of its kind.
+     */
+    public String imageWrite(String hash, long offset, long total, byte[] piece) {
+        String result;
+        synchronized (this) {
+            result = writePiece(hash, offset, total, piece);
+        }
+        if (result.equals("done")) notifyChanged();
+        return result;
+    }
+
+    private String writePiece(String hash, long offset, long total, byte[] piece) {
+        File part = null;
+        try {
+            part = images.arriving(hash);
+            if (part == null || piece == null || piece.length == 0 || offset < 0 || offset + piece.length > total) {
+                return refuse(part);
+            }
+            Long expectedBytes = null;
+            String type = null;
+            try (Cursor row = db.rawQuery("SELECT imageBytes, imageType FROM CLIPBOARD_ITEMS WHERE " + WAITING_FOR + " LIMIT 1", new String[] { hash })) {
+                if (row.moveToFirst()) {
+                    expectedBytes = row.getLong(0);
+                    type = row.getString(1);
+                }
+            }
+            if (expectedBytes == null || expectedBytes != total || total > SyncQueries.MAX_IMAGE_BYTES || !ImageFiles.TYPES.contains(type)) {
+                return refuse(part);
+            }
+            // pieces come in order: what is there so far must end where this begins
+            long sofar = offset == 0 ? 0 : (part.isFile() ? part.length() : -1);
+            if (sofar != offset) return refuse(part);
+            try (RandomAccessFile file = new RandomAccessFile(part, "rw")) {
+                if (offset == 0) file.setLength(0);
+                file.seek(offset);
+                file.write(piece);
+            }
+            if (offset + piece.length < total) return "more";
+
+            boolean isWhole = part.length() == total && ImageFiles.looksLike(type, ImageFiles.head(part)) && ImageFiles.sha256(part).equals(hash);
+            if (!isWhole) return refuse(part);
+            boolean handed = hand(hash, part);
+            part.delete();
+            return handed ? "done" : "refused";
+        } catch (IOException | RuntimeException unwritable) {
+            return refuse(part);
+        }
+    }
+
+    private static String refuse(File part) {
+        if (part != null) part.delete();
+        return "refused";
+    }
+
+    /**
+     * Save an image copied or shared on this phone: `source` is copied in, so
+     * the caller's file can go. The same picture as the newest unpinned item
+     * bumps that one to the top, as a repeated text does. Returns the item's
+     * id, or null when it isn't an image that is kept (its kind, or its size).
+     */
+    public String saveImage(File source, int width, int height, String sourceAppName, long dateCopied) {
+        String id;
+        synchronized (this) {
+            String type;
+            String hash;
+            String name;
+            long bytes = source.length();
+            try {
+                type = ImageFiles.typeOf(ImageFiles.head(source));
+                if (type == null || bytes < 1 || bytes > SyncQueries.MAX_IMAGE_BYTES || width < 1 || height < 1) return null;
+                hash = ImageFiles.sha256(source);
+                name = images.keep(source, type);
+            } catch (IOException unreadable) {
+                return null;
+            }
+            String kept = name;
+            String[] used = { null };
+            id = inTransaction(() -> {
+                try (
+                    Cursor newest = db.rawQuery(
+                        "SELECT id, kind, imageHash FROM CLIPBOARD_ITEMS WHERE deletedAt IS NULL AND pinnedAt IS NULL ORDER BY " +
+                        HistoryQueries.UNPINNED_ORDER +
+                        " LIMIT 1",
+                        null
+                    )
+                ) {
+                    if (newest.moveToFirst() && "image".equals(newest.getString(1)) && hash.equals(newest.getString(2))) {
+                        String repeated = newest.getString(0);
+                        db.execSQL(
+                            "UPDATE CLIPBOARD_ITEMS SET dateCopied = MAX(dateCopied, ?), sourceAppName = ?, syncSeq = ? WHERE id = ?",
+                            new Object[] { dateCopied, sourceAppName, nextSyncSeq(), repeated }
+                        );
+                        return repeated;
+                    }
+                }
+                String newId = UUID.randomUUID().toString();
+                ContentValues values = new ContentValues();
+                values.put("id", newId);
+                values.put("kind", "image");
+                values.put("path", kept);
+                values.put("imageSize", "{\"width\":" + width + ",\"height\":" + height + "}");
+                values.put("imageHash", hash);
+                values.put("imageBytes", bytes);
+                values.put("imageType", type);
+                values.put("dateCopied", dateCopied);
+                values.put("sourceAppName", sourceAppName);
+                values.put("createdAt", dateCopied);
+                values.put("originDevice", deviceId);
+                values.put("syncSeq", nextSyncSeq());
+                db.insertOrThrow("CLIPBOARD_ITEMS", null, values);
+                used[0] = kept;
+                return newId;
+            });
+            // a repeat keeps the file it has
+            if (used[0] == null) images.remove(kept);
+            deleteBeyondLimits(System.currentTimeMillis());
+        }
+        notifyChanged();
+        return id;
     }
 
     private void writePeer(String deviceId, Map<String, Object> patch) {
@@ -865,7 +1168,9 @@ public final class HistoryStore {
             string(row, "linkUrl"),
             string(row, "linkHost"),
             nullableInt(row, "detectorVersion"),
-            longColumn(row, "syncSeq")
+            longColumn(row, "syncSeq"),
+            string(row, "kind"),
+            new SyncRows.Image(string(row, "imageSize"), string(row, "imageHash"), nullableLong(row, "imageBytes"), string(row, "imageType"))
         );
     }
 
@@ -922,7 +1227,7 @@ public final class HistoryStore {
         return strings;
     }
 
-    private static Item toItem(Cursor row, List<SecretSpan> secrets, boolean preview) {
+    private Item toItem(Cursor row, List<SecretSpan> secrets, boolean preview) {
         String text = string(row, "value");
         boolean isTruncated = false;
         if (preview && text != null) {
@@ -946,7 +1251,10 @@ public final class HistoryStore {
             hasLink ? linkUrl : null,
             hasLink ? linkHost : null,
             isTruncated,
-            nullableInt(row, "detectorVersion")
+            nullableInt(row, "detectorVersion"),
+            string(row, "kind"),
+            images.file(string(row, "path")),
+            string(row, "imageSize")
         );
     }
 

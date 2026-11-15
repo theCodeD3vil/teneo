@@ -292,6 +292,23 @@ export class FakeHistory implements NativeHistory {
     return ok(true);
   }
 
+  // images: this history holds none, and wants none
+  imagesMissing(): string {
+    return ok([]);
+  }
+
+  imageSize(): string {
+    return ok(null);
+  }
+
+  imageRead(): string {
+    return ok(null);
+  }
+
+  imageWrite(): string {
+    return ok("refused");
+  }
+
   historyTrim(): string {
     this.trims += 1;
     return ok(true);

@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { findLink } from "@teneo/shared/detection/links";
 import { findSecrets } from "@teneo/shared/detection/secrets";
 import { detectionVersion } from "@teneo/shared/detection/version";
@@ -61,16 +62,19 @@ function detected(
 
 /** The item the app shows for one the native history handed over */
 export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
+  const isImage = item.kind === "image" && Boolean(item.imagePath);
   return {
     id: item.id,
     dateCopied: item.dateCopied,
-    kind: "text",
+    kind: isImage ? "image" : "text",
     changeCount: item.dateCopied,
     text: item.text,
     html: null,
     paths: [],
-    image: null,
-    imageSize: null,
+    // the web view reads a file of the app's through an address Capacitor
+    // makes for it
+    image: isImage ? Capacitor.convertFileSrc(item.imagePath!) : null,
+    imageSize: isImage ? (item.imageSize ?? null) : null,
     color: null,
     concealed: false,
     sourceApp:

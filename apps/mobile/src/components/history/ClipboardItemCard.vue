@@ -147,8 +147,15 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
     @click="copyItem">
     <div class="flex items-start gap-4">
       <!-- a link's icon fills the square like an app icon -->
+      <!-- an image shows itself, small -->
       <img
-        v-if="siteIcon"
+        v-if="isImage && itemDetails.image"
+        :src="itemDetails.image"
+        :alt="imageName"
+        loading="lazy"
+        class="size-9 shrink-0 rounded-md object-cover" />
+      <img
+        v-else-if="siteIcon"
         :src="siteIcon"
         :alt="itemDetails.link?.host"
         class="size-9 shrink-0 rounded-md object-cover" />

@@ -74,6 +74,8 @@ const page: SyncPage = {
         platform: "android",
         // the Mac shows this maker's logo by the items copied here
         maker: native.deviceMaker() || undefined,
+        // images sync too: their bytes are files native code keeps
+        images: opened.images,
         // a Mac's items say which app they were copied from: ask it for each
         // app's icon once, and keep it for the app's page to show
         iconSink: {

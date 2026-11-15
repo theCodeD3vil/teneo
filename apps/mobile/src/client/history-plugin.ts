@@ -11,6 +11,11 @@ import type { MobileSettings } from "../types/settings";
 /** An item as the native history hands it over */
 export interface NativeItem {
   id: string;
+  /** an image when it says so; a text otherwise */
+  kind?: "text" | "image";
+  /** an image's file on the phone, and its width and height */
+  imagePath?: string | null;
+  imageSize?: { width: number; height: number } | null;
   dateCopied: number;
   text: string | null;
   sourceAppName: string | null;

@@ -120,13 +120,23 @@ public class HistoryPlugin extends Plugin {
         call.resolve();
     }
 
-    /** Put an item's whole text on the clipboard; rejects if it isn't there */
+    /** Put an item's whole text, or its image, on the clipboard; rejects if it isn't there */
     @PluginMethod
     public void copy(PluginCall call) {
         HistoryStore store = store(call);
         String id = required(call, "id");
         if (store == null || id == null) return;
         HistoryStore.Item item = store.getItem(id);
+        if (item != null && "image".equals(item.kind)) {
+            try {
+                if (item.imageFile == null || !item.imageFile.isFile()) throw new IllegalStateException("The image is gone");
+                ClipboardWriter.writeImage(getContext(), item.imageFile);
+                call.resolve();
+            } catch (RuntimeException error) {
+                call.reject("Couldn't copy the image", error);
+            }
+            return;
+        }
         if (item == null || item.text == null) {
             call.reject("This item has no text to copy");
             return;
@@ -388,6 +398,18 @@ public class HistoryPlugin extends Plugin {
         }
         JSObject json = new JSObject();
         json.put("id", item.id);
+        json.put("kind", item.kind);
+        // an image: where its file is, and its width and height
+        json.put("imagePath", item.imageFile == null ? JSONObject.NULL : item.imageFile.getAbsolutePath());
+        Object imageSize = JSONObject.NULL;
+        if (item.imageSize != null) {
+            try {
+                imageSize = new JSONObject(item.imageSize);
+            } catch (JSONException unreadable) {
+                // shown without its size
+            }
+        }
+        json.put("imageSize", imageSize);
         json.put("dateCopied", item.dateCopied);
         json.put("text", orNull(item.text));
         json.put("sourceAppName", orNull(item.sourceAppName));

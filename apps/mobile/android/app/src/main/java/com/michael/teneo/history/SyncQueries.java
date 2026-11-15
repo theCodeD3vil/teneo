@@ -24,11 +24,15 @@ public final class SyncQueries {
         "id, CASE WHEN length(CAST(value AS BLOB)) > " +
         MAX_TEXT_BYTES +
         " THEN NULL ELSE value END AS value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, " +
-        "pinnedStamp, deletedAt, createdAt, originDevice, secrets, linkUrl, linkHost, detectorVersion, syncSeq";
+        "pinnedStamp, deletedAt, createdAt, originDevice, secrets, linkUrl, linkHost, detectorVersion, syncSeq, " +
+        "kind, imageSize, imageHash, imageBytes, imageType";
 
-    /** Text rows and tombstones after a change number, oldest change first: `?` is the number, then the most rows */
+    /** Texts, images and tombstones after a change number, oldest change first: `?` is the number, then the most rows */
     public static final String CHANGES_AFTER =
-        "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE kind = 'text' AND syncSeq > ? ORDER BY syncSeq LIMIT ?";
+        "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE kind IN ('text', 'image') AND syncSeq > ? ORDER BY syncSeq LIMIT ?";
+
+    /** As packages/sync maxImageBytes: a larger image stays on the device that copied it */
+    public static final long MAX_IMAGE_BYTES = 16L * 1024 * 1024;
 
     public static final String ROW = "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE id = ?";
 

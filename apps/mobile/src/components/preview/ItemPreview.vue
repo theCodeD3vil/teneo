@@ -122,6 +122,14 @@ onUnmounted(() => clearTimeout(copiedTimeout));
       :item="item" />
     <ColorPreview v-else-if="item.color" :color="item.color" />
     <div
+      v-else-if="item.kind === 'image' && item.image"
+      class="flex min-h-0 flex-1 items-center justify-center">
+      <img
+        :src="item.image"
+        alt=""
+        class="max-h-full max-w-full rounded-md object-contain" />
+    </div>
+    <div
       v-else
       class="text-foreground/50 flex flex-1 items-center justify-center text-sm">
       This item can't be previewed on your phone yet.

@@ -33,10 +33,11 @@ import {
 const maxAttempts = 8;
 const retryWaitMs = 25;
 
-/** Phone rows never carry the Mac's `encrypted` flag, and are all text */
+/** Phone rows never carry the Mac's `encrypted` flag. One without a kind is
+ *  a text: so native code of before images said them. */
 const asSyncRow = (row: WireRow): SyncRow => ({
   ...row,
-  kind: "text",
+  kind: row.kind ?? "text",
   encrypted: null,
 });
 
@@ -238,6 +239,9 @@ class NativeTransaction implements SyncTransaction {
   async put(record: ItemRecord): Promise<void> {
     const existing = this.rowOf(record.id);
     const columns = recordToColumns(record, existing);
+    // The id belongs to a copy of another kind (not a thing that happens with
+    // random ids): leave it, rather than fail the whole batch.
+    if (existing && (existing.kind ?? "text") !== record.kind) return;
 
     // The text is looked at only when it is new to the row: the row already
     // has what was found in the text it holds.
@@ -284,6 +288,12 @@ class NativeTransaction implements SyncTransaction {
       linkHost: found.linkHost,
       detectorVersion: found.detectorVersion,
       syncSeq: 0,
+      // an image: native code gives it a file once its bytes have arrived
+      kind: record.kind,
+      imageSize: columns.imageSize,
+      imageHash: columns.imageHash,
+      imageBytes: columns.imageBytes,
+      imageType: columns.imageType,
     });
   }
 

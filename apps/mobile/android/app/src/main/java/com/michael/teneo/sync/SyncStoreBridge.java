@@ -177,6 +177,33 @@ final class SyncStoreBridge {
         });
     }
 
+    // ---- the bytes of images (HistoryStore's image methods): an answer is JSON like the others
+
+    String imagesMissing() {
+        return answer(() -> new JSONArray(store().imagesMissing()));
+    }
+
+    /** The image's length, or null when this phone doesn't hold it */
+    String imageSize(String hash) {
+        return answer(() -> {
+            long size = store().imageSize(hash);
+            return size < 0 ? null : size;
+        });
+    }
+
+    /** A piece of it in base64, or null */
+    String imageRead(String hash, long offset, int length) {
+        return answer(() -> {
+            byte[] piece = store().imageRead(hash, offset, length);
+            return piece == null ? null : android.util.Base64.encodeToString(piece, android.util.Base64.NO_WRAP);
+        });
+    }
+
+    /** `piece` in base64. The answer is "more", "done" or "refused". */
+    String imageWrite(String hash, long offset, long total, String piece) {
+        return answer(() -> store().imageWrite(hash, offset, total, android.util.Base64.decode(piece, android.util.Base64.DEFAULT)));
+    }
+
     /** A copy made on this phone, saved as the capture saves one. Only for a debug build to try sync with. */
     String debugSaveText(String text) {
         return answer(() -> store().saveText(new HistoryStore.NewText(text, null, null, Collections.emptyList(), null, null, null), System.currentTimeMillis()));
@@ -204,7 +231,12 @@ final class SyncStoreBridge {
             .put("linkUrl", orNull(row.linkUrl))
             .put("linkHost", orNull(row.linkHost))
             .put("detectorVersion", orNull(row.detectorVersion))
-            .put("syncSeq", row.syncSeq);
+            .put("syncSeq", row.syncSeq)
+            .put("kind", row.kind)
+            .put("imageSize", orNull(row.image.size))
+            .put("imageHash", orNull(row.image.hash))
+            .put("imageBytes", orNull(row.image.bytes))
+            .put("imageType", orNull(row.image.type));
     }
 
     private static JSONObject json(SyncRows.Single single) throws JSONException {
@@ -242,7 +274,10 @@ final class SyncStoreBridge {
             string(row, "linkUrl"),
             string(row, "linkHost"),
             detector == null ? null : detector.intValue(),
-            0
+            0,
+            // a page from before images says no kind: its rows are texts
+            "image".equals(row.optString("kind")) ? "image" : "text",
+            new SyncRows.Image(string(row, "imageSize"), string(row, "imageHash"), number(row, "imageBytes"), string(row, "imageType"))
         );
     }
 

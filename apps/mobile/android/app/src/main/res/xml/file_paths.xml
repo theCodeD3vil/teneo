@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="my_images" path="." />
     <cache-path name="my_cache_images" path="." />
+    <!-- the history's images: one of them is on the clipboard after a copy -->
+    <files-path name="history_images" path="images/" />
 </paths>

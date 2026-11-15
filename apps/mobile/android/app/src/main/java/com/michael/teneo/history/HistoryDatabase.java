@@ -14,8 +14,44 @@ import java.security.SecureRandom;
 public final class HistoryDatabase extends SQLiteOpenHelper {
 
     public static final String NAME = "teneo.sqlite";
-    /** 2: SYNC_PEERS has a maker */
-    private static final int VERSION = 2;
+    /** 2: SYNC_PEERS has a maker. 3: an item may be an image. */
+    private static final int VERSION = 3;
+
+    /** The columns of an item before images, in the order they are copied over */
+    private static final String TEXT_COLUMNS =
+        "id, kind, value, dateCopied, sourceAppName, sourceAppBundleId, deletedAt, pinnedAt, encrypted, secrets, " +
+        "linkUrl, linkHost, detectorVersion, syncSeq, pinnedStamp, originDevice, createdAt";
+
+    // An image has no value: `path` is its file's name in the images folder
+    // (NULL while its bytes are on their way from another device, and once it
+    // is deleted), `imageSize` its width and height as JSON, and imageHash,
+    // imageBytes and imageType what a sync record says of the file.
+    private static final String ITEMS_TABLE =
+        """
+        CREATE TABLE CLIPBOARD_ITEMS (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK(kind IN ('text', 'image')),
+          value TEXT,
+          dateCopied INTEGER NOT NULL,
+          sourceAppName TEXT,
+          sourceAppBundleId TEXT,
+          deletedAt INTEGER,
+          pinnedAt INTEGER,
+          encrypted INTEGER,
+          secrets TEXT,
+          linkUrl TEXT,
+          linkHost TEXT,
+          detectorVersion INTEGER,
+          syncSeq INTEGER,
+          pinnedStamp TEXT,
+          originDevice TEXT,
+          createdAt INTEGER,
+          path TEXT,
+          imageSize TEXT,
+          imageHash TEXT,
+          imageBytes INTEGER,
+          imageType TEXT
+        )""";
 
     HistoryDatabase(Context context, String name) {
         super(context, name, null, VERSION);
@@ -31,40 +67,8 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
         // counter, pinnedStamp the stamp of its latest pin or unpin,
         // originDevice and createdAt the device that first copied it and when.
         // encrypted stays NULL on the phone; the Mac's mapping reads it.
-        db.execSQL(
-            """
-            CREATE TABLE CLIPBOARD_ITEMS (
-              id TEXT PRIMARY KEY,
-              kind TEXT NOT NULL CHECK(kind = 'text'),
-              value TEXT,
-              dateCopied INTEGER NOT NULL,
-              sourceAppName TEXT,
-              sourceAppBundleId TEXT,
-              deletedAt INTEGER,
-              pinnedAt INTEGER,
-              encrypted INTEGER,
-              secrets TEXT,
-              linkUrl TEXT,
-              linkHost TEXT,
-              detectorVersion INTEGER,
-              syncSeq INTEGER,
-              pinnedStamp TEXT,
-              originDevice TEXT,
-              createdAt INTEGER
-            )"""
-        );
-        // The list reads each page straight off one of these, already in order:
-        // the first page and the pinned ones; the pages past the pinned items,
-        // the repeat-copy check and the newest-N of "Maximum items"; and the
-        // changes a peer has not read yet.
-        db.execSQL(
-            "CREATE INDEX clipboard_items_list_order_index ON CLIPBOARD_ITEMS " +
-            "((pinnedAt IS NULL), pinnedAt DESC, dateCopied DESC, id DESC) WHERE deletedAt IS NULL"
-        );
-        db.execSQL(
-            "CREATE INDEX clipboard_items_unpinned_index ON CLIPBOARD_ITEMS (dateCopied DESC, id DESC) WHERE pinnedAt IS NULL"
-        );
-        db.execSQL("CREATE INDEX clipboard_items_sync_seq_index ON CLIPBOARD_ITEMS (syncSeq)");
+        db.execSQL(ITEMS_TABLE);
+        createItemIndexes(db);
 
         db.execSQL("CREATE TABLE SYNC_META (key TEXT PRIMARY KEY, value)");
         db.execSQL(
@@ -93,10 +97,42 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE APP_STATE (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     }
 
+    // The list reads each page straight off one of these, already in order:
+    // the first page and the pinned ones; the pages past the pinned items,
+    // the repeat-copy check and the newest-N of "Maximum items"; and the
+    // changes a peer has not read yet.
+    private static void createItemIndexes(SQLiteDatabase db) {
+        db.execSQL(
+            "CREATE INDEX clipboard_items_list_order_index ON CLIPBOARD_ITEMS " +
+            "((pinnedAt IS NULL), pinnedAt DESC, dateCopied DESC, id DESC) WHERE deletedAt IS NULL"
+        );
+        db.execSQL(
+            "CREATE INDEX clipboard_items_unpinned_index ON CLIPBOARD_ITEMS (dateCopied DESC, id DESC) WHERE pinnedAt IS NULL"
+        );
+        db.execSQL("CREATE INDEX clipboard_items_sync_seq_index ON CLIPBOARD_ITEMS (syncSeq)");
+    }
+
+    /**
+     * The table said an item is a text, and sqlite can't take that back: the
+     * rows move to a table that allows an image too. Android runs an upgrade
+     * in one transaction, so a phone has all of it or none.
+     */
+    private static void allowImages(SQLiteDatabase db) {
+        for (String index : new String[] { "clipboard_items_list_order_index", "clipboard_items_unpinned_index", "clipboard_items_sync_seq_index" }) {
+            db.execSQL("DROP INDEX IF EXISTS " + index);
+        }
+        db.execSQL("ALTER TABLE CLIPBOARD_ITEMS RENAME TO CLIPBOARD_ITEMS_TEXT_ONLY");
+        db.execSQL(ITEMS_TABLE);
+        db.execSQL("INSERT INTO CLIPBOARD_ITEMS (" + TEXT_COLUMNS + ") SELECT " + TEXT_COLUMNS + " FROM CLIPBOARD_ITEMS_TEXT_ONLY");
+        db.execSQL("DROP TABLE CLIPBOARD_ITEMS_TEXT_ONLY");
+        createItemIndexes(db);
+    }
+
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         // who made a device ("google"), as it said: its logo shows by the items copied on it
         if (oldVersion < 2) db.execSQL("ALTER TABLE SYNC_PEERS ADD COLUMN maker TEXT NOT NULL DEFAULT ''");
+        if (oldVersion < 3) allowImages(db);
     }
 
     private static String randomHex(int bytes) {

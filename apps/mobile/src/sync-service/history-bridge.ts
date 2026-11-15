@@ -3,7 +3,13 @@ import type { ClipboardLink, SecretSpan } from "@teneo/shared/types/clipboard";
 // (HistoryStore.java) and the page asks through `TeneoNative`. Each call is
 // one round trip with text in and text out, so every answer is JSON, and this
 // is the one place that reads and writes it.
-import type { PeerPatch, PeerRecord } from "@teneo/sync";
+import {
+  fromBase64,
+  type ImageStore,
+  type PeerPatch,
+  type PeerRecord,
+  toBase64,
+} from "@teneo/sync";
 
 /** The calls native code answers (SyncStoreBridge.java). An answer is
  *  `{"v": value}`, or `{"error": why}`; none of them throws. */
@@ -28,6 +34,20 @@ export interface NativeHistory {
   historyTrim(): string;
   /** Store what detection found in texts, for rules of this version */
   historySaveDetections(detections: string, version: number): string;
+  /** The hashes of the images whose bytes the phone lacks, a JSON array */
+  imagesMissing(): string;
+  /** How long the image with this hash is, or null when the phone lacks it */
+  imageSize(hash: string): string;
+  /** A piece of it in base64, or null */
+  imageRead(hash: string, offset: number, length: number): string;
+  /** Keep a piece (base64) of an image that is arriving: "more", "done" or
+   *  "refused" (HistoryStore.imageWrite) */
+  imageWrite(
+    hash: string,
+    offset: number,
+    total: number,
+    piece: string,
+  ): string;
   /** Debug builds only: a copy made on this phone, as the capture saves one */
   debugSaveText(text: string): string;
 }
@@ -53,6 +73,15 @@ export interface WireRow {
   detectorVersion: number | null;
   /** The row's change number. Read, never written: native code hands out its own. */
   syncSeq: number;
+  /** "image" for an image; a text when absent */
+  kind?: "text" | "image";
+  /** An image's width and height as JSON, and what a record says of its
+   *  bytes: their SHA-256, how many, and their kind. Null or absent in a text
+   *  and in a tombstone. */
+  imageSize?: string | null;
+  imageHash?: string | null;
+  imageBytes?: number | null;
+  imageType?: string | null;
 }
 
 /** What one sync transaction wrote, to save at once */
@@ -127,6 +156,22 @@ export class HistoryBridge {
   trim(): void {
     unwrap(this.native.historyTrim());
   }
+
+  /** The bytes of the history's images, as the sync engine asks for them */
+  readonly images: ImageStore = {
+    missing: async () => unwrap<string[]>(this.native.imagesMissing()),
+    size: async (hash) => unwrap<number | null>(this.native.imageSize(hash)),
+    read: async (hash, offset, length) => {
+      const piece = unwrap<string | null>(
+        this.native.imageRead(hash, offset, length),
+      );
+      return piece === null ? null : fromBase64(piece);
+    },
+    write: async (hash, offset, total, piece) =>
+      unwrap<"more" | "done" | "refused">(
+        this.native.imageWrite(hash, offset, total, toBase64(piece)),
+      ),
+  };
 
   saveDetections(items: Detection[], version: number): void {
     unwrap(this.native.historySaveDetections(JSON.stringify(items), version));

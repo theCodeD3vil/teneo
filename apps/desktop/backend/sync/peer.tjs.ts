@@ -218,6 +218,26 @@ async function handle(line: string): Promise<void> {
       console.log(`ok from ${sourceApp.name}`);
       break;
     }
+    case "image": {
+      // a png file, copied in as the clipboard would hand one over
+      const bytes = await tjs.readFile(argument);
+      const size = new DataView(bytes.buffer, bytes.byteOffset + 16, 8);
+      const saved = `${folder}/data/images/${crypto.randomUUID()}.png`;
+      await tjs.makeDir(`${folder}/data/images`, { recursive: true });
+      await tjs.writeFile(saved, bytes);
+      const item = await saveClipboardItem(
+        {
+          ...textItem(""),
+          kind: "image",
+          text: null,
+          image: saved,
+          imageSize: { width: size.getUint32(0), height: size.getUint32(4) },
+        },
+        app,
+      );
+      console.log(`ok image ${item.id}`);
+      break;
+    }
     case "pin":
     case "unpin":
       await setClipboardItemPinned(argument, command === "pin", app);
@@ -239,7 +259,11 @@ async function handle(line: string): Promise<void> {
       });
       for (const item of page.items) {
         console.log(
-          `item ${item.id} ${item.pinned ? "pinned" : "-"} ${JSON.stringify(item.text)}${item.originMaker ? ` maker=${item.originMaker}` : ""}`,
+          `item ${item.id} ${item.pinned ? "pinned" : "-"} ${
+            item.kind === "image"
+              ? `image ${item.imageSize?.width}x${item.imageSize?.height} ${item.image}`
+              : JSON.stringify(item.text)
+          }${item.originMaker ? ` maker=${item.originMaker}` : ""}`,
         );
       }
       console.log("end list");

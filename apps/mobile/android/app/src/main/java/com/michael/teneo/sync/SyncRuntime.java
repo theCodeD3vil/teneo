@@ -459,6 +459,28 @@ final class SyncRuntime {
             return history.trimHistory();
         }
 
+        // --- the bytes of images, a piece at a time: answers are JSON too
+
+        @JavascriptInterface
+        public String imagesMissing() {
+            return history.imagesMissing();
+        }
+
+        @JavascriptInterface
+        public String imageSize(String hash) {
+            return history.imageSize(hash);
+        }
+
+        @JavascriptInterface
+        public String imageRead(String hash, double offset, int length) {
+            return history.imageRead(hash, (long) offset, length);
+        }
+
+        @JavascriptInterface
+        public String imageWrite(String hash, double offset, double total, String piece) {
+            return history.imageWrite(hash, (long) offset, (long) total, piece);
+        }
+
         @JavascriptInterface
         public String historySaveDetections(String detections, int version) {
             return history.saveDetections(detections, version);

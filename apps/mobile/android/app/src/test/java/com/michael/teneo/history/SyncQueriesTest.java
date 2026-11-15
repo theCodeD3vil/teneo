@@ -12,8 +12,10 @@ import org.junit.Test;
 public class SyncQueriesTest {
 
     @Test
-    public void theChangesAreTextRowsAndTombstonesAfterACounterInChangeOrder() {
-        assertTrue(SyncQueries.CHANGES_AFTER.contains("FROM CLIPBOARD_ITEMS WHERE kind = 'text' AND syncSeq > ?"));
+    public void theChangesAreTextsImagesAndTombstonesAfterACounterInChangeOrder() {
+        assertTrue(SyncQueries.CHANGES_AFTER.contains("FROM CLIPBOARD_ITEMS WHERE kind IN ('text', 'image') AND syncSeq > ?"));
+        assertTrue(SyncQueries.ROW_COLUMNS.endsWith("kind, imageSize, imageHash, imageBytes, imageType"));
+        assertEquals(16L * 1024 * 1024, SyncQueries.MAX_IMAGE_BYTES);
         assertTrue(SyncQueries.CHANGES_AFTER.endsWith("ORDER BY syncSeq LIMIT ?"));
         // a tombstone is a text row with no value: nothing keeps it out
         assertFalse(SyncQueries.CHANGES_AFTER.contains("deletedAt IS NULL"));

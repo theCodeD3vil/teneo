@@ -143,6 +143,16 @@ Two things came after the first release, without a new version:
   ever sent to a device that listed the capability. A Mac lists it; a phone
   asks for the icon of each app in the records it receives, once per app.
 
+- A device that lists the capability `images` takes image records (`kind:
+  "image"`, `text: null`, and `image: { hash, bytes, width, height, type }`:
+  the SHA-256 of the file, its length, at most 16 MiB, and one of png, jpeg,
+  gif and webp) and exchanges their bytes: `blob-want` (`hash`) is answered
+  with `blob` frames (`hash`, `offset`, `total`, `data`: at most 192 KiB in
+  base64, in order from offset 0) or with `blob-none` (`hash`) when the
+  device holds no such file. A device asks for one image at a time, and
+  again on its next connection for any it still lacks. Image records and
+  these frames are only sent to a device that listed the capability.
+
 A device that closes for a protocol reason says which one (`auth`, `version`,
 `protocol`, `timeout`) as the close reason, so both sides show the same cause.
 
@@ -184,6 +194,9 @@ by the device with the smaller id, so they never keep different ones.
   `latestStamp`, `trimHistory` and `transaction`, whose `put` stamps the row and
   runs the app's own secret and link detection on the text. The merge rules and
   the cursor logic stay in the engine, so they are written once.
+- Optionally `images` (`ImageStore`: which hashes it lacks, a piece of a file
+  it holds, and a place for a piece that arrives, which it checks against
+  the hash once whole). Without it a device neither sends nor takes images.
 - Optionally `iconSource` (a Mac: the png of an app by its name) or `iconSink`
   (a phone: which names it lacks, and a place to keep one), and `maker`.
 
