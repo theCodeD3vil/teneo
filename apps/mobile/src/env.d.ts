@@ -1,2 +1,2 @@
-/** versionName from android/app/build.gradle (see vite.config.ts) */
+/** The version in package.json, which build.gradle makes the versionName */
 declare const __APP_VERSION__: string;

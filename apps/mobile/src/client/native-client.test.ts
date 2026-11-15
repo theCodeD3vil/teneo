@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
+import { formatRecoveryCode } from "@teneo/sync";
+
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { HistoryPlugin, NativeItem } from "./history-plugin";
 import { NativeClient, toHistoryItem } from "./native-client";
+import { NativeSync } from "./native-sync";
+import type { SyncPlugin } from "./sync-plugin";
 
 const nativeItem: NativeItem = {
   id: "item-1",
@@ -307,5 +311,122 @@ describe("NativeClient", () => {
     expect((await client.listItems(request)).total).toBe(1);
     await client.listItems(request);
     expect(looks).toBe(2);
+  });
+});
+
+describe("NativeClient sync", () => {
+  /** A sync plugin that pairs like SyncPlugin.java, recording each call */
+  function fakeSync() {
+    const calls: string[] = [];
+    let paired = false;
+    const status = () => ({
+      paired,
+      running: paired,
+      problem: null,
+      devices: [],
+    });
+    const plugin: SyncPlugin = {
+      getStatus: async () => status(),
+      pair: async () => {
+        calls.push("pair");
+        paired = true;
+        return status();
+      },
+      unpair: async () => {
+        calls.push("unpair");
+        paired = false;
+        return status();
+      },
+      settingsChanged: async () => void calls.push("settingsChanged"),
+      requestNotifications: async () => {
+        calls.push("requestNotifications");
+        return { granted: true };
+      },
+      addListener: (async () => ({
+        remove: async () => {},
+      })) as SyncPlugin["addListener"],
+    };
+    return { sync: new NativeSync(plugin, { waitForDeviceMs: 0 }), calls };
+  }
+
+  function settingsPlugin(initial: Partial<MobileSettings>) {
+    let stored: Partial<MobileSettings> = { ...defaultSettings, ...initial };
+    return fakePlugin({
+      getSettings: async () => ({ settings: { ...stored } }),
+      updateSettings: async ({ changes }) => {
+        stored = { ...stored, ...changes };
+        return { settings: { ...stored } };
+      },
+    }).plugin;
+  }
+
+  const settle = () => Bun.sleep(5);
+
+  test("pairing with a good code asks for notifications when sync runs in the background", async () => {
+    const { sync, calls } = fakeSync();
+    const client = new NativeClient(settingsPlugin({}), { sync });
+    const code = await formatRecoveryCode(new Uint8Array(32).fill(1));
+    expect((await client.pair(code)).ok).toBe(true);
+    await settle();
+    expect(calls).toEqual(["pair", "requestNotifications"]);
+    expect((await client.getSyncStatus()).state).toBe("searching");
+  });
+
+  test("with background receive off, pairing asks for no notifications", async () => {
+    const { sync, calls } = fakeSync();
+    const client = new NativeClient(
+      settingsPlugin({ backgroundReceive: false }),
+      { sync },
+    );
+    const code = await formatRecoveryCode(new Uint8Array(32).fill(1));
+    expect((await client.pair(code)).ok).toBe(true);
+    await settle();
+    expect(calls).toEqual(["pair"]);
+  });
+
+  test("a wrong code changes nothing and asks for nothing", async () => {
+    const { sync, calls } = fakeSync();
+    const client = new NativeClient(settingsPlugin({}), { sync });
+    const result = await client.pair("ABCD-1234-EFGH-5678");
+    await settle();
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([]);
+    expect((await client.getSyncStatus()).state).toBe("not_paired");
+  });
+
+  test("a sync setting tells the service; others don't", async () => {
+    const { sync, calls } = fakeSync();
+    const client = new NativeClient(settingsPlugin({}), { sync });
+    await client.updateSettings({ maxItems: 10 });
+    await client.updateSettings({ syncSecrets: true });
+    expect(calls).toEqual(["settingsChanged"]);
+
+    // turned on while paired: the notification is asked for then
+    await client.pair(await formatRecoveryCode(new Uint8Array(32).fill(2)));
+    await settle();
+    calls.length = 0;
+    await client.updateSettings({ backgroundReceive: false });
+    await client.updateSettings({ backgroundReceive: true });
+    await settle();
+    expect(calls).toEqual([
+      "settingsChanged",
+      "settingsChanged",
+      "requestNotifications",
+    ]);
+  });
+
+  test("unpairing goes to the service", async () => {
+    const { sync, calls } = fakeSync();
+    const client = new NativeClient(settingsPlugin({}), { sync });
+    await client.pair(await formatRecoveryCode(new Uint8Array(32).fill(3)));
+    await client.unpair();
+    expect(calls).toContain("unpair");
+    expect((await client.getSyncStatus()).state).toBe("not_paired");
+  });
+
+  test("with no sync (a test database) it is never paired", async () => {
+    const client = new NativeClient(settingsPlugin({}));
+    expect((await client.getSyncStatus()).state).toBe("not_paired");
+    expect((await client.pair("anything")).ok).toBe(false);
   });
 });

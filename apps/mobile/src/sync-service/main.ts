@@ -4,9 +4,9 @@
 //
 // This page never touches the network itself: the service serves it from the
 // app and answers every other request with a 404.
-import { SyncEngine, parseRecoveryCode } from "@teneo/sync";
+import { SyncEngine, fromBase64 } from "@teneo/sync";
 
-import type { NativeSync, SyncPage } from "./native";
+import type { ConnectedDevice, NativeSync, SyncPage } from "./native";
 import { openSyncStore } from "./store";
 import { loggedStore } from "./store-log";
 import { PhoneTransport } from "./transport";
@@ -29,12 +29,22 @@ let run: Run | null = null;
 let starting = false;
 // a stop that came while starting: start gives up at its next step
 let stopWanted = false;
+let allowSecrets = false;
+
+/** Tell native code who is connected: the app's status and device list */
+function reportPeers(engine: SyncEngine): void {
+  const devices: ConnectedDevice[] = engine
+    .peers()
+    .map(({ deviceId, name, platform }) => ({ deviceId, name, platform }));
+  native.peersChanged(JSON.stringify(devices));
+}
 
 const page: SyncPage = {
-  async start(recoveryCode) {
+  async start(encodedKey, syncSecrets) {
     if (run || starting) return;
     starting = true;
     stopWanted = false;
+    allowSecrets = syncSecrets;
     try {
       if (!isSecureContext || typeof crypto?.subtle !== "object") {
         native.failed(
@@ -42,9 +52,11 @@ const page: SyncPage = {
         );
         return;
       }
-      const vaultKey = await parseRecoveryCode(recoveryCode);
-      if (!vaultKey) {
-        native.failed("that is not a valid recovery code");
+      // checked by the app's parsers when it was paired; this only guards
+      // against storage handing back something else
+      const vaultKey = fromBase64(encodedKey);
+      if (vaultKey?.length !== 32) {
+        native.failed("the stored key is not a vault key");
         return;
       }
       if (stopWanted) return;
@@ -62,10 +74,12 @@ const page: SyncPage = {
         platform: "android",
         vaultKey,
         store,
+        syncSecrets: () => allowSecrets,
         onItemsChanged: () => {
           if (debuggable) log("items changed by another device");
         },
         onPeersChanged: () => {
+          reportPeers(engine);
           if (debuggable) log(`peers ${describePeers(engine)}`);
         },
         onError: (error) => log(`engine error: ${String(error)}`),
@@ -94,6 +108,13 @@ const page: SyncPage = {
     } finally {
       starting = false;
     }
+  },
+
+  setSyncSecrets(allowed) {
+    const wasAllowed = allowSecrets;
+    allowSecrets = allowed;
+    // the ones held back go out from the next send
+    if (allowed && !wasAllowed) run?.engine.localChanged();
   },
 
   stop() {

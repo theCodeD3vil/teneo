@@ -39,6 +39,8 @@ public final class Settings {
         types.put(HISTORY_RETENTION_DAYS, Type.COUNT);
         types.put(MAX_ITEMS, Type.COUNT);
         types.put(HIDE_SECRETS, Type.BOOLEAN);
+        // read by the app only
+        types.put("checkForUpdates", Type.BOOLEAN);
         TYPES = Collections.unmodifiableMap(types);
     }
 

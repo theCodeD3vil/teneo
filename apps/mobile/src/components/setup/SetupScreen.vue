@@ -57,12 +57,14 @@ const isSyncOn = computed(
 );
 
 const recoveryCode = ref("");
+const hasJoined = ref(false);
 const joinedDeviceName = ref<string | null>(null);
 
 async function joinWith(code: string): Promise<void> {
-  const deviceName = await join(code);
-  if (!deviceName) return;
-  joinedDeviceName.value = deviceName;
+  const joined = await join(code);
+  if (!joined) return;
+  hasJoined.value = true;
+  joinedDeviceName.value = joined.deviceName;
   recoveryCode.value = "";
   currentStep.value = "ready";
 }
@@ -226,10 +228,16 @@ const primaryAction = computed<FooterAction>(() => {
           <ReadyIllustration class="w-52 shrink-0" />
           <h1 class="text-2xl font-medium">Teneo is ready</h1>
           <p
-            v-if="joinedDeviceName || isSyncOn"
+            v-if="joinedDeviceName"
             class="text-foreground/60 max-w-md text-sm text-balance">
-            Connected to {{ joinedDeviceName ?? "your Mac" }}. What you copy
-            there shows up here.
+            Connected to {{ joinedDeviceName }}. What you copy there shows up
+            here.
+          </p>
+          <p
+            v-else-if="hasJoined || isSyncOn"
+            class="text-foreground/60 max-w-md text-sm text-balance">
+            Joined. Teneo connects to your Mac when both are on the same Wi-Fi,
+            and what you copy there shows up here.
           </p>
           <p v-else class="text-foreground/60 max-w-md text-sm text-balance">
             Connect to your Mac any time in Settings › Sync.

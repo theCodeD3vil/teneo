@@ -17,9 +17,12 @@ import android.webkit.WebViewClient;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
@@ -35,11 +38,17 @@ import org.json.JSONObject;
 final class SyncRuntime {
 
     interface Host {
-        /** The core can't run, so there is nothing to retry: the recovery code is no good */
+        /** The core can't run, so there is nothing to retry: the key is no good */
         void failed(String reason);
 
         /** The web view's process died, and this runtime with it */
         void pageGone(boolean crashed);
+
+        /** These devices are connected now */
+        void peersChanged(List<KnownDevices.Peer> peers);
+
+        /** The port this phone listens on, or -1 when none was free */
+        void listening(int port);
     }
 
     private static final String TAG = "TeneoSync";
@@ -54,7 +63,9 @@ final class SyncRuntime {
 
     private final Context context;
     private final Host host;
-    private final String recoveryCode;
+    /** The vault key, base64: handed to the page once, then let go of */
+    private String vaultKey;
+    private volatile boolean syncSecrets;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final boolean debuggable;
     /** False: listen and announce, but never dial what Bonjour finds. For a
@@ -76,10 +87,11 @@ final class SyncRuntime {
     /** The phone's history, for the page; a change to it is news for the core */
     private final SyncStoreBridge history;
 
-    SyncRuntime(Context context, Host host, String recoveryCode, boolean dialOut) {
+    SyncRuntime(Context context, Host host, String vaultKey, boolean syncSecrets, boolean dialOut) {
         this.context = context.getApplicationContext();
         this.host = host;
-        this.recoveryCode = recoveryCode;
+        this.vaultKey = vaultKey;
+        this.syncSecrets = syncSecrets;
         this.dialOut = dialOut;
         this.history = new SyncStoreBridge(
             context,
@@ -112,6 +124,21 @@ final class SyncRuntime {
     /** How long this run has lasted, for deciding whether a restart is a crash loop */
     long ageMs() {
         return System.currentTimeMillis() - startedAt;
+    }
+
+    /** Whether items holding secrets may travel: read by the page from now on */
+    void setSyncSecrets(boolean allowed) {
+        syncSecrets = allowed;
+        evaluate("teneoSyncPage.setSyncSecrets(" + allowed + ")");
+    }
+
+    /** Debug builds: kill the web view's process, as the system would. It is
+     *  shared with the app's own web view, if that is open. */
+    void debugCrash() {
+        if (!debuggable) return;
+        main.post(() -> {
+            if (!closed && page != null) page.loadUrl("chrome://crash");
+        });
     }
 
     /** Runs script in the page. Any thread. */
@@ -208,6 +235,7 @@ final class SyncRuntime {
         if (port < 0) Log.w(TAG, "none of the sync ports is free: this phone can only dial out");
         else Log.i(TAG, "listening on port " + port);
         network = started;
+        host.listening(port);
 
         discovery = new NsdDiscovery(
             context,
@@ -250,10 +278,35 @@ final class SyncRuntime {
 
     private final class Bridge {
 
-        /** The page is up: hand it the recovery code */
+        /** The page is up: hand it the key, once */
         @JavascriptInterface
         public void pageLoaded() {
-            evaluate("teneoSyncPage.start(" + JSONObject.quote(recoveryCode) + ")");
+            String key;
+            synchronized (SyncRuntime.this) {
+                key = vaultKey;
+                vaultKey = null;
+            }
+            if (key == null) return;
+            evaluate("teneoSyncPage.start(" + JSONObject.quote(key) + "," + syncSecrets + ")");
+        }
+
+        /** The connected devices changed: a JSON array of {deviceId, name, platform} */
+        @JavascriptInterface
+        public void peersChanged(String json) {
+            List<KnownDevices.Peer> peers = new ArrayList<>();
+            try {
+                JSONArray list = new JSONArray(json);
+                for (int i = 0; i < list.length(); i++) {
+                    JSONObject peer = list.getJSONObject(i);
+                    peers.add(new KnownDevices.Peer(peer.getString("deviceId"), peer.optString("name", ""), peer.optString("platform", "")));
+                }
+            } catch (JSONException malformed) {
+                Log.w(TAG, "the page reported its devices in a way native code can't read");
+                return;
+            }
+            main.post(() -> {
+                if (!closed) host.peersChanged(peers);
+            });
         }
 
         /** The core has its keys: start listening, announcing and browsing */

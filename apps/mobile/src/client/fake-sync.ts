@@ -1,10 +1,10 @@
 import type { PairResult } from "../types/client";
 import type { SyncStatus } from "../types/sync";
+import { invalidCodeMessage, readPairingCode } from "./pairing-code";
 
 /**
- * Pairing and sync status as they will look, with no Mac behind them: a
- * well-formed code "pairs" with a MacBook Pro. Both clients use it until the
- * phone syncs for real.
+ * Pairing and sync status as they look, with no Mac behind them, for the app
+ * in a browser: a code the sync core accepts "pairs" with a MacBook Pro.
  */
 export class FakeSync {
   private status: SyncStatus = { state: "not_paired", devices: [] };
@@ -36,23 +36,14 @@ export class FakeSync {
   }
 
   async pair(code: string): Promise<PairResult> {
-    const trimmed = code.trim();
-
-    // The QR code's link (teneo://pair?v=1&k=<key>, then the Mac's addresses
-    // and anything a later version adds) or a recovery code
-    const isTeneoUri = /^teneo:\/\/pair\?v=1&k=[a-zA-Z0-9_-]+(&\S*)?$/.test(
-      trimmed,
-    );
-    const isRecoveryCode =
-      /^[A-Za-z0-9]{4}(-[A-Za-z0-9]{4}){2,5}$/.test(trimmed) ||
-      /^[a-fA-F0-9]{32,64}$/.test(trimmed);
-
-    if (!isTeneoUri && !isRecoveryCode) {
+    if (this.status.state !== "not_paired") {
       return {
         ok: false,
-        error:
-          "Invalid pairing code. Expected a Teneo QR code or formatted recovery code.",
+        error: "This phone already syncs. Turn sync off before joining again.",
       };
+    }
+    if (!(await readPairingCode(code))) {
+      return { ok: false, error: invalidCodeMessage };
     }
 
     this.status = {
@@ -61,8 +52,9 @@ export class FakeSync {
         {
           id: "mac-host-01",
           name: "MacBook Pro",
-          model: "MacBookPro18,1",
+          platform: "Mac",
           lastSeen: Date.now(),
+          connected: true,
         },
       ],
     };

@@ -399,6 +399,39 @@ public final class HistoryStore {
         return id;
     }
 
+    /**
+     * Give every text holding a secret a new place in the change counter, so
+     * sync sends it. For when the user allows items with secrets to sync: the
+     * other devices' cursors are past those items, which were held back, and
+     * only a newer change number reaches them. As the Mac's
+     * restampSecretItems. Returns how many were restamped.
+     */
+    public int restampSecretItems() {
+        int restamped;
+        synchronized (this) {
+            restamped = inTransaction(() -> {
+                List<String> ids = new ArrayList<>();
+                try (
+                    Cursor row = db.rawQuery(
+                        "SELECT id FROM CLIPBOARD_ITEMS WHERE kind = 'text' AND deletedAt IS NULL AND secrets IS NOT NULL ORDER BY syncSeq",
+                        null
+                    )
+                ) {
+                    while (row.moveToNext()) ids.add(row.getString(0));
+                }
+                for (String id : ids) {
+                    ContentValues values = new ContentValues();
+                    values.put("syncSeq", nextSyncSeq());
+                    db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { id });
+                }
+                return ids.size();
+            });
+        }
+        // nothing shown changes, but sync has something new to send
+        if (restamped > 0) notifyChanged();
+        return restamped;
+    }
+
     /** The newest unpinned item, when it holds `text` */
     private String repeatedCopy(String text) {
         try (
