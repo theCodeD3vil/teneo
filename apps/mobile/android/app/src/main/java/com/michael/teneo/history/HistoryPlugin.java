@@ -1,12 +1,14 @@
 package com.michael.teneo.history;
 
 import android.content.pm.ApplicationInfo;
+import android.util.Base64;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -32,6 +34,35 @@ public class HistoryPlugin extends Plugin {
     // each open store's listener, by database name
     private final Map<String, HistoryStore> watched = new HashMap<>();
     private final Map<String, HistoryStore.Listener> listeners = new HashMap<>();
+
+    // an icon the sync service saves shows on the cards that were waiting for it
+    private final AppIcons.Listener iconsListener = () -> notifyListeners("appIconsChanged", new JSObject());
+
+    @Override
+    public void load() {
+        AppIcons.addListener(iconsListener);
+    }
+
+    /**
+     * The icons of the Mac apps with these `names`, each a png data: URL, by
+     * name; an app with none is left out. They are for every database alike.
+     */
+    @PluginMethod
+    public void appIcons(PluginCall call) {
+        JSArray names = call.getArray("names");
+        JSObject icons = new JSObject();
+        if (names != null) {
+            AppIcons saved = new AppIcons(new File(getContext().getFilesDir(), AppIcons.FOLDER));
+            for (int i = 0; i < names.length(); i++) {
+                String name = names.optString(i, null);
+                byte[] png = name == null ? null : saved.read(name);
+                if (png != null) icons.put(name, "data:image/png;base64," + Base64.encodeToString(png, Base64.NO_WRAP));
+            }
+        }
+        JSObject result = new JSObject();
+        result.put("icons", icons);
+        call.resolve(result);
+    }
 
     @PluginMethod
     public void list(PluginCall call) {
@@ -89,13 +120,23 @@ public class HistoryPlugin extends Plugin {
         call.resolve();
     }
 
-    /** Put an item's whole text on the clipboard; rejects if it isn't there */
+    /** Put an item's whole text, or its image, on the clipboard; rejects if it isn't there */
     @PluginMethod
     public void copy(PluginCall call) {
         HistoryStore store = store(call);
         String id = required(call, "id");
         if (store == null || id == null) return;
         HistoryStore.Item item = store.getItem(id);
+        if (item != null && "image".equals(item.kind)) {
+            try {
+                if (item.imageFile == null || !item.imageFile.isFile()) throw new IllegalStateException("The image is gone");
+                ClipboardWriter.writeImage(getContext(), item.imageFile);
+                call.resolve();
+            } catch (RuntimeException error) {
+                call.reject("Couldn't copy the image", error);
+            }
+            return;
+        }
         if (item == null || item.text == null) {
             call.reject("This item has no text to copy");
             return;
@@ -238,7 +279,8 @@ public class HistoryPlugin extends Plugin {
                         item.getString("id"),
                         parseSecrets(item.optJSONArray("secrets")),
                         link == null ? null : link.optString("url", null),
-                        link == null ? null : link.optString("host", null)
+                        link == null ? null : link.optString("host", null),
+                        item.isNull("color") ? null : item.optString("color", null)
                     )
                 );
             }
@@ -277,6 +319,7 @@ public class HistoryPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        AppIcons.removeListener(iconsListener);
         // each store outlives the web view, and must not call into a gone one
         for (Map.Entry<String, HistoryStore> entry : watched.entrySet()) {
             entry.getValue().removeListener(listeners.get(entry.getKey()));
@@ -356,10 +399,24 @@ public class HistoryPlugin extends Plugin {
         }
         JSObject json = new JSObject();
         json.put("id", item.id);
+        json.put("kind", item.kind);
+        // an image: where its file is, and its width and height
+        json.put("imagePath", item.imageFile == null ? JSONObject.NULL : item.imageFile.getAbsolutePath());
+        Object imageSize = JSONObject.NULL;
+        if (item.imageSize != null) {
+            try {
+                imageSize = new JSONObject(item.imageSize);
+            } catch (JSONException unreadable) {
+                // shown without its size
+            }
+        }
+        json.put("imageSize", imageSize);
+        json.put("color", orNull(item.color));
         json.put("dateCopied", item.dateCopied);
         json.put("text", orNull(item.text));
         json.put("sourceAppName", orNull(item.sourceAppName));
         json.put("sourceAppBundleId", orNull(item.sourceAppBundleId));
+        json.put("originMaker", item.originMaker == null || item.originMaker.isEmpty() ? JSONObject.NULL : item.originMaker);
         json.put("pinned", item.pinnedAt != null);
         json.put("secrets", secrets);
         json.put("linkUrl", orNull(item.linkUrl));

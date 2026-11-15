@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { formatRecoveryCode } from "@teneo/sync";
 
 import { defaultSettings, type MobileSettings } from "../types/settings";
+import { phoneDetectionVersion } from "./detection";
 import type { HistoryPlugin, NativeItem } from "./history-plugin";
 import { NativeClient, toHistoryItem } from "./native-client";
 import { NativeSync } from "./native-sync";
@@ -14,12 +15,13 @@ const nativeItem: NativeItem = {
   text: "https://example.org",
   sourceAppName: "Pixel 6 Pro",
   sourceAppBundleId: null,
+  originMaker: "google",
   pinned: true,
   secrets: [],
   linkUrl: "https://example.org",
   linkHost: "example.org",
   isTruncated: false,
-  detectorVersion: 1,
+  detectorVersion: phoneDetectionVersion,
 };
 
 /** A plugin with only what a test needs; the rest throws */
@@ -61,6 +63,7 @@ describe("NativeClient", () => {
       color: null,
       concealed: false,
       sourceApp: { name: "Pixel 6 Pro", bundleId: null },
+      originMaker: "google",
       sourceURL: null,
       pinned: true,
       pasteAsFile: false,
@@ -69,6 +72,18 @@ describe("NativeClient", () => {
       link: { url: "https://example.org", host: "example.org" },
       isTruncated: false,
     });
+    // a text that is a colour is shown as one, whether stored so or found now
+    for (const color of [
+      { ...nativeItem, text: "#1122AA", linkUrl: null, color: "#1122AA" },
+      { ...nativeItem, text: "#1122AA", linkUrl: null, detectorVersion: null },
+    ]) {
+      expect(toHistoryItem(color)).toMatchObject({
+        kind: "color",
+        color: "#1122AA",
+        text: null,
+        link: null,
+      });
+    }
     const bare = toHistoryItem({
       ...nativeItem,
       sourceAppName: null,
@@ -180,20 +195,26 @@ describe("NativeClient", () => {
     await Promise.resolve();
     const request = { kind: "all" as const, search: "", limit: 10 };
     await client.listItems(request);
-    expect(calls).toEqual(["undetected v1", "saveDetections", "list"]);
+    expect(calls).toEqual([
+      `undetected v${phoneDetectionVersion}`,
+      "saveDetections",
+      "list",
+    ]);
     expect(saved).toEqual([
       {
-        detectorVersion: 1,
+        detectorVersion: phoneDetectionVersion,
         items: [
           {
             id: "link",
             secrets: [],
             link: { url: "https://www.example.org/x", host: "example.org" },
+            color: null,
           },
           {
             id: "secret",
             secrets: [{ start: 16, end: 20, label: "Password in URL" }],
             link: null,
+            color: null,
           },
         ],
       },
@@ -204,7 +225,11 @@ describe("NativeClient", () => {
     expect(calls).toEqual(["list"]);
     emit({ database: "teneo.sqlite" });
     await client.listItems(request);
-    expect(calls).toEqual(["list", "undetected v1", "list"]);
+    expect(calls).toEqual([
+      "list",
+      `undetected v${phoneDetectionVersion}`,
+      "list",
+    ]);
   });
 
   test("a text nothing has looked at yet is listed with its secret found", async () => {

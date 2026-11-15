@@ -1,15 +1,19 @@
-import { findLink } from "@teneo/shared/detection/links";
-import { findSecrets } from "@teneo/shared/detection/secrets";
-import { detectionVersion } from "@teneo/shared/detection/version";
+import { Capacitor } from "@capacitor/core";
 import type {
   ClipboardHistoryItem,
+  LinkPreviewImage,
   ClipboardListPage,
   ClipboardListRequest,
 } from "@teneo/shared/types/clipboard";
 
+import type { LinkPreviews } from "../previews/link-previews";
 import type { PairResult, TeneoClient } from "../types/client";
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
+import {
+  detectIn,
+  phoneDetectionVersion as detectionVersion,
+} from "./detection";
 import {
   appDatabase,
   type DatabaseOption,
@@ -36,8 +40,9 @@ type Detection = Parameters<
  */
 function detected(
   item: NativeItem,
-): Pick<ClipboardHistoryItem, "secrets" | "link"> {
+): Pick<ClipboardHistoryItem, "secrets" | "link" | "color"> {
   const stored = {
+    color: item.color ?? null,
     secrets: item.secrets,
     link:
       item.linkUrl && item.linkHost
@@ -48,10 +53,10 @@ function detected(
     item.detectorVersion !== null && item.detectorVersion >= detectionVersion;
   if (isLookedAt || item.text === null) return stored;
   try {
-    return {
-      secrets: findSecrets(item.text),
-      link: item.isTruncated ? stored.link : findLink(item.text),
-    };
+    // a link and a colour are the whole text or nothing, so a cut text keeps
+    // what is stored
+    const found = detectIn(item.text);
+    return item.isTruncated ? { ...stored, secrets: found.secrets } : found;
   } catch {
     return stored;
   }
@@ -59,27 +64,34 @@ function detected(
 
 /** The item the app shows for one the native history handed over */
 export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
+  const isImage = item.kind === "image" && Boolean(item.imagePath);
+  const found = detected(item);
+  // a text that is a colour is shown as one, as the Mac shows its own; the
+  // row keeps the text, so a copy still gives it
+  const isColor = !isImage && found.color !== null;
   return {
     id: item.id,
     dateCopied: item.dateCopied,
-    kind: "text",
+    kind: isImage ? "image" : isColor ? "color" : "text",
     changeCount: item.dateCopied,
-    text: item.text,
+    text: isColor ? null : item.text,
     html: null,
     paths: [],
-    image: null,
-    imageSize: null,
-    color: null,
+    // the web view reads a file of the app's through an address Capacitor
+    // makes for it
+    image: isImage ? Capacitor.convertFileSrc(item.imagePath!) : null,
+    imageSize: isImage ? (item.imageSize ?? null) : null,
     concealed: false,
     sourceApp:
       item.sourceAppName === null && item.sourceAppBundleId === null
         ? null
         : { name: item.sourceAppName, bundleId: item.sourceAppBundleId },
+    originMaker: item.originMaker ?? null,
     sourceURL: null,
     pinned: item.pinned,
     pasteAsFile: false,
     fileSize: null,
-    ...detected(item),
+    ...found,
     isTruncated: item.isTruncated,
   };
 }
@@ -96,6 +108,9 @@ export class NativeClient implements TeneoClient {
   private readonly databaseName: string;
   private historyListeners = new Set<() => void>();
   private readonly sync: NativeSync | null;
+  private readonly linkPreviews: LinkPreviews | null;
+  // null until the settings have been read
+  private showLinkPreviews: boolean | null = null;
   private removeNativeListener: Promise<() => Promise<void>>;
   private mayHaveUndetected = true;
   // texts whose detections couldn't be made or saved: left out of later
@@ -105,10 +120,15 @@ export class NativeClient implements TeneoClient {
 
   constructor(
     plugin: HistoryPlugin,
-    options: DatabaseOption & { sync?: NativeSync } = {},
+    options: DatabaseOption & {
+      sync?: NativeSync;
+      linkPreviews?: LinkPreviews;
+    } = {},
   ) {
     this.plugin = plugin;
     this.sync = options.sync ?? null;
+    this.linkPreviews = options.linkPreviews ?? null;
+    void this.linkPreviews?.removeStale().catch(() => undefined);
     this.database = options.database ? { database: options.database } : {};
     this.databaseName = options.database ?? appDatabase;
     this.removeNativeListener = plugin
@@ -179,7 +199,7 @@ export class NativeClient implements TeneoClient {
       for (const { id, text } of items) {
         if (this.unsavable.has(id)) continue;
         try {
-          found.push({ id, secrets: findSecrets(text), link: findLink(text) });
+          found.push({ id, ...detectIn(text) });
         } catch {
           this.unsavable.add(id);
         }
@@ -262,6 +282,31 @@ export class NativeClient implements TeneoClient {
     await this.plugin.copyText({ ...this.database, text });
   }
 
+  async getAppIcons(names: string[]): Promise<Record<string, string>> {
+    if (names.length === 0) return {};
+    return (await this.plugin.appIcons({ names })).icons;
+  }
+
+  onAppIconsChanged(listener: () => void): () => void {
+    const handle = this.plugin.addListener("appIconsChanged", listener);
+    return () => void handle.then((added) => added.remove());
+  }
+
+  /** Without a preview service (a test database) there are none */
+  private async previews(): Promise<LinkPreviews | null> {
+    if (!this.linkPreviews) return null;
+    this.showLinkPreviews ??= (await this.getSettings()).showLinkPreviews;
+    return this.showLinkPreviews ? this.linkPreviews : null;
+  }
+
+  async getLinkPreview(url: string): Promise<string | null> {
+    return (await (await this.previews())?.icon(url)) ?? null;
+  }
+
+  async getLinkPreviewImage(url: string): Promise<LinkPreviewImage | null> {
+    return (await (await this.previews())?.image(url)) ?? null;
+  }
+
   onHistoryChanged(listener: () => void): () => void {
     this.historyListeners.add(listener);
     return () => {
@@ -275,7 +320,9 @@ export class NativeClient implements TeneoClient {
       Object.entries(defaultSettings).filter(([key]) => !(key in settings)),
     );
     if (Object.keys(unsaved).length === 0) {
-      return { ...defaultSettings, ...settings };
+      const saved = { ...defaultSettings, ...settings };
+      this.showLinkPreviews = saved.showLinkPreviews;
+      return saved;
     }
     // The first start saves the defaults: native code that reads a setting
     // without the app (the history limits, later the capture and sync)
@@ -291,6 +338,7 @@ export class NativeClient implements TeneoClient {
       changes,
     });
     const saved = { ...defaultSettings, ...settings };
+    this.showLinkPreviews = saved.showLinkPreviews;
     if (
       this.sync &&
       ("backgroundReceive" in changes || "syncSecrets" in changes)

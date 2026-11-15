@@ -1,10 +1,9 @@
-import { detectionVersion } from "@teneo/shared/detection/version";
-
 import {
   type ContractSeed,
   defineClientContract,
   pause,
 } from "./client-contract";
+import { phoneDetectionVersion as detectionVersion } from "./detection";
 import type { HistoryPlugin } from "./history-plugin";
 import { NativeClient } from "./native-client";
 import { History } from "./native-history";

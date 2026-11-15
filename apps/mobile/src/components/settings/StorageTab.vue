@@ -44,9 +44,6 @@ const maximumItems = computed({
 
       <SettingsField>
         <template #label>Keep history for</template>
-        <template #description>
-          Older items are deleted automatically; pinned items stay
-        </template>
         <SelectSheet
           v-model="historyDuration"
           :options="durationOptions"
@@ -56,9 +53,6 @@ const maximumItems = computed({
 
       <SettingsField>
         <template #label>Maximum items</template>
-        <template #description>
-          The oldest items go first; pinned items don't count
-        </template>
         <SelectSheet
           v-model="maximumItems"
           :options="maximumItemsOptions"

@@ -113,10 +113,10 @@ const {
     </SettingsSection>
 
     <SettingsSection>
-      <template #section-title>Password Managers</template>
+      <template #section-title>Sensitive Apps</template>
 
       <SettingsField>
-        <template #label>Ignore password managers</template>
+        <template #label>Ignore sensitive apps</template>
         <template #description>
           Skip anything copied from the apps below
         </template>
@@ -126,18 +126,18 @@ const {
       <p
         v-if="excludedAppsError && !excludedApps"
         class="text-destructive px-3 py-2.5 text-sm">
-        Couldn't look up password managers
+        Couldn't look up ignored apps
       </p>
       <p
         v-else-if="!excludedApps"
         class="text-foreground/60 flex items-center gap-2 px-3 py-2.5 text-sm">
         <Spinner />
-        Looking for password managers…
+        Looking for ignored apps…
       </p>
       <p
         v-else-if="excludedApps.length === 0"
         class="text-foreground/60 px-3 py-2.5 text-sm">
-        No password managers found on this Mac
+        No ignored apps on this Mac
       </p>
       <SettingsField
         v-for="excludedApp in excludedApps"
@@ -173,34 +173,32 @@ const {
           size="sm"
           :disabled="!settings.ignorePasswords || isChoosingApp"
           @click="chooseAppToExclude">
-          <AddIcon /> Add app…
+          <AddIcon /> Add app
         </Button>
       </div>
     </SettingsSection>
 
     <SettingsSection>
-      <template #section-title>API Keys</template>
+      <template #section-title>Secrets</template>
 
       <SettingsField>
         <template #label>
           <span class="flex items-center gap-2">
-            Hide API keys
+            Hide secrets
             <BetaBadge />
           </span>
         </template>
         <template #description>
-          Show keys and other secrets as asterisks in history. Pasting still
-          gives the full key.
+          Mask secrets in history. Pasting still gives the full secret.
         </template>
         <Switch v-model="maskSecrets" />
       </SettingsField>
 
       <SettingsField>
-        <template #label>Encrypt API keys</template>
+        <template #label>Encrypt secrets</template>
         <template #description>
-          Save keys encrypted, with the key that unlocks them in your Keychain.
-          macOS may ask for your Mac password to allow it, and again after
-          updates.
+          Save secrets encrypted, with the key in your Keychain. macOS may ask
+          for your Mac password to allow it, and again after updates.
           <span v-if="encryptionError" class="text-destructive block">
             {{ encryptionError }}
           </span>
@@ -215,9 +213,6 @@ const {
 
       <SettingsField>
         <template #label>Show link previews</template>
-        <template #description>
-          Show the site's icon next to links you copy.
-        </template>
         <Switch v-model="showLinkPreviews" />
       </SettingsField>
     </SettingsSection>
@@ -225,11 +220,11 @@ const {
     <AlertDialog v-model:open="isDecryptWarningOpen">
       <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
-          <AlertDialogTitle>Stop encrypting API keys?</AlertDialogTitle>
+          <AlertDialogTitle>Stop encrypting secrets?</AlertDialogTitle>
           <AlertDialogDescription>
-            Keys already in your history will be saved unencrypted on this Mac,
-            and Teneo's key is removed from your Keychain. Any key Teneo can't
-            decrypt is deleted from history.
+            Secrets already in your history will be saved unencrypted on this
+            Mac, and Teneo's key is removed from your Keychain. Any secret Teneo
+            can't decrypt is deleted from history.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -246,11 +241,10 @@ const {
     <AlertDialog v-model:open="isMaskSecretsWarningOpen">
       <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
-          <AlertDialogTitle>Show API keys in history?</AlertDialogTitle>
+          <AlertDialogTitle>Show secrets in history?</AlertDialogTitle>
           <AlertDialogDescription>
-            Keys and other secrets will show in full in Teneo's history, where
-            anyone who sees your screen can read them. They stay saved encrypted
-            on this Mac.
+            Secrets will show in full in Teneo's history, where anyone who sees
+            your screen can read them. They stay saved encrypted on this Mac.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -258,7 +252,7 @@ const {
           <AlertDialogAction
             variant="destructive"
             @click="showSecretsInHistory">
-            Show keys
+            Show secrets
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

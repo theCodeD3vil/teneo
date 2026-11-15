@@ -10,6 +10,10 @@ def (major, minor, patch) = appVersion.tokenize('.-').take(3).collect { it as in
 // release's: 1.2.3-beta.4 is 1020304, and 1.2.3 itself is 1020399
 def beta = (appVersion =~ /-beta\.(\d+)$/)
 def appVersionCode = major * 1000000 + minor * 10000 + patch * 100 + (beta ? (beta[0][1] as int) : 99)
+// A beta is an app of its own, "Teneo Beta", so it installs beside the full
+// release; a debug build is a third, "Teneo Debug". Their names are in
+// src/beta/res and src/debug/res.
+def isBeta = appVersion.contains('-beta.')
 
 // The release key comes from the environment, so it is never in the repo.
 // Without it a release build is left unsigned, which a phone won't install.
@@ -48,10 +52,19 @@ android {
         }
     }
     buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+        }
         release {
+            if (isBeta) applicationIdSuffix '.beta'
             signingConfig releaseKeystore ? signingConfigs.release : null
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    sourceSets {
+        release {
+            if (isBeta) res.srcDirs += 'src/beta/res'
         }
     }
 }

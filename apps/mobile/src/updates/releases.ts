@@ -52,8 +52,9 @@ function nextPage(link: string | null): string | null {
 
 /**
  * The newest Android release newer than `current`, or null when there is
- * none. A beta install is offered betas and full releases; a full release
- * only full releases. It lists the android-v tags, then reads the release of
+ * none. A beta install is offered only betas and a full release only full
+ * releases: Teneo Beta and Teneo are two apps (android/app/build.gradle), and
+ * Android won't update one with the other. It lists the android-v tags, then reads the release of
  * the newest: two small requests, where listing the releases would download
  * every Mac release's notes too.
  */
@@ -88,7 +89,9 @@ export async function findUpdate(
       return version && { text, code: versionCode(version), version };
     })
     .filter((entry) => entry !== null)
-    .filter((entry) => installed.beta !== null || entry.version.beta === null)
+    .filter(
+      (entry) => (entry.version.beta === null) === (installed.beta === null),
+    )
     .filter((entry) => entry.code > versionCode(installed))
     .sort((a, b) => b.code - a.code);
 

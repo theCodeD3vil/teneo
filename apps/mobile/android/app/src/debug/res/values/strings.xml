@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- Debug builds: named apart from the releases, which they install beside -->
+<resources>
+    <string name="app_name">Teneo Debug</string>
+    <string name="title_activity_main">Teneo Debug</string>
+    <string name="share_target">Save to Teneo Debug</string>
+</resources>

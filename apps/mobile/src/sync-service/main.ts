@@ -4,7 +4,7 @@
 //
 // This page never touches the network itself: the service serves it from the
 // app and answers every other request with a 404.
-import { SyncEngine, fromBase64 } from "@teneo/sync";
+import { SyncEngine, fromBase64, toBase64 } from "@teneo/sync";
 
 import type { ConnectedDevice, NativeSync, SyncPage } from "./native";
 import { openSyncStore } from "./store";
@@ -72,6 +72,27 @@ const page: SyncPage = {
         deviceId,
         name: native.deviceName(),
         platform: "android",
+        // the Mac shows this maker's logo by the items copied here
+        maker: native.deviceMaker() || undefined,
+        // images sync too: their bytes are files native code keeps
+        images: opened.images,
+        // a Mac's items say which app they were copied from: ask it for each
+        // app's icon once, and keep it for the app's page to show
+        iconSink: {
+          missing: async (names) => {
+            const missing: unknown = JSON.parse(
+              native.missingAppIcons(JSON.stringify(names)),
+            );
+            return Array.isArray(missing)
+              ? missing.filter((name) => typeof name === "string")
+              : [];
+          },
+          save: async (name, png) => {
+            if (!native.saveAppIcon(name, toBase64(png))) {
+              throw new Error(`the icon of ${name} could not be kept`);
+            }
+          },
+        },
         vaultKey,
         store,
         syncSecrets: () => allowSecrets,

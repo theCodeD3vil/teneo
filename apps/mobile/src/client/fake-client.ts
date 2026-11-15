@@ -176,6 +176,24 @@ export class FakeClient implements TeneoClient {
     };
   }
 
+  // a browser has no Mac to ask for its apps' icons
+  async getAppIcons(): Promise<Record<string, string>> {
+    return {};
+  }
+
+  onAppIconsChanged(): () => void {
+    return () => {};
+  }
+
+  // a browser can't read other sites, so the sample links have no previews
+  async getLinkPreview(): Promise<string | null> {
+    return null;
+  }
+
+  async getLinkPreviewImage(): Promise<null> {
+    return null;
+  }
+
   async getSettings(): Promise<MobileSettings> {
     return { ...this.settings };
   }

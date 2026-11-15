@@ -15,6 +15,11 @@ const captureOnOpen = computed({
   set: (enabled) => updateSettings({ captureOnOpen: enabled }),
 });
 
+const showLinkPreviews = computed({
+  get: () => settings.value.showLinkPreviews,
+  set: (enabled) => updateSettings({ showLinkPreviews: enabled }),
+});
+
 // Turning this off shows keys in full in history, so it asks first
 const isHideSecretsWarningOpen = ref(false);
 const hideSecrets = computed({
@@ -34,35 +39,43 @@ const hideSecrets = computed({
       <SettingsField>
         <template #label>Save clipboard on open</template>
         <template #description>
-          Add what you copied in other apps when you open Teneo
+          Add what you copied in other apps to history
         </template>
         <Switch v-model="captureOnOpen" />
       </SettingsField>
     </SettingsSection>
 
     <SettingsSection>
-      <template #section-title>API Keys</template>
+      <template #section-title>Secrets</template>
 
       <SettingsField>
         <template #label>
           <span class="flex items-center gap-2">
-            Hide API keys
+            Hide secrets
             <BetaBadge />
           </span>
         </template>
         <template #description>
-          Show keys and other secrets as asterisks in history. Copying still
-          gives the full key.
+          Mask secrets in history. Copying still gives the full secret.
         </template>
         <Switch v-model="hideSecrets" />
       </SettingsField>
     </SettingsSection>
 
+    <SettingsSection>
+      <template #section-title>Links</template>
+
+      <SettingsField>
+        <template #label>Show link previews</template>
+        <Switch v-model="showLinkPreviews" />
+      </SettingsField>
+    </SettingsSection>
+
     <ConfirmSheet
       v-model:open="isHideSecretsWarningOpen"
-      title="Show API keys in history?"
-      description="Keys and other secrets will show in full in Teneo's history, where anyone who sees your screen can read them."
-      confirm-label="Show keys"
+      title="Show secrets in history?"
+      description="Secrets will show in full in Teneo's history, where anyone who sees your screen can read them."
+      confirm-label="Show secrets"
       @confirm="updateSettings({ hideSecrets: false })" />
   </div>
 </template>

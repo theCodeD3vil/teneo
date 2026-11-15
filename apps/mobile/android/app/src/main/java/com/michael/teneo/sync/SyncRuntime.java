@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
@@ -14,12 +15,15 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import com.michael.teneo.history.AppIcons;
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -370,10 +374,42 @@ final class SyncRuntime {
             return Build.MODEL;
         }
 
+        /** Who made this phone, such as "google": the others show its logo */
+        @JavascriptInterface
+        public String deviceMaker() {
+            return Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(Locale.ROOT);
+        }
+
         /** Only a debug build may show what the page does with items */
         @JavascriptInterface
         public boolean isDebuggable() {
             return debuggable;
+        }
+
+        // --- the icons of the Mac apps items were copied from (AppIcons)
+
+        /** Which of these app names (a JSON array) have no icon here, as a JSON
+         *  array; none when the answer can't be made, so nothing is asked for */
+        @JavascriptInterface
+        public String missingAppIcons(String names) {
+            try {
+                JSONArray asked = new JSONArray(names);
+                List<String> list = new ArrayList<>();
+                for (int i = 0; i < asked.length(); i++) list.add(asked.optString(i, ""));
+                return new JSONArray(appIcons().missing(list)).toString();
+            } catch (JSONException | RuntimeException unreadable) {
+                return "[]";
+            }
+        }
+
+        /** Keep an app's icon (a png, base64). False when it isn't kept. */
+        @JavascriptInterface
+        public boolean saveAppIcon(String name, String png) {
+            try {
+                return appIcons().save(name, Base64.decode(png, Base64.DEFAULT));
+            } catch (RuntimeException unreadable) {
+                return false;
+            }
         }
 
         // --- the history: answers are JSON text, see SyncStoreBridge
@@ -421,6 +457,28 @@ final class SyncRuntime {
         @JavascriptInterface
         public String historyTrim() {
             return history.trimHistory();
+        }
+
+        // --- the bytes of images, a piece at a time: answers are JSON too
+
+        @JavascriptInterface
+        public String imagesMissing() {
+            return history.imagesMissing();
+        }
+
+        @JavascriptInterface
+        public String imageSize(String hash) {
+            return history.imageSize(hash);
+        }
+
+        @JavascriptInterface
+        public String imageRead(String hash, double offset, int length) {
+            return history.imageRead(hash, (long) offset, length);
+        }
+
+        @JavascriptInterface
+        public String imageWrite(String hash, double offset, double total, String piece) {
+            return history.imageWrite(hash, (long) offset, (long) total, piece);
         }
 
         @JavascriptInterface
@@ -476,5 +534,10 @@ final class SyncRuntime {
             });
             return true;
         }
+    }
+
+    /** Where the icons sync receives are kept, for the app's page to show */
+    private AppIcons appIcons() {
+        return new AppIcons(new File(context.getFilesDir(), AppIcons.FOLDER));
     }
 }

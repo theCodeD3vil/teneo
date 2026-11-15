@@ -12,6 +12,7 @@ const maxTextBytes = 1024 * 1024;
 const peerFields = [
   "name",
   "platform",
+  "maker",
   "epoch",
   "receivedSeq",
   "lastAddress",
@@ -289,6 +290,23 @@ export class FakeHistory implements NativeHistory {
     if (batch.puts.length > 0)
       for (const listener of this.listeners) listener();
     return ok(true);
+  }
+
+  // images: this history holds none, and wants none
+  imagesMissing(): string {
+    return ok([]);
+  }
+
+  imageSize(): string {
+    return ok(null);
+  }
+
+  imageRead(): string {
+    return ok(null);
+  }
+
+  imageWrite(): string {
+    return ok("refused");
   }
 
   historyTrim(): string {

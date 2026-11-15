@@ -182,6 +182,13 @@ if (!appMode) {
 
 // --- commands
 
+// the app the next copies are from: `from <bundle id> <name>` changes it, to
+// try what goes by an item's app, such as the icon a phone asks for
+let sourceApp: { name: string; bundleId: string | null } = {
+  name: "sync:peer",
+  bundleId: null,
+};
+
 const textItem = (text: string): Parameters<typeof saveClipboardItem>[0] => ({
   kind: "text",
   changeCount: 0,
@@ -192,7 +199,7 @@ const textItem = (text: string): Parameters<typeof saveClipboardItem>[0] => ({
   imageSize: null,
   color: null,
   concealed: false,
-  sourceApp: { name: "sync:peer", bundleId: null },
+  sourceApp,
   sourceURL: null,
 });
 
@@ -203,6 +210,41 @@ async function handle(line: string): Promise<void> {
     case "copy": {
       const item = await saveClipboardItem(textItem(argument), app);
       console.log(`ok copy ${item.id}`);
+      break;
+    }
+    case "from": {
+      const [bundleId = "", ...name] = rest;
+      sourceApp = { name: name.join(" ") || bundleId, bundleId };
+      console.log(`ok from ${sourceApp.name}`);
+      break;
+    }
+    case "color": {
+      // as the app saves a copied text that is a colour
+      const item = await saveClipboardItem(
+        { ...textItem(""), kind: "color", text: null, color: argument },
+        app,
+      );
+      console.log(`ok color ${item.id}`);
+      break;
+    }
+    case "image": {
+      // a png file, copied in as the clipboard would hand one over
+      const bytes = await tjs.readFile(argument);
+      const size = new DataView(bytes.buffer, bytes.byteOffset + 16, 8);
+      const saved = `${folder}/data/images/${crypto.randomUUID()}.png`;
+      await tjs.makeDir(`${folder}/data/images`, { recursive: true });
+      await tjs.writeFile(saved, bytes);
+      const item = await saveClipboardItem(
+        {
+          ...textItem(""),
+          kind: "image",
+          text: null,
+          image: saved,
+          imageSize: { width: size.getUint32(0), height: size.getUint32(4) },
+        },
+        app,
+      );
+      console.log(`ok image ${item.id}`);
       break;
     }
     case "pin":
@@ -226,7 +268,13 @@ async function handle(line: string): Promise<void> {
       });
       for (const item of page.items) {
         console.log(
-          `item ${item.id} ${item.pinned ? "pinned" : "-"} ${JSON.stringify(item.text)}`,
+          `item ${item.id} ${item.pinned ? "pinned" : "-"} ${
+            item.kind === "image"
+              ? `image ${item.imageSize?.width}x${item.imageSize?.height} ${item.image}`
+              : item.kind === "color"
+                ? `color ${item.color}`
+                : JSON.stringify(item.text)
+          }${item.originMaker ? ` maker=${item.originMaker}` : ""}`,
         );
       }
       console.log("end list");

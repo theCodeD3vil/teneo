@@ -188,9 +188,7 @@ const isTurnOffWarningOpen = ref(false);
 
         <SettingsField>
           <template #label>Sync with your other devices</template>
-          <template #description>
-            Over your Wi-Fi, encrypted, with no account or server
-          </template>
+          <template #description> Over your Wi-Fi, encrypted </template>
           <Spinner v-if="isBusy" />
           <Button v-else size="sm" @click="turnOn()">Turn on</Button>
         </SettingsField>
@@ -198,20 +196,20 @@ const isTurnOffWarningOpen = ref(false);
         <SettingsField>
           <template #label>Join your other devices</template>
           <template #description>
-            Use the recovery code from another device
+            Use the join code from another device
           </template>
           <Button
             variant="outline"
             size="sm"
             :disabled="isBusy"
             @click="isJoining = !isJoining">
-            {{ isJoining ? "Cancel" : "Join…" }}
+            {{ isJoining ? "Cancel" : "Join" }}
           </Button>
           <template v-if="isJoining" #footer>
             <form class="flex gap-2" @submit.prevent="joinWithCode">
               <Input
                 :model-value="recoveryCode"
-                placeholder="Recovery code"
+                placeholder="Join code"
                 autocomplete="off"
                 autocapitalize="characters"
                 spellcheck="false"
@@ -221,7 +219,7 @@ const isTurnOffWarningOpen = ref(false);
                 type="submit"
                 size="sm"
                 :disabled="isBusy || !recoveryCode.trim()">
-                Join
+                Connect
               </Button>
             </form>
           </template>
@@ -241,7 +239,7 @@ const isTurnOffWarningOpen = ref(false);
             <span v-if="status.problem" class="text-destructive block">
               {{ status.problem }}
             </span>
-            <span class="block">Shown as “{{ status.deviceName }}”</span>
+            <span class="mt-4 block">Shown as “{{ status.deviceName }}”</span>
           </template>
           <Spinner v-if="isBusy" />
           <Button
@@ -249,7 +247,7 @@ const isTurnOffWarningOpen = ref(false);
             variant="outline"
             size="sm"
             @click="isTurnOffWarningOpen = true">
-            Turn off…
+            Turn off
           </Button>
         </SettingsField>
       </SettingsSection>
@@ -276,7 +274,7 @@ const isTurnOffWarningOpen = ref(false);
 
         <SettingsField>
           <template #label>Add a device</template>
-          <template #description> A QR code and a recovery code </template>
+          <template #description> A QR code and a join code </template>
           <Button variant="outline" size="sm" @click="showPairing()">
             Show code
           </Button>
@@ -287,9 +285,9 @@ const isTurnOffWarningOpen = ref(false);
         <template #section-title>Privacy</template>
 
         <SettingsField>
-          <template #label>Sync items with secrets</template>
+          <template #label>Sync sensitive items</template>
           <template #description>
-            Secrets like API keys stay on this Mac when off
+            Items like API keys stay on this Mac when off
           </template>
           <Spinner v-if="isBusy" />
           <Switch v-else v-model="syncSecrets" />
@@ -324,14 +322,13 @@ const isTurnOffWarningOpen = ref(false);
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Copy recovery code"
+                aria-label="Copy join code"
                 @click="copyRecoveryCode">
                 <CheckIcon v-if="isCodeCopied" />
                 <CopyIcon v-else />
               </Button>
             </div>
-            <Alert
-              class="border-warning/30 bg-warning/10 dark:bg-warning/15 w-full">
+            <Alert class="bg-warning/10 dark:bg-warning/15 w-full border-0!">
               <AlertCircleIcon class="text-warning!" />
               <AlertTitle>Keep this code private</AlertTitle>
               <AlertDescription class="text-foreground/60 text-xs">
@@ -355,7 +352,7 @@ const isTurnOffWarningOpen = ref(false);
           <AlertDialogTitle>Turn off sync?</AlertDialogTitle>
           <AlertDialogDescription>
             This Mac stops syncing but keeps your history. To sync again, use a
-            recovery code from another device.
+            join code from another device.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -370,7 +367,7 @@ const isTurnOffWarningOpen = ref(false);
     <AlertDialog v-model:open="isSecretsWarningOpen">
       <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
-          <AlertDialogTitle>Sync items with secrets?</AlertDialogTitle>
+          <AlertDialogTitle>Sync sensitive items?</AlertDialogTitle>
           <AlertDialogDescription>
             The secrets in your history, and new ones, will be sent to your
             other devices, encrypted on the way. Turning this off stops new ones

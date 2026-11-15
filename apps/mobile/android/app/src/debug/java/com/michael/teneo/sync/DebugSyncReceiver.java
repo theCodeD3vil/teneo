@@ -12,7 +12,7 @@ import android.util.Log;
  * is checked by the same parsers; it is used at once if the app is open, or
  * when it next opens.
  *
- *   adb shell am broadcast -n com.michael.teneo/.sync.DebugSyncReceiver \
+ *   adb shell am broadcast -n com.michael.teneo.debug/com.michael.teneo.sync.DebugSyncReceiver \
  *     --es pair "<recovery code or teneo://pair link>"
  *   ... --ez unpair true     turn sync off and forget the key
  *   ... --es copy "text"     a copy made on this phone, to see it reach the others

@@ -1,11 +1,12 @@
 <script lang="ts" setup>
+import { shortTimeAgo } from "@teneo/shared/time/ago";
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 import Button from "@teneo/ui/components/button/Button.vue";
 import { currentTime } from "@teneo/ui/composables/useRelativeTimeAgo";
 import { cn } from "@teneo/ui/lib/utils";
+import { makerIcon } from "@teneo/ui/utils/device-makers";
 import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { maskSecrets, type TextPart } from "@teneo/ui/utils/secrets";
-import { formatTimeAgo } from "@vueuse/core";
 import { computed, onUnmounted, ref } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
 import OpenIcon from "~icons/tabler/chevron-right";
@@ -15,7 +16,9 @@ import LinkIcon from "~icons/tabler/link";
 import ImageIcon from "~icons/tabler/photo";
 
 import { useClient } from "../../client";
+import { useAppIcons } from "../../composables/useAppIcons";
 import { showCopiedNotice } from "../../composables/useCopiedNotice";
+import { useLinkPreviews } from "../../composables/useLinkPreviews";
 import { useSettings } from "../../composables/useSettings";
 import BetaBadge from "../BetaBadge.vue";
 
@@ -31,6 +34,20 @@ const emit = defineEmits<{
 
 const client = useClient();
 const { settings } = useSettings();
+// A link shows its site's icon, fetched from the site itself. Until it
+// loads, or when previews are off, the link icon holds its place.
+const { linkIcon } = useLinkPreviews();
+const siteIcon = computed(() => linkIcon(props.itemDetails));
+// An item copied on a Mac shows the icon of the app it came from, which sync
+// fetched from the Mac and the phone keeps by the app's name
+const { appIcon } = useAppIcons();
+const sourceAppIcon = computed(() =>
+  appIcon(props.itemDetails.sourceApp?.name),
+);
+// An item copied on a phone is named after the phone, with its maker's logo
+const deviceMakerIcon = computed(() =>
+  makerIcon(props.itemDetails.originMaker),
+);
 
 const isCopying = ref(false);
 // Bumped on each copy so the sweep across the card plays again
@@ -64,12 +81,9 @@ const imageName = computed(() =>
     : "Image",
 );
 
+// a copy made again moves the item's time, so it is read from the item each time
 const dateCopied = computed(() =>
-  formatTimeAgo(
-    new Date(props.itemDetails.dateCopied),
-    undefined,
-    currentTime.value,
-  ),
+  shortTimeAgo(props.itemDetails.dateCopied, currentTime.value.getTime()),
 );
 
 // Secrets show as asterisks unless hiding is off in Settings; copying always
@@ -132,7 +146,20 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
     "
     @click="copyItem">
     <div class="flex items-start gap-4">
-      <div :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
+      <!-- a link's icon fills the square like an app icon -->
+      <!-- an image shows itself, small -->
+      <img
+        v-if="isImage && itemDetails.image"
+        :src="itemDetails.image"
+        :alt="imageName"
+        loading="lazy"
+        class="size-9 shrink-0 rounded-md object-cover" />
+      <img
+        v-else-if="siteIcon"
+        :src="siteIcon"
+        :alt="itemDetails.link?.host"
+        class="size-9 shrink-0 rounded-md object-cover" />
+      <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
         <LinkIcon v-if="itemDetails.link" class="size-5" />
         <TextAlignLeftIcon
           v-else-if="itemDetails.kind === 'text'"
@@ -179,6 +206,16 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
         <!-- one line: where it came from, size, date, secrets -->
         <div
           class="text-foreground/50 flex items-center gap-x-2 text-xs whitespace-nowrap">
+          <!-- beside the name, not around it: the name truncates on its own -->
+          <img
+            v-if="itemDetails.sourceApp && sourceAppIcon"
+            :src="sourceAppIcon"
+            alt=""
+            class="-mr-1 size-4 shrink-0 rounded" />
+          <component
+            :is="deviceMakerIcon"
+            v-else-if="itemDetails.sourceApp && deviceMakerIcon"
+            class="-mr-1 size-3 shrink-0" />
           <span v-if="itemDetails.sourceApp" class="min-w-0 truncate">
             {{ itemDetails.sourceApp.name }}
           </span>
@@ -188,7 +225,8 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
           </template>
           <template v-if="itemDetails.dateCopied">
             <span v-if="itemDetails.sourceApp || fileSize">·</span>
-            <span>{{ dateCopied }}</span>
+            <!-- a step under the line's size, which is 0.9375rem here -->
+            <span class="text-[0.8125rem]">{{ dateCopied }}</span>
           </template>
           <template v-if="secretLabels">
             <span>·</span>

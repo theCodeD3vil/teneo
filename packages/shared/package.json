@@ -4,7 +4,9 @@
   "type": "module",
   "exports": {
     "./types/*": "./src/types/*.ts",
-    "./detection/*": "./src/detection/*.ts"
+    "./detection/*": "./src/detection/*.ts",
+    "./links/*": "./src/links/*.ts",
+    "./time/*": "./src/time/*.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

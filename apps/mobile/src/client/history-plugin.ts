@@ -11,10 +11,20 @@ import type { MobileSettings } from "../types/settings";
 /** An item as the native history hands it over */
 export interface NativeItem {
   id: string;
+  /** an image when it says so; a text otherwise */
+  kind?: "text" | "image";
+  /** the text itself when it is exactly one CSS colour: shown as a colour */
+  color?: string | null;
+  /** an image's file on the phone, and its width and height */
+  imagePath?: string | null;
+  imageSize?: { width: number; height: number } | null;
   dateCopied: number;
   text: string | null;
   sourceAppName: string | null;
   sourceAppBundleId: string | null;
+  /** who made the device it was copied on, such as "google"; null when
+   *  that device didn't say */
+  originMaker?: string | null;
   pinned: boolean;
   secrets: SecretSpan[];
   linkUrl: string | null;
@@ -84,13 +94,24 @@ export interface HistoryPlugin {
         id: string;
         secrets: SecretSpan[];
         link: ClipboardLink | null;
+        color?: string | null;
       }[];
     },
   ): Promise<void>;
   resetTestDatabase(options: { database: string }): Promise<void>;
+  /** The icons of the Mac apps with these names, each a png data: URL; an
+   *  app the phone has no icon for is left out */
+  appIcons(options: {
+    names: string[];
+  }): Promise<{ icons: Record<string, string> }>;
   addListener(
     event: "historyChanged",
     listener: (event: { database: string }) => void,
+  ): Promise<PluginListenerHandle>;
+  /** Sync saved an icon for an app that had none */
+  addListener(
+    event: "appIconsChanged",
+    listener: () => void,
   ): Promise<PluginListenerHandle>;
 }
 

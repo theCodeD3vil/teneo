@@ -13,9 +13,11 @@ import {
   onHistoryChanged,
 } from "../database";
 import { clipboardHistoryChangedEvent } from "../types/clipboard";
+import { appIconPng } from "./app-icon-source";
 import type { Discovery } from "./discovery";
 import { MacDiscovery } from "./discovery-macos";
 import { ChildRegistry } from "./dns-sd-registry";
+import { clearPartialImages, SqliteImageStore } from "./image-store";
 import { LanTransport } from "./lan-transport";
 import { SqliteSyncStore } from "./sync-store";
 
@@ -55,6 +57,7 @@ export async function startSyncService(
   await initializeDatabase(app);
   const { deviceId, clock } = getSyncIdentity();
   const store = new SqliteSyncStore(app);
+  await clearPartialImages(app);
   const engine = new SyncEngine({
     deviceId,
     name: options.name,
@@ -62,6 +65,10 @@ export async function startSyncService(
     vaultKey: options.vaultKey,
     store,
     syncSecrets: options.syncSecrets,
+    // a phone shows the icons of the apps items were copied from, and has
+    // none of its own: this Mac hands it the ones it asks for
+    iconSource: { icon: (name) => appIconPng(name, app) },
+    images: new SqliteImageStore(app),
     clock,
     // what came from another device is for the windows only: it is not a
     // change of this device's to send on

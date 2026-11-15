@@ -50,15 +50,15 @@ const features: Array<{
     beta: true,
   },
   {
-    title: "Leaves passwords alone",
+    title: "Skips sensitive apps",
     description:
       "Anything copied from a password manager is skipped, and you can add any other app you want Teneo to ignore.",
     icon: PasswordIcon,
   },
   {
-    title: "Hides API keys",
+    title: "Hides secrets",
     description:
-      "Keys from GitHub, OpenAI, Stripe, AWS and others are hidden in your history but still paste in full.",
+      "API keys and other secrets are hidden in your history but still paste in full.",
     icon: KeyIcon,
   },
   {

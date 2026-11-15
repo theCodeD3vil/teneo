@@ -325,9 +325,15 @@ async function refreshDetection(
   if (changed) notifyClipboardHistoryChanged(app);
 }
 
-// A deleted text whose text is gone: what sync keeps so peers hear of the
-// delete (see tombstones below). Deleted before sync, a text keeps its value.
-const tombstoneRow = `(kind = 'text' AND deletedAt IS NOT NULL AND value IS NULL)`;
+// The kinds whose value is a text that syncs: a colour travels as the text it
+// was copied as.
+const textKinds = `kind IN ('text', 'color')`;
+// A deleted text or colour whose value is gone, or a deleted image whose file
+// is: what sync keeps so peers hear of the delete (see tombstones below).
+// Deleted before sync, a text keeps its value and an image its file.
+const tombstoneRow = `(deletedAt IS NOT NULL AND (
+  (${textKinds} AND value IS NULL) OR (kind = 'image' AND path IS NULL)
+))`;
 // ...and one still young enough that it must stay: ?  is its cutoff (ms)
 const youngTombstone = `(${tombstoneRow} AND deletedAt >= ?)`;
 
@@ -377,7 +383,7 @@ export async function countClipboardItemsToDelete(
 const eraseText = ["value", "secrets", "linkUrl", "linkHost", "encrypted"]
   .map(
     (column) =>
-      `${column} = CASE WHEN kind = 'text' THEN NULL ELSE ${column} END`,
+      `${column} = CASE WHEN ${textKinds} THEN NULL ELSE ${column} END`,
   )
   .join(", ");
 
@@ -401,6 +407,7 @@ export async function deleteClipboardItems(
   // saved meanwhile can't be deleted without its image path being read
   const { deletedRows, changed } = await exclusive(async () => {
     let tombstoned = 0;
+    let erasedImages: Pick<ClipboardItemRow, "kind" | "path">[] = [];
     if (leaveTombstones && getSettings().syncEnabled) {
       // The texts become tombstones, and drop out of the condition below
       // while they are young. A tombstone already there stays as it is.
@@ -409,7 +416,26 @@ export async function deleteClipboardItems(
         `
           UPDATE "CLIPBOARD_ITEMS"
           SET deletedAt = ifnull(deletedAt, ?), pinnedAt = NULL, syncSeq = NULL, ${eraseText}
-          WHERE kind = 'text' AND NOT ${tombstoneRow} AND ${deletionCondition}
+          WHERE ${textKinds} AND NOT ${tombstoneRow} AND ${deletionCondition}
+        `,
+        Date.now(),
+        ...values,
+      );
+      // The images too, each without its file from here on
+      erasedImages = all<Pick<ClipboardItemRow, "kind" | "path">>(
+        database,
+        `
+          SELECT kind, path FROM "CLIPBOARD_ITEMS"
+          WHERE kind = 'image' AND NOT ${tombstoneRow} AND ${deletionCondition}
+        `,
+        ...values,
+      );
+      run(
+        database,
+        `
+          UPDATE "CLIPBOARD_ITEMS"
+          SET deletedAt = ifnull(deletedAt, ?), pinnedAt = NULL, syncSeq = NULL, path = NULL
+          WHERE kind = 'image' AND NOT ${tombstoneRow} AND ${deletionCondition}
         `,
         Date.now(),
         ...values,
@@ -428,7 +454,10 @@ export async function deleteClipboardItems(
         ...values,
       );
     }
-    return { deletedRows: rows, changed: tombstoned > 0 || rows.length > 0 };
+    return {
+      deletedRows: [...erasedImages, ...rows],
+      changed: tombstoned > 0 || rows.length > 0,
+    };
   });
   if (!changed) return;
   notifyClipboardHistoryChanged(app);
@@ -475,20 +504,29 @@ export async function purgeOldTombstones(app: TinyApp): Promise<void> {
 
 /** Hide an item from the history. Its row stays, so history limits count it
  *  and delete it in time. It's unpinned too. With sync on, a text also loses
- *  its text and becomes a tombstone, which tells the other devices to delete
- *  it; every other kind keeps its row and image as before. */
+ *  its text, and an image its file, and becomes a tombstone, which tells the
+ *  other devices to delete it; every other kind keeps its row as before. */
 export async function softDeleteClipboardItem(
   id: string,
   app: TinyApp,
 ): Promise<void> {
   const database = await initializeDatabase(app);
-  await exclusive(async () => {
+  const { data: dataDirectory } = await appPaths(app);
+  const isSyncing = getSettings().syncEnabled;
+  const imagePath = await exclusive(async () => {
+    const [row] = all<Pick<ClipboardItemRow, "kind" | "path">>(
+      database,
+      `SELECT kind, path FROM "CLIPBOARD_ITEMS" WHERE id = ? AND deletedAt IS NULL`,
+      id,
+    );
     run(
       database,
       `
         UPDATE "CLIPBOARD_ITEMS"
         SET deletedAt = ?, pinnedAt = NULL, syncSeq = ?${
-          getSettings().syncEnabled ? `, ${eraseText}` : ""
+          isSyncing
+            ? `, ${eraseText}, path = CASE WHEN kind = 'image' THEN NULL ELSE path END`
+            : ""
         }
         WHERE id = ? AND deletedAt IS NULL
       `,
@@ -497,7 +535,18 @@ export async function softDeleteClipboardItem(
       id,
     );
     notifyClipboardHistoryChanged(app);
+    return isSyncing && row?.kind === "image"
+      ? restoreImagePath(row.path, dataDirectory)
+      : null;
   });
+  // after its row, so history never points at a missing file
+  if (imagePath) {
+    await tjs
+      .remove(imagePath)
+      .catch((error: unknown) =>
+        logError(`deleting ${imagePath} failed:`, error),
+      );
+  }
 }
 
 /** Pinned items list first, newest pin first, and history
@@ -623,12 +672,19 @@ export function notifyClipboardHistoryChanged(app: TinyApp): void {
   }
 }
 
+// Who made the device an item was copied on ("google"), for its logo on the
+// card. Only a device that said so has one: a phone, never this Mac.
+const originMakerColumn = `
+  (SELECT maker FROM "SYNC_PEERS" WHERE deviceId = originDevice) AS originMaker
+`;
+
 // The list reads only the start of a long text: the card shows two lines, and
 // the whole text comes by id when it's previewed or copied. A text holding a
 // secret is read whole, so the search can tell the secret from the rest.
 const listColumns = `
   id, kind, imageSize, path, dateCopied, sourceAppName, sourceAppBundleId,
   pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
+  ${originMakerColumn},
   CASE WHEN kind != 'text' OR encrypted IS 1 OR secrets IS NOT NULL
     THEN value ELSE substr(value, 1, ?) END AS value,
   length(value) AS valueLength
@@ -709,7 +765,8 @@ export async function getClipboardItem(
     await initializeDatabase(app),
     `
       SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId,
-        pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost
+        pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
+        ${originMakerColumn}
       FROM "CLIPBOARD_ITEMS"
       WHERE id = ? AND deletedAt IS NULL
     `,
@@ -744,7 +801,12 @@ function listConditions(
   search: string,
   cursor?: ClipboardListCursor,
 ): { where: string; values: unknown[] } {
-  const conditions = [`deletedAt IS NULL`];
+  // an image that sync has heard of and whose file has not arrived yet is not
+  // shown until it has
+  const conditions = [
+    `deletedAt IS NULL`,
+    `NOT (kind = 'image' AND path IS NULL)`,
+  ];
   const values: unknown[] = [];
   if (kind !== "all") {
     conditions.push(`kind = ?`);
@@ -1003,6 +1065,12 @@ const addedColumns = {
   pinnedStamp: "TEXT",
   originDevice: "TEXT",
   createdAt: "INTEGER",
+  // for syncing an image: the SHA-256 of its file, the file's length and its
+  // kind ("image/png"). Filled in the first time the image is sent, and from
+  // the record for one that arrives.
+  imageHash: "TEXT",
+  imageBytes: "INTEGER",
+  imageType: "TEXT",
 };
 
 function addMissingColumns(database: Database): void {
@@ -1058,6 +1126,7 @@ function rowToClipboardItem(
     color: row.kind === "color" ? row.value : null,
     concealed: false,
     sourceApp: sourceAppFromRow(row),
+    originMaker: row.originMaker || null,
     sourceURL: null,
     pinned: row.pinnedAt != null,
     pasteAsFile: row.kind === "image" && row.pasteAsFile === 1,

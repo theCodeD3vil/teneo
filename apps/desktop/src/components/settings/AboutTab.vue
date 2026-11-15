@@ -21,7 +21,7 @@ const checkForUpdateMutation = useMutation({
 const updateStatus = computed(() => {
   if (checkForUpdateMutation.isError.value) return "Couldn't check for updates";
   const update = checkForUpdateMutation.data.value;
-  if (!update) return "Look for a newer version of Teneo";
+  if (!update) return "";
   return update.available
     ? `Teneo ${update.latest} is available`
     : "Teneo is up to date";
@@ -44,7 +44,9 @@ const updateStatus = computed(() => {
 
       <SettingsField>
         <template #label>Software update</template>
-        <template #description>{{ updateStatus }}</template>
+        <template v-if="updateStatus" #description>
+          {{ updateStatus }}
+        </template>
         <Button
           variant="outline"
           size="sm"

@@ -5,6 +5,27 @@
 import { isDeviceId, isStamp } from "./hlc";
 
 export const maxTextBytes = 1024 * 1024;
+/** A larger image stays on the device that copied it. */
+export const maxImageBytes = 16 * 1024 * 1024;
+/** The kinds of image every device can show. Any other stays where it is. */
+export const imageTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+];
+
+/** What an image item says about its picture. The bytes travel apart from
+ *  the record (the engine's blob frames), named by their hash. */
+export interface ImageInfo {
+  /** SHA-256 of the file, 64 hex digits */
+  hash: string;
+  bytes: number;
+  width: number;
+  height: number;
+  /** One of imageTypes */
+  type: string;
+}
 
 export interface Pin {
   /** When it was pinned, or null when this change is an unpin. */
@@ -15,9 +36,11 @@ export interface Pin {
 
 export interface ItemRecord {
   id: string;
-  kind: "text";
-  /** Null in a tombstone. */
+  kind: "text" | "image";
+  /** Null in a tombstone, and in an image. */
   text: string | null;
+  /** Set in an image that is not deleted; null in a text and a tombstone. */
+  image: ImageInfo | null;
   createdAt: number;
   /** The device that first copied it. */
   origin: string;
@@ -58,6 +81,28 @@ export function utf8Length(text: string): number {
 const idPattern = /^[A-Za-z0-9_-]{1,64}$/;
 const maxSourceAppLength = 256;
 
+const hashPattern = /^[0-9a-f]{64}$/;
+const maxImageSide = 100_000;
+
+const isSide = (value: unknown): value is number =>
+  typeof value === "number" &&
+  Number.isSafeInteger(value) &&
+  value >= 1 &&
+  value <= maxImageSide;
+
+/** A clean copy of a record's image, or null when it is not one this version
+ *  takes. */
+function parseImage(input: unknown): ImageInfo | null {
+  if (typeof input !== "object" || input === null) return null;
+  const { hash, bytes, width, height, type } = input as Record<string, unknown>;
+  if (typeof hash !== "string" || !hashPattern.test(hash)) return null;
+  if (typeof bytes !== "number" || !Number.isSafeInteger(bytes)) return null;
+  if (bytes < 1 || bytes > maxImageBytes) return null;
+  if (!isSide(width) || !isSide(height)) return null;
+  if (typeof type !== "string" || !imageTypes.includes(type)) return null;
+  return { hash, bytes, width, height, type };
+}
+
 const isTime = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
@@ -67,7 +112,7 @@ export function parseRecord(input: unknown): ItemRecord | null {
   if (typeof input !== "object" || input === null) return null;
   const r = input as Record<string, unknown>;
   if (typeof r.id !== "string" || !idPattern.test(r.id)) return null;
-  if (r.kind !== "text") return null;
+  if (r.kind !== "text" && r.kind !== "image") return null;
   if (!isTime(r.createdAt) || !isTime(r.dateCopied)) return null;
   if (!isDeviceId(r.origin)) return null;
   // never empty: null means none, and the merge treats the two as different
@@ -84,7 +129,14 @@ export function parseRecord(input: unknown): ItemRecord | null {
   if (r.deletedAt !== null && !isTime(r.deletedAt)) return null;
 
   let text: string | null = null;
-  if (r.deletedAt === null) {
+  let image: ImageInfo | null = null;
+  if (r.kind === "image") {
+    if (r.text !== null) return null; // an image carries no text
+    if (r.deletedAt === null) {
+      image = parseImage(r.image);
+      if (!image) return null;
+    }
+  } else if (r.deletedAt === null) {
     if (typeof r.text !== "string" || utf8Length(r.text) > maxTextBytes)
       return null;
     text = r.text;
@@ -104,8 +156,9 @@ export function parseRecord(input: unknown): ItemRecord | null {
 
   return {
     id: r.id,
-    kind: "text",
+    kind: r.kind,
     text,
+    image,
     createdAt: r.createdAt,
     origin: r.origin,
     dateCopied: r.dateCopied,
@@ -123,13 +176,16 @@ export function isSameItem(a: ItemRecord, b: ItemRecord): boolean {
     a.id === b.id &&
     a.createdAt === b.createdAt &&
     a.origin === b.origin &&
-    (a.text === null || b.text === null || a.text === b.text)
+    a.kind === b.kind &&
+    (a.text === null || b.text === null || a.text === b.text) &&
+    (!a.image || !b.image || a.image.hash === b.image.hash)
   );
 }
 
 export function isSameRecord(a: ItemRecord, b: ItemRecord): boolean {
   return (
     a.text === b.text &&
+    a.image?.hash === b.image?.hash &&
     a.dateCopied === b.dateCopied &&
     a.sourceApp === b.sourceApp &&
     a.deletedAt === b.deletedAt &&
@@ -164,8 +220,9 @@ export function mergeRecords(a: ItemRecord, b: ItemRecord): ItemRecord {
   const deletedAt = earlierDelete(a.deletedAt, b.deletedAt);
   return {
     id: a.id,
-    kind: "text",
+    kind: a.kind,
     text: deletedAt === null ? (a.text ?? b.text) : null,
+    image: deletedAt === null ? (a.image ?? b.image ?? null) : null,
     createdAt: a.createdAt,
     origin: a.origin,
     dateCopied: copy.dateCopied,
@@ -178,7 +235,16 @@ export function mergeRecords(a: ItemRecord, b: ItemRecord): ItemRecord {
   };
 }
 
-/** The same text copied on two devices becomes one item: the one with the
+/** Whether two live items hold the same thing: the same text, or the same
+ *  picture. */
+export function hasSameContent(a: ItemRecord, b: ItemRecord): boolean {
+  if (a.kind !== b.kind || isTombstone(a) || isTombstone(b)) return false;
+  return a.kind === "text"
+    ? a.text === b.text
+    : Boolean(a.image) && a.image?.hash === b.image?.hash;
+}
+
+/** The same text (or picture) copied on two devices becomes one item: the one with the
  *  smaller id stays, with the later copy time, and the other is deleted. Both
  *  results are ordinary records, so every device reaches the same state. */
 export function collapseSameText(
@@ -190,6 +256,6 @@ export function collapseSameText(
   const copy = laterCopy(a, b);
   return {
     kept: { ...keep, dateCopied: copy.dateCopied, sourceApp: copy.sourceApp },
-    dropped: { ...drop, text: null, deletedAt },
+    dropped: { ...drop, text: null, image: null, deletedAt },
   };
 }

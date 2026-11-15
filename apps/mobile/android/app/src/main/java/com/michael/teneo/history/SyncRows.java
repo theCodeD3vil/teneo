@@ -13,8 +13,33 @@ public final class SyncRows {
 
     private SyncRows() {}
 
-    /** A text row. `syncSeq` is read, never written: the store hands out its own. */
+    /** What a sync record says of an image's picture; every field is null in a text and in a tombstone */
+    public static final class Image {
+
+        /** its width and height as JSON, as the Mac keeps them */
+        public final String size;
+        /** SHA-256 of the file, hex */
+        public final String hash;
+        public final Long bytes;
+        /** such as "image/png" */
+        public final String type;
+
+        public Image(String size, String hash, Long bytes, String type) {
+            this.size = size;
+            this.hash = hash;
+            this.bytes = bytes;
+            this.type = type;
+        }
+    }
+
+    /** A text or image row. `syncSeq` is read, never written: the store hands out its own. */
     public static final class Row {
+
+        /** "text" or "image" */
+        public final String kind;
+        public final Image image;
+        /** set on a text that is exactly one CSS colour, found with the secrets and the link */
+        public final String color;
 
         public final String id;
         /** null in a tombstone, and for a text too long for sync to send */
@@ -50,8 +75,14 @@ public final class SyncRows {
             String linkUrl,
             String linkHost,
             Integer detectorVersion,
-            long syncSeq
+            long syncSeq,
+            String kind,
+            Image image,
+            String color
         ) {
+            this.kind = kind;
+            this.image = image;
+            this.color = color;
             this.id = id;
             this.value = value;
             this.dateCopied = dateCopied;

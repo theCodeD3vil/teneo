@@ -23,7 +23,11 @@ public final class HistoryQueries {
     public static final String UNPINNED_ORDER = "dateCopied DESC, id DESC";
 
     /** A deleted text: it holds no text, only news for the other devices */
-    public static final String TOMBSTONE_ROW = "(kind = 'text' AND deletedAt IS NOT NULL AND value IS NULL)";
+    public static final String TOMBSTONE_ROW =
+        "(deletedAt IS NOT NULL AND ((kind = 'text' AND value IS NULL) OR (kind = 'image' AND path IS NULL)))";
+
+    /** An image sync has heard of whose file has not arrived yet: not shown until it has */
+    public static final String WAITING_IMAGE = "(kind = 'image' AND path IS NULL)";
     private static final String YOUNG_TOMBSTONE = "(" + TOMBSTONE_ROW + " AND deletedAt >= ?)";
 
     /**
@@ -95,7 +99,13 @@ public final class HistoryQueries {
         List<String> conditions = new ArrayList<>();
         List<Object> values = new ArrayList<>();
         conditions.add("deletedAt IS NULL");
-        if (!"all".equals(kind)) {
+        conditions.add("NOT " + WAITING_IMAGE);
+        // a text that is a colour is listed with the colours, not the texts
+        if ("color".equals(kind)) {
+            conditions.add("color IS NOT NULL");
+        } else if ("text".equals(kind)) {
+            conditions.add("kind = 'text' AND color IS NULL");
+        } else if (!"all".equals(kind)) {
             conditions.add("kind = ?");
             values.add(kind);
         }

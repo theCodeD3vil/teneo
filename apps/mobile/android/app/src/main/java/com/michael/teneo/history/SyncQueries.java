@@ -24,11 +24,15 @@ public final class SyncQueries {
         "id, CASE WHEN length(CAST(value AS BLOB)) > " +
         MAX_TEXT_BYTES +
         " THEN NULL ELSE value END AS value, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, " +
-        "pinnedStamp, deletedAt, createdAt, originDevice, secrets, linkUrl, linkHost, detectorVersion, syncSeq";
+        "pinnedStamp, deletedAt, createdAt, originDevice, secrets, linkUrl, linkHost, detectorVersion, syncSeq, " +
+        "kind, imageSize, imageHash, imageBytes, imageType, color";
 
-    /** Text rows and tombstones after a change number, oldest change first: `?` is the number, then the most rows */
+    /** Texts, images and tombstones after a change number, oldest change first: `?` is the number, then the most rows */
     public static final String CHANGES_AFTER =
-        "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE kind = 'text' AND syncSeq > ? ORDER BY syncSeq LIMIT ?";
+        "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE kind IN ('text', 'image') AND syncSeq > ? ORDER BY syncSeq LIMIT ?";
+
+    /** As packages/sync maxImageBytes: a larger image stays on the device that copied it */
+    public static final long MAX_IMAGE_BYTES = 16L * 1024 * 1024;
 
     public static final String ROW = "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE id = ?";
 
@@ -42,7 +46,7 @@ public final class SyncQueries {
 
     /** The fields of a device that can be changed: the page's patch may name no others */
     public static final List<String> PEER_FIELDS = Collections.unmodifiableList(
-        Arrays.asList("name", "platform", "epoch", "receivedSeq", "lastAddress", "lastSeenAt")
+        Arrays.asList("name", "platform", "maker", "epoch", "receivedSeq", "lastAddress", "lastSeenAt")
     );
 
     /** A skip list this long is more than one batch can make (two rows per received change) */

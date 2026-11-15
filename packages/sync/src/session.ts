@@ -23,9 +23,9 @@ import {
   utf8,
 } from "./crypto";
 import {
-  type ChangesFrame,
   type Frame,
-  type StateFrame,
+  type PingFrame,
+  type PongFrame,
   handshakeMs,
   heartbeat,
   maxMessageLength,
@@ -94,7 +94,7 @@ export interface SessionOptions {
 }
 
 export type FrameHandler = (
-  frame: StateFrame | ChangesFrame,
+  frame: Exclude<Frame, PingFrame | PongFrame>,
 ) => Promise<void> | void;
 
 type Phase = "hello" | "proof" | "open" | "closed";

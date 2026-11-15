@@ -274,57 +274,6 @@ const swatches = [
         :style="delay(560)" />
     </template>
 
-    <!-- files: an open folder holding a single blank sheet -->
-    <template v-else-if="kind === 'files'">
-      <path
-        d="M42 36a6 6 0 0 1 6-6h20l8 8h36a6 6 0 0 1 6 6v46a6 6 0 0 1-6 6H48a6 6 0 0 1-6-6Z"
-        class="illus-rise fill-warning/45"
-        :style="delay(80)" />
-      <!-- the sheet slides up out of the folder -->
-      <g class="illus-rise" :style="delay(220)">
-        <g transform="rotate(-6 78 50)">
-          <rect
-            x="54"
-            y="30"
-            width="48"
-            height="40"
-            rx="4"
-            stroke-width="1.5"
-            class="fill-background stroke-foreground/15" />
-          <rect
-            x="60"
-            y="38"
-            width="26"
-            height="4"
-            rx="2"
-            class="fill-foreground/12" />
-          <rect
-            x="60"
-            y="46"
-            width="34"
-            height="4"
-            rx="2"
-            class="fill-foreground/12" />
-        </g>
-      </g>
-      <path
-        d="M42 54a6 6 0 0 1 6-6h64a6 6 0 0 1 6 6v36a6 6 0 0 1-6 6H48a6 6 0 0 1-6-6Z"
-        class="illus-rise fill-warning"
-        :style="delay(140)" />
-      <g class="illus-pop" :style="delay(400)">
-        <path
-          :d="sparkle"
-          transform="translate(130 34) scale(.7)"
-          class="fill-warning" />
-      </g>
-      <circle
-        cx="32"
-        cy="50"
-        r="2.5"
-        class="illus-pop fill-warning/50"
-        :style="delay(480)" />
-    </template>
-
     <!-- colors: swatch cards, stacked, fanning out -->
     <template v-else-if="kind === 'color'">
       <g

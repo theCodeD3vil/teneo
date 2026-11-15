@@ -4,16 +4,23 @@ import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 /** Android's share sheet, through SharePlugin.java in the Android app */
 interface SharePlugin {
   share(options: { text: string }): Promise<void>;
+  /** Share the image of the history item with this id */
+  shareImage(options: { id: string }): Promise<void>;
 }
 
 const Share = registerPlugin<SharePlugin>("Share");
 
 /**
- * Hand the item's text or link to the share sheet. The list carries only the
+ * Hand the item's text, link or image to the share sheet. The list carries only the
  * start of a long text, so pass the whole item (see `client.getItem`).
  * Rejects if the sheet couldn't be opened.
  */
 export async function shareItem(item: ClipboardHistoryItem): Promise<void> {
+  if (item.kind === "image") {
+    // native code hands the file over: the page only has an address for it
+    if (Capacitor.isNativePlatform()) await Share.shareImage({ id: item.id });
+    return;
+  }
   const text = item.link?.url ?? item.text ?? item.color;
   if (!text) return;
   // the app's web view has no navigator.share

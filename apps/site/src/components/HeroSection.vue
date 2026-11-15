@@ -63,8 +63,8 @@ const fan = [
     featureTitle: "Private by design",
     features: [
       "History stays on your Mac",
-      "Skips password managers",
-      "Masks API keys in history",
+      "Skips sensitive apps",
+      "Masks secrets in history",
     ],
   },
   {

@@ -201,8 +201,8 @@ test("a mistyped recovery code is refused and nothing changes", async () => {
   const { manager, calls, secrets } = await setup();
   const code = await formatRecoveryCode(randomBytes(32));
   const mistyped = (code[0] === "0" ? "1" : "0") + code.slice(1);
-  await expect(manager.join(mistyped)).rejects.toThrow("recovery code");
-  await expect(manager.join("")).rejects.toThrow("recovery code");
+  await expect(manager.join(mistyped)).rejects.toThrow("join code");
+  await expect(manager.join("")).rejects.toThrow("join code");
   expect(secrets.size).toBe(0);
   expect(calls.started).toHaveLength(0);
   expect(getSettings().syncEnabled).toBe(false);

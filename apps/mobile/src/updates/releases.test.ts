@@ -108,7 +108,7 @@ describe("findUpdate", () => {
     expect(requested).toHaveLength(1);
   });
 
-  test("offers a beta install betas and full releases", async () => {
+  test("offers a beta install only betas", async () => {
     const releases = {
       "0.2.0-beta.2": { assets: [asset("0.2.0-beta.2")] },
       "0.2.0": { assets: [asset("0.2.0")] },
@@ -118,7 +118,11 @@ describe("findUpdate", () => {
       "0.2.0-beta.2",
     );
     const full = github(["0.2.0-beta.2", "0.2.0"], releases);
-    expect((await findUpdate("0.2.0-beta.1", full))?.version).toBe("0.2.0");
+    expect((await findUpdate("0.2.0-beta.1", full))?.version).toBe(
+      "0.2.0-beta.2",
+    );
+    const onlyFull = github(["0.2.0"], releases);
+    expect(await findUpdate("0.2.0-beta.1", onlyFull)).toBeNull();
   });
 
   test("finds nothing when this is the newest", async () => {

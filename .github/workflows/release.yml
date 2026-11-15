@@ -4,6 +4,9 @@ name: Release
 # unless that version is already tagged — so bump it in the PR to ship a
 # release. A version with a suffix, such as 0.4.0-beta.1, is published as a
 # pre-release: it is never "latest", so installed apps are not updated to it.
+# A beta is an app of its own, Teneo Beta, that installs beside Teneo and
+# updates from the "beta-channel" release, which holds the newest beta's
+# manifest.json and nothing else.
 on:
   pull_request:
     types: [closed]
@@ -97,6 +100,12 @@ jobs:
           fi
           echo "TINYJS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
 
+      # tinyjs.json is committed as the full release's. A beta version makes
+      # it Teneo Beta's: its own name, id and update address
+      - name: Name the app
+        working-directory: apps/desktop
+        run: bun scripts/set-release-identity.ts
+
       # Shown on the release page and in the in-app update prompt
       - name: Write release notes
         env:
@@ -121,9 +130,12 @@ jobs:
           done
           # Installed apps only update from the manifest: both CPUs must be in it
           jq -e '.mac.arm64 and .mac.x86_64' dist/publish/manifest.json > /dev/null
-          # tinyjs points the zips at update.url's folder (releases/latest);
-          # pin them to this release's tag instead
-          sed -i '' "s#/releases/latest/download/#/releases/download/v$VERSION/#" dist/publish/manifest.json
+          # tinyjs points the zips at update.url's folder (releases/latest, or
+          # the beta channel's); pin them to this release's tag instead
+          sed -i '' \
+            -e "s#/releases/latest/download/#/releases/download/v$VERSION/#" \
+            -e "s#/releases/download/beta-channel/#/releases/download/v$VERSION/#" \
+            dist/publish/manifest.json
 
       - name: Create release
         working-directory: apps/desktop
@@ -141,14 +153,36 @@ jobs:
             "${flags[@]}" \
             "$RUNNER_TEMP"/dmg/*.dmg dist/publish/*.zip dist/publish/manifest.json
 
+      # Teneo Beta looks here for updates. The release only carries the
+      # manifest, which points at the zips of the beta just published
+      - name: Point the beta channel at this beta
+        if: contains(needs.version.outputs.version, '-')
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if ! gh release view beta-channel > /dev/null 2>&1; then
+            gh release create beta-channel \
+              --target "$MERGE_COMMIT" \
+              --title "Teneo Beta update channel" \
+              --notes "Teneo Beta reads its updates from the manifest.json here. To install a beta, download it from its own release." \
+              --prerelease \
+              --latest=false
+          fi
+          gh release upload beta-channel dist/publish/manifest.json --clobber
+
       # A dead link here is an updater failing silently on users' Macs
       - name: Verify update links
         working-directory: apps/desktop
         run: |
           if [[ "$VERSION" == *-* ]]; then
-            # a beta leaves "latest" where it was, on the last full release
+            # a beta leaves "latest" where it was, on the last full release,
+            # and is what the beta channel now offers
             curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
               | jq -e --arg version "$VERSION" '.version != $version' > /dev/null
+            curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/beta-channel/manifest.json" \
+              | jq -e --arg version "$VERSION" '.version == $version' > /dev/null
           else
             curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
               | jq -e --arg version "$VERSION" '.version == $version' > /dev/null

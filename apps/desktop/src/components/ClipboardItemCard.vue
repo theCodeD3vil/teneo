@@ -2,6 +2,7 @@
 import Button from "@teneo/ui/components/button/Button.vue";
 import { useRelativeTimeAgo } from "@teneo/ui/composables/useRelativeTimeAgo";
 import { cn } from "@teneo/ui/lib/utils";
+import { makerIcon } from "@teneo/ui/utils/device-makers";
 import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { maskSecrets, type TextPart } from "@teneo/ui/utils/secrets";
 import { computed, onUnmounted, ref } from "vue";
@@ -65,6 +66,8 @@ function getClipboardThemeClasses() {
 // the preview is a data: URL, or null when that file was moved or deleted since
 // it was copied; until it loads, the kind icon holds its place at the same size.
 const sourceAppBundleId = props.itemDetails.sourceApp?.bundleId;
+// An item copied on a phone is named after the phone, with its maker's logo
+const deviceMakerIcon = makerIcon(props.itemDetails.originMaker);
 const isImage = props.itemDetails.kind === "image";
 const isFiles = props.itemDetails.kind === "files";
 const firstPath = props.itemDetails.paths[0];
@@ -310,6 +313,12 @@ onUnmounted(() => {
               " />
             {{ itemDetails.sourceApp?.name }}
           </span>
+          <span
+            v-else-if="deviceMakerIcon && itemDetails.sourceApp?.name"
+            class="text-foreground/50 flex items-center gap-x-1 text-xs">
+            <component :is="deviceMakerIcon" class="size-3" />
+            {{ itemDetails.sourceApp.name }}
+          </span>
           <template v-if="fileSize">
             <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 text-xs">{{ fileSize }}</span>
@@ -322,7 +331,9 @@ onUnmounted(() => {
           </template> -->
           <template v-if="itemDetails.dateCopied">
             <span class="text-foreground/50">·</span>
-            <span class="text-foreground/50 text-xs">{{ dateCopied }}</span>
+            <span class="text-foreground/50 text-[0.6875rem]">{{
+              dateCopied
+            }}</span>
           </template>
           <template v-if="secretLabels">
             <span class="text-foreground/50">·</span>

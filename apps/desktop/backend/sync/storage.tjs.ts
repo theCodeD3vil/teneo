@@ -13,6 +13,7 @@ import { Database } from "tjs:sqlite";
 
 import {
   countClipboardItemsToDelete,
+  getClipboardItem,
   deleteClipboardItems,
   getSyncIdentity,
   initializeDatabase,
@@ -29,6 +30,8 @@ import { clearClipboardHistory } from "../history-limits";
 import { getSettings, loadSettings, updateSettings } from "../settings";
 import { all, run } from "../sqlite";
 import type { ClipboardItemToSave } from "../types/clipboard";
+import { appIconPng } from "./app-icon-source";
+import { SqliteImageStore } from "./image-store";
 import { pinStampFor, tombstoneLifetime } from "./records";
 import { check, finish, rejects, same, test } from "./runtime-test";
 import { backfillSyncColumns, syncEpoch, syncHead } from "./schema";
@@ -89,6 +92,7 @@ interface Row {
   deletedAt: number | null;
   encrypted: number | null;
   secrets: string | null;
+  imageHash: string | null;
   linkUrl: string | null;
   syncSeq: number | null;
   createdAt: number | null;
@@ -187,6 +191,7 @@ const reset = () => run(database, `DELETE FROM "CLIPBOARD_ITEMS"`);
 const head = () => syncHead(database);
 
 const record = (id: string, text: string | null, extra = {}): ItemRecord => ({
+  image: null,
   id,
   kind: "text",
   text,
@@ -322,22 +327,28 @@ await test("every write path stamps the row with the next syncSeq", async () => 
   same(row.value, "one", "with sync off the text stays, as before");
 });
 
-await test("changesAfter returns text rows in order, with the store's head", async () => {
+await test("changesAfter returns texts and colours in order, with the store's head", async () => {
   reset();
   const a = await saveClipboardItem(textItem("a"), app);
+  // not an image a peer would take: its file is three bytes of nothing
   await saveClipboardItem(await imageItem("i1"), app);
-  await saveClipboardItem(colorItem("#ff0000"), app);
+  const red = await saveClipboardItem(colorItem("#ff0000"), app);
   const b = await saveClipboardItem(textItem("b secret " + secretText), app);
   const c = await saveClipboardItem(textItem("c"), app);
   const { changes, head: storeHead } = await store.changesAfter(0, 100);
   same(
     changes.map((x) => x.record.id),
-    [a.id, b.id, c.id],
-    "only text, oldest first",
+    [a.id, red.id, b.id, c.id],
+    "texts and the colour, oldest first",
+  );
+  same(
+    [changes[1]!.record.kind, changes[1]!.record.text],
+    ["text", "#ff0000"],
+    "a colour travels as the text it was copied as",
   );
   same(
     changes.map((x) => x.hasSecret),
-    [false, true, false],
+    [false, false, true, false],
     "the secret is flagged",
   );
   same(storeHead, head(), "head");
@@ -349,7 +360,7 @@ await test("changesAfter returns text rows in order, with the store's head", asy
   const page = await store.changesAfter(changes[0]!.seq, 1);
   same(
     page.changes.map((x) => x.record.id),
-    [b.id],
+    [red.id],
     "after a cursor, a page at a time",
   );
   same(
@@ -567,7 +578,7 @@ await test("pins and unpins carry rising stamps, and the clock starts past the s
 
 // --- tombstones, clear and trim
 
-await test("with sync on, deleting a text leaves a tombstone; other kinds keep their row", async () => {
+await test("with sync on, deleting a text or a colour leaves a tombstone", async () => {
   reset();
   await updateSettings({ syncEnabled: true }, app);
   const text = await saveClipboardItem(textItem("gone " + secretText), app);
@@ -586,7 +597,8 @@ await test("with sync on, deleting a text leaves a tombstone; other kinds keep t
     tomb.deletedAt !== null && tomb.syncSeq! > seqBefore,
     "deleted and stamped",
   );
-  same(rowOf(color.id).value, "#00ff00", "a color keeps its value");
+  same(rowOf(color.id).value, null, "a colour is erased the same way");
+  check(rowOf(color.id).deletedAt !== null, "and deleted");
   const listed = await listClipboardItems(app, {
     kind: "all",
     search: "",
@@ -603,7 +615,7 @@ await test("with sync on, deleting a text leaves a tombstone; other kinds keep t
   );
 });
 
-await test("Clear history with sync on tombstones texts, removes the rest, keeps pinned items", async () => {
+await test("Clear history with sync on tombstones texts and images, removes the rest, keeps pinned items", async () => {
   reset();
   await updateSettings({ syncEnabled: true }, app);
   const plain = await saveClipboardItem(textItem("plain"), app);
@@ -627,7 +639,7 @@ await test("Clear history with sync on tombstones texts, removes the rest, keeps
     .sort();
   same(
     left,
-    [pinned.id, plain.id, tombstone.id].sort(),
+    [pinned.id, plain.id, tombstone.id, image.id, color.id].sort(),
     "pinned item and fresh tombstones remain",
   );
   same(rowOf(plain.id).value, null, "the text is gone");
@@ -635,15 +647,12 @@ await test("Clear history with sync on tombstones texts, removes the rest, keeps
   check(rowOf(plain.id).syncSeq! > seqBefore, "which peers will read");
   same(rowOf(pinned.id).value, "pinned", "pinned stays whole");
   check(!(await fileExists(imageFile)), "the image file is removed");
+  same(rowOf(image.id).path, null, "the image keeps no file");
+  check(rowOf(image.id).deletedAt !== null, "and is a tombstone too");
   same(
-    all(
-      database,
-      `SELECT 1 FROM "CLIPBOARD_ITEMS" WHERE id IN (?, ?)`,
-      color.id,
-      image.id,
-    ).length,
-    0,
-    "image and color rows",
+    [rowOf(color.id).value, rowOf(color.id).deletedAt !== null],
+    [null, true],
+    "the colour is a tombstone too",
   );
   same(
     new Set(allRows().map((r) => r.syncSeq)).size,
@@ -798,8 +807,8 @@ await test("a Mac's history and a second device end up the same, through the rea
   let pair = await connect();
   same(
     other.store.liveTexts().sort(),
-    ["e2e one", "e2e two"],
-    "existing history arrives, minus the secret and non-text",
+    ["#123456", "e2e one", "e2e two"],
+    "existing history arrives, the colour as its text, minus the secret and the rest",
   );
   const received = other.store.snapshot().find((r) => r.id === two.id);
   same(received?.pinned?.at !== null, true, "with its pin");
@@ -994,6 +1003,251 @@ await test("a change made here tells the history listeners, until they are remov
   const after = heard;
   await saveClipboardItem(textItem("heard-4"), app);
   same(heard, after, "a removed listener heard another change");
+});
+
+await test("an item copied on a device that said who made it is listed with its maker", async () => {
+  reset();
+  await store.transaction(async (tx) => {
+    await tx.put(record("m-1", "copied on a phone"));
+    await tx.updatePeer(peerId, { name: "Pixel 9", platform: "android" });
+  });
+  await saveClipboardItem(textItem("copied here"), app);
+  const list = async () =>
+    (await listClipboardItems(app, { kind: "all", search: "", limit: 50 }))
+      .items;
+  same(
+    (await list()).map((item) => item.originMaker),
+    [null, null],
+    "a device that didn't say has none",
+  );
+  await store.transaction((tx) => tx.updatePeer(peerId, { maker: "google" }));
+  same((await store.getPeer(peerId))?.maker, "google", "the maker is kept");
+  const listed = await list();
+  same(
+    listed.find((item) => item.id === "m-1")?.originMaker,
+    "google",
+    "the phone's item has its maker",
+  );
+  same(
+    listed.find((item) => item.id !== "m-1")?.originMaker,
+    null,
+    "this Mac's own item has none",
+  );
+  same(
+    (await getClipboardItem("m-1", app))?.originMaker,
+    "google",
+    "and so has the item read whole",
+  );
+});
+
+await test("a phone that asks for an app's icon by name gets the one saved for it", async () => {
+  reset();
+  await saveClipboardItem(
+    textItem("from safari", { name: "Safari", bundleId: "com.apple.Safari" }),
+    app,
+  );
+  // an item that arrived from another Mac has a name and no app here
+  await saveClipboardItem(
+    textItem("from elsewhere", { name: "Elsewhere", bundleId: null }),
+    app,
+  );
+  // saved the first time the app was seen (app-icons.ts)
+  await tjs.makeDir(`${dataFolder}/icons`, { recursive: true });
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  await tjs.writeFile(`${dataFolder}/icons/com.apple.Safari.png`, png);
+  same([...((await appIconPng("Safari", app)) ?? [])], [...png], "its icon");
+  same(await appIconPng("Elsewhere", app), null, "no app here by that name");
+  same(await appIconPng("Never Copied", app), null, "an unknown name");
+});
+
+await test("a colour syncs both ways, and is a colour item on the Mac", async () => {
+  reset();
+  await updateSettings({ syncEnabled: true }, app);
+  const network = new TestNetwork();
+  const other = network.add("b");
+  const errors: unknown[] = [];
+  const engine = new SyncEngine({
+    deviceId,
+    name: "Test Mac",
+    platform: "mac",
+    vaultKey: network.vaultKey,
+    store: new SqliteSyncStore(app),
+    clock,
+    scheduler: network.scheduler,
+    onError: (error) => errors.push(error),
+  });
+  const pair = memoryChannelPair();
+  const settle = () =>
+    until(
+      () => pair.pending() === 0 && engine.isIdle() && other.engine.isIdle(),
+      "the engines to go idle",
+    );
+  const list = async () =>
+    (await listClipboardItems(app, { kind: "all", search: "", limit: 50 }))
+      .items;
+
+  const macColor = await saveClipboardItem(colorItem("#aabbcc"), app);
+  void engine.attach(pair.initiator);
+  void other.engine.attach(pair.responder);
+  await until(() => engine.peers().length === 1, "the devices to meet");
+  await settle();
+  same(other.store.liveTexts(), ["#aabbcc"], "the Mac's colour arrives");
+
+  // a colour copied on the phone is a text there, and a colour item here
+  const phoneColor = other.copy("rgb(1, 2, 3)", { sourceApp: "Pixel 9" });
+  other.copy("just words");
+  await settle();
+  same(rowOf(phoneColor).kind, "color", "kept as a colour");
+  const listed = (await list()).find((item) => item.id === phoneColor);
+  same(
+    [listed?.kind, listed?.color, listed?.text],
+    ["color", "rgb(1, 2, 3)", null],
+    "and listed as one",
+  );
+  same(
+    (await list()).find((item) => item.text === "just words")?.kind,
+    "text",
+    "other words stay a text",
+  );
+
+  // a delete on either side reaches the other
+  other.remove(macColor.id);
+  await softDeleteClipboardItem(phoneColor, app);
+  engine.localChanged();
+  await settle();
+  same(
+    [rowOf(macColor.id).value, rowOf(macColor.id).deletedAt !== null],
+    [null, true],
+    "the Mac's colour is deleted here",
+  );
+  same(other.store.liveTexts(), ["just words"], "and the phone's there");
+  same(errors.map(String), [], "nothing went wrong on the way");
+  engine.stop();
+  network.stop();
+});
+
+await test("images sync both ways through the real store, files and all", async () => {
+  reset();
+  await updateSettings({ syncEnabled: true }, app);
+  const network = new TestNetwork();
+  const other = network.add("b");
+  const errors: unknown[] = [];
+  const engine = new SyncEngine({
+    deviceId,
+    name: "Test Mac",
+    platform: "mac",
+    vaultKey: network.vaultKey,
+    store: new SqliteSyncStore(app),
+    images: new SqliteImageStore(app),
+    clock,
+    scheduler: network.scheduler,
+    onError: (error) => errors.push(error),
+  });
+  const settle = () =>
+    until(
+      () => pair.pending() === 0 && engine.isIdle() && other.engine.isIdle(),
+      "the engines to go idle",
+    );
+  // a png as far as its first bytes go, and long enough for three pieces
+  const png = (seed: number, length: number) =>
+    Uint8Array.from({ length }, (_, index) =>
+      index < 4 ? [0x89, 0x50, 0x4e, 0x47][index]! : (index * 7 + seed) % 251,
+    );
+  const list = async () =>
+    (await listClipboardItems(app, { kind: "all", search: "", limit: 50 }))
+      .items;
+
+  // an image copied on the Mac before the devices meet
+  await tjs.makeDir(`${dataFolder}/images`, { recursive: true });
+  const macBytes = png(1, 500_000);
+  await tjs.writeFile(`${dataFolder}/images/mac-shot.png`, macBytes);
+  const macImage = await saveClipboardItem(
+    {
+      ...textItem(""),
+      kind: "image",
+      text: null,
+      image: `${dataFolder}/images/mac-shot.png`,
+      imageSize: { width: 800, height: 600 },
+    },
+    app,
+  );
+  const pair = memoryChannelPair();
+  void engine.attach(pair.initiator);
+  void other.engine.attach(pair.responder);
+  await until(() => engine.peers().length === 1, "the devices to meet");
+  await settle();
+  const received = other.store.snapshot().find((r) => r.id === macImage.id);
+  same(received?.kind, "image", "the image arrives as an image");
+  same(
+    [received?.image?.bytes, received?.image?.width, received?.image?.type],
+    [500_000, 800, "image/png"],
+    "with what the Mac knows of it",
+  );
+  same(
+    [...(other.store.blobs.get(received!.image!.hash) ?? [])].length,
+    500_000,
+    "and every byte",
+  );
+  check(
+    other.store.blobs
+      .get(received!.image!.hash)!
+      .every((byte, index) => byte === macBytes[index]),
+    "the bytes are the file's",
+  );
+  check(rowOf(macImage.id).imageHash !== null, "the Mac kept its measure");
+
+  // an image copied on the other device
+  const phoneBytes = png(2, 300_000);
+  const phoneId = await other.copyImage(phoneBytes, { sourceApp: "Pixel 9" });
+  await settle();
+  const row = rowOf(phoneId);
+  check(row.path !== null, "the Mac has a file for it");
+  const saved = await tjs.readFile(`${dataFolder}/${row.path}`);
+  check(
+    saved.length === phoneBytes.length &&
+      saved.every((byte, index) => byte === phoneBytes[index]),
+    "holding the bytes that were sent",
+  );
+  const listed = (await list()).find((item) => item.id === phoneId);
+  same(
+    [listed?.kind, listed?.imageSize, listed?.sourceApp?.name],
+    ["image", { width: 4, height: 3 }, "Pixel 9"],
+    "and it is listed as an image",
+  );
+
+  // bytes that are not an image are never kept, and their item never shown
+  const badId = await other.copyImage(
+    Uint8Array.from({ length: 2000 }, (_, index) => index % 200),
+  );
+  await settle();
+  same(rowOf(badId).path, null, "no file for bytes that are not a png");
+  check(!(await list()).some((item) => item.id === badId), "and no item");
+
+  // a delete on either side takes the file with it
+  await softDeleteClipboardItem(macImage.id, app);
+  engine.localChanged(); // what the app's history listener does
+  await settle();
+  check(
+    !(await fileExists(`${dataFolder}/images/mac-shot.png`)),
+    "the Mac's file goes with its image",
+  );
+  same(
+    other.store.snapshot().find((r) => r.id === macImage.id)?.deletedAt !==
+      null,
+    true,
+    "and the other device hears of it",
+  );
+  other.remove(phoneId);
+  await settle();
+  check(rowOf(phoneId).deletedAt !== null, "a delete made there arrives");
+  same(rowOf(phoneId).path, null, "the row keeps no file");
+  check(
+    !(await fileExists(`${dataFolder}/${row.path}`)),
+    "and the file is removed",
+  );
+  same(errors.map(String), [], "nothing went wrong on the way");
+  engine.stop();
+  network.stop();
 });
 
 await tjs.remove(folder).catch(() => {});

@@ -98,13 +98,16 @@ jobs:
           rm "$RUNNER_TEMP/release.p12"
 
       # An unsigned or wrongly versioned APK is one nobody can install or
-      # update to
+      # update to. A beta is its own app, Teneo Beta: under the full release's
+      # id it would replace Teneo on the phones that have both
       - name: Verify the APK
         run: |
           build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           "$build_tools/apksigner" verify --verbose "$RUNNER_TEMP/Teneo-$VERSION.apk"
+          package=com.michael.teneo
+          if [[ "$VERSION" == *-beta.* ]]; then package=com.michael.teneo.beta; fi
           "$build_tools/aapt2" dump badging "$RUNNER_TEMP/Teneo-$VERSION.apk" \
-            | grep -q "versionName='$VERSION'"
+            | grep -q "^package: name='$package' .*versionName='$VERSION'"
 
       - name: Write release notes
         env:

@@ -34,6 +34,7 @@ test("a text row becomes the record of the item", () => {
     id: "0f3a-1",
     kind: "text",
     text: "hello",
+    image: null,
     createdAt: 1000,
     origin: other,
     dateCopied: 2000,
@@ -113,11 +114,89 @@ test("a record sets its row, keeping the bundle id while the app stays", () => {
     pinnedAt: null,
     pinnedStamp: null,
     deletedAt: null,
+    imageSize: null,
+    imageHash: null,
+    imageBytes: null,
+    imageType: null,
   });
   expect(
     recordToColumns({ ...record, sourceApp: "Safari" }, row).sourceAppBundleId,
   ).toBeNull();
   expect(recordToColumns(record, null).sourceAppBundleId).toBeNull();
+});
+
+// --- images
+
+const imageRow: SyncRow = {
+  ...row,
+  id: "0f3a-2",
+  kind: "image",
+  value: null,
+  path: "images/shot.png",
+  imageSize: JSON.stringify({ width: 640.4, height: 480 }),
+  imageHash: "ab".repeat(32),
+  imageBytes: 1234,
+  imageType: "image/png",
+};
+const picture = {
+  hash: "ab".repeat(32),
+  bytes: 1234,
+  width: 640,
+  height: 480,
+  type: "image/png",
+};
+
+test("an image row becomes an image record once its file has been measured", () => {
+  expect(rowToRecord(imageRow, device)).toMatchObject({
+    id: "0f3a-2",
+    kind: "image",
+    text: null,
+    image: picture,
+  });
+  // not measured yet, without a size, or of a kind that isn't synced
+  expect(rowToRecord({ ...imageRow, imageHash: null }, device)).toBeNull();
+  expect(rowToRecord({ ...imageRow, imageSize: null }, device)).toBeNull();
+  expect(
+    rowToRecord({ ...imageRow, imageType: "image/heic" }, device),
+  ).toBeNull();
+  // a file list is never a record
+  expect(rowToRecord({ ...imageRow, kind: "files" }, device)).toBeNull();
+});
+
+test("a colour row travels as the text it was copied as", () => {
+  const color = { ...row, kind: "color", value: "#1122AA" };
+  expect(rowToRecord(color, device)).toMatchObject({
+    kind: "text",
+    text: "#1122AA",
+    image: null,
+  });
+  expect(
+    rowToRecord({ ...color, value: null, deletedAt: 5000 }, device),
+  ).toMatchObject({ kind: "text", text: null, deletedAt: 5000 });
+});
+
+test("a deleted image row is a tombstone, measured or not", () => {
+  const deleted = { ...imageRow, deletedAt: 5000, path: null, imageHash: null };
+  expect(rowToRecord(deleted, device)).toMatchObject({
+    kind: "image",
+    text: null,
+    image: null,
+    deletedAt: 5000,
+  });
+});
+
+test("an image record sets what its row knows of the picture", () => {
+  const record = rowToRecord(imageRow, device)!;
+  expect(recordToColumns(record, null)).toMatchObject({
+    value: null,
+    imageSize: JSON.stringify({ width: 640, height: 480 }),
+    imageHash: picture.hash,
+    imageBytes: 1234,
+    imageType: "image/png",
+  });
+  expect(
+    recordToColumns({ ...record, image: null, deletedAt: 9 }, imageRow),
+  ).toMatchObject({ imageHash: null, deletedAt: 9 });
 });
 
 test("a tombstone clears the text and the pin time, and keeps the stamp", () => {

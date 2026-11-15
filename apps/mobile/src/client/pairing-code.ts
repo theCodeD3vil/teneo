@@ -7,7 +7,7 @@ export interface PairingCode {
 }
 
 export const invalidCodeMessage =
-  "That code doesn't look right. Scan the QR code on your Mac again, or check the recovery code and try again.";
+  "That code doesn't look right. Scan the QR code on your Mac again, or check the join code and try again.";
 
 /** What was scanned or typed, read with the sync core's own parsers: the QR
  *  code's `teneo://pair?...` link, or a recovery code. Null when it is

@@ -11,6 +11,10 @@ import { Sync } from "./client/native-sync-plugin";
 import { initNavigation } from "./composables/useNavigation";
 import { isSetupDone } from "./composables/useSetup";
 import { provideUpdater } from "./composables/useUpdates";
+import { LinkFetch, nativeLinkFetcher } from "./previews/link-fetch-plugin";
+import { LinkPreviews } from "./previews/link-previews";
+import { indexedDbPreviewCache } from "./previews/preview-cache";
+import { drawThumbnail } from "./previews/thumbnail";
 import { Updates } from "./updates/native-update-plugin";
 import { Updater } from "./updates/updater";
 
@@ -42,7 +46,12 @@ function nativeClient(): NativeClient {
         console.info(`debug pairing: ${result.ok ? "paired" : result.error}`);
       }),
   });
-  const client = new NativeClient(History, { sync });
+  const linkPreviews = new LinkPreviews({
+    fetcher: nativeLinkFetcher(LinkFetch),
+    cache: indexedDbPreviewCache(),
+    thumbnail: drawThumbnail,
+  });
+  const client = new NativeClient(History, { sync, linkPreviews });
   return client;
 }
 

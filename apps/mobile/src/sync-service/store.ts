@@ -1,4 +1,4 @@
-import { type SyncStore } from "@teneo/sync";
+import { type ImageStore, type SyncStore } from "@teneo/sync";
 
 import { HistoryBridge, type NativeHistory } from "./history-bridge";
 import { NativeSyncStore } from "./native-store";
@@ -10,8 +10,14 @@ import { NativeSyncStore } from "./native-store";
 export function openSyncStore(native: NativeHistory): {
   deviceId: string;
   store: SyncStore;
+  /** The bytes of its images: files native code keeps */
+  images: ImageStore;
 } {
   const history = new HistoryBridge(native);
   const deviceId = history.deviceId();
-  return { deviceId, store: new NativeSyncStore(history, deviceId) };
+  return {
+    deviceId,
+    store: new NativeSyncStore(history, deviceId),
+    images: history.images,
+  };
 }

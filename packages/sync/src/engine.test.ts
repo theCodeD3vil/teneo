@@ -455,3 +455,323 @@ for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
     net.stop();
   });
 }
+
+// --- what came after the first release: a device's maker, and app icons
+
+const png = (...body: number[]) =>
+  new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...body]);
+
+/** A Mac's icons by app name, and what was asked of it */
+function iconSource(icons: Record<string, Uint8Array>) {
+  const asked: string[] = [];
+  return {
+    asked,
+    icon: async (name: string) => {
+      asked.push(name);
+      return icons[name] ?? null;
+    },
+  };
+}
+
+/** A phone's saved icons */
+function iconSink(saved = new Map<string, Uint8Array>()) {
+  return {
+    saved,
+    missing: async (names: string[]) =>
+      names.filter((name) => !saved.has(name)),
+    save: async (name: string, icon: Uint8Array) => {
+      saved.set(name, icon);
+    },
+  };
+}
+
+test("a device that says who made it is known by it, and one that doesn't is not", async () => {
+  const net = new TestNetwork();
+  const mac = net.add("a");
+  const phone = net.add("b", { maker: "google" });
+  net.connect(mac, phone);
+  await net.settle();
+  expect(mac.engine.peers()).toMatchObject([{ maker: "google" }]);
+  expect(phone.engine.peers()).toMatchObject([{ maker: "" }]);
+  expect((await mac.store.getPeer(phone.id))?.maker).toBe("google");
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a phone gets the icon of each app its items were copied from, once", async () => {
+  const net = new TestNetwork();
+  const source = iconSource({ Safari: png(1), Notes: png(2) });
+  const sink = iconSink();
+  const mac = net.add("a", { iconSource: source });
+  const phone = net.add("b", { iconSink: sink });
+  mac.copy("one", { sourceApp: "Safari" });
+  mac.copy("two", { sourceApp: "Safari" });
+  mac.copy("three", { sourceApp: "Unknown App" });
+  net.connect(mac, phone);
+  await net.settle();
+  expect([...sink.saved.keys()]).toEqual(["Safari"]);
+  expect(sink.saved.get("Safari")).toEqual(png(1));
+  expect(phone.iconsChanged).toBe(1);
+
+  // an app it has, or has asked this Mac for, is not asked for again
+  mac.copy("four", { sourceApp: "Safari" });
+  mac.copy("five", { sourceApp: "Unknown App" });
+  mac.copy("six", { sourceApp: "Notes" });
+  await net.settle();
+  expect(source.asked.sort()).toEqual(["Notes", "Safari", "Unknown App"]);
+  expect([...sink.saved.keys()].sort()).toEqual(["Notes", "Safari"]);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("icons are asked for in batches, however many apps there are", async () => {
+  const net = new TestNetwork();
+  const names = Array.from({ length: 70 }, (_, index) => `App ${index}`);
+  const source = iconSource(
+    Object.fromEntries(names.map((name, index) => [name, png(index)])),
+  );
+  const sink = iconSink();
+  const mac = net.add("a", { iconSource: source });
+  const phone = net.add("b", { iconSink: sink });
+  for (const name of names) mac.copy(`from ${name}`, { sourceApp: name });
+  net.connect(mac, phone);
+  await net.settle();
+  expect(sink.saved.size).toBe(70);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a device that offers no icons is never asked, and sync goes on", async () => {
+  const net = new TestNetwork();
+  const sink = iconSink();
+  // an older Teneo, or another phone: it would close over a frame it doesn't know
+  const old = net.add("a");
+  const phone = net.add("b", { iconSink: sink });
+  old.copy("one", { sourceApp: "Safari" });
+  net.connect(old, phone);
+  await net.settle();
+  expect(live(phone)).toEqual(["one"]);
+  expect(sink.saved.size).toBe(0);
+  expect(net.isConnected(old, phone)).toBe(true);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("an icon that isn't a small png is not saved, and one that fails to save doesn't end sync", async () => {
+  const net = new TestNetwork();
+  const source = iconSource({
+    Fake: new TextEncoder().encode("<svg onload=alert(1)>"),
+    Huge: png(...Array.from({ length: 70 * 1024 }, () => 0)),
+    Good: png(1),
+    Unsavable: png(2),
+  });
+  const sink = iconSink();
+  const save = sink.save;
+  sink.save = async (name, icon) => {
+    if (name === "Unsavable") throw new Error("disk full");
+    await save(name, icon);
+  };
+  const mac = net.add("a", { iconSource: source });
+  const phone = net.add("b", { iconSink: sink });
+  for (const name of ["Fake", "Huge", "Good", "Unsavable"]) {
+    mac.copy(`from ${name}`, { sourceApp: name });
+  }
+  net.connect(mac, phone);
+  await net.settle();
+  expect([...sink.saved.keys()]).toEqual(["Good"]);
+  expect(live(phone)).toHaveLength(4);
+  expect(net.errors.map(String)).toEqual(["Error: disk full"]);
+  net.stop();
+});
+
+// --- images: a record names the picture, and its bytes follow in pieces
+
+/** Bytes that are different for each seed, and not a multiple of a piece */
+const pictureBytes = (seed: number, length: number) =>
+  Uint8Array.from({ length }, (_, index) => (index * 31 + seed) % 251);
+const imagesOf = (device: TestDevice) =>
+  device.store
+    .snapshot()
+    .filter((record) => record.kind === "image" && record.image !== null);
+
+test("an image copied on one device arrives on the other, bytes and all", async () => {
+  const net = new TestNetwork();
+  const [mac, phone] = [net.add("a"), net.add("b")];
+  const bytes = pictureBytes(1, 500_000); // three pieces
+  const id = await mac.copyImage(bytes, { sourceApp: "Preview" });
+  net.connect(mac, phone);
+  await net.settle();
+  const [received] = imagesOf(phone);
+  expect(received).toMatchObject({ id, kind: "image", sourceApp: "Preview" });
+  expect(phone.store.blobs.get(received!.image!.hash)).toEqual(bytes);
+  expect(phone.store.piecesWritten.map((piece) => piece.offset)).toEqual([
+    0,
+    192 * 1024,
+    384 * 1024,
+  ]);
+  expect(await phone.store.images.missing()).toEqual([]);
+  expect(phone.itemsChanged).toBeGreaterThan(1); // the record, then the picture
+
+  // and the other way, while connected
+  const back = pictureBytes(2, 1000);
+  await phone.copyImage(back, { type: "image/jpeg" });
+  await net.settle();
+  expect(imagesOf(mac)).toHaveLength(2);
+  expect([...mac.store.blobs.values()]).toContainEqual(back);
+  same(mac, phone);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("several images arrive one after another, and text is not held up", async () => {
+  const net = new TestNetwork();
+  const [mac, phone] = [net.add("a"), net.add("b")];
+  for (let seed = 0; seed < 5; seed++) {
+    await mac.copyImage(pictureBytes(seed, 300_000));
+  }
+  mac.copy("some words");
+  net.connect(mac, phone);
+  await net.settle();
+  expect(phone.store.blobs.size).toBe(5);
+  expect(live(phone)).toEqual(["some words"]);
+  // one image at a time: its pieces are never mixed with another's
+  const order = phone.store.piecesWritten.map((piece) => piece.hash);
+  expect(order.filter((hash, index) => hash !== order[index - 1])).toHaveLength(
+    5,
+  );
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("an image passes through a device in the middle, and one that never got its bytes says so", async () => {
+  const net = new TestNetwork();
+  const [mac, phone, other] = [net.add("a"), net.add("b"), net.add("c")];
+  const bytes = pictureBytes(3, 250_000);
+  await mac.copyImage(bytes);
+  net.connect(mac, phone);
+  await net.settle();
+  net.disconnect(mac, phone);
+
+  // the phone holds the picture now, and hands it on
+  net.connect(phone, other);
+  await net.settle();
+  expect([...other.store.blobs.values()]).toEqual([bytes]);
+
+  // a device that has the record and not the bytes answers that it has none,
+  // and the asker gets them from whoever has, on a later connection
+  const [late, relay] = [net.add("d"), net.add("e")];
+  relay.store.blobs.clear();
+  net.connect(other, relay);
+  await net.settle();
+  net.disconnect(other, relay);
+  const hash = imagesOf(relay)[0]!.image!.hash;
+  relay.store.blobs.delete(hash);
+  net.connect(relay, late);
+  await net.settle();
+  expect(imagesOf(late)).toHaveLength(1);
+  expect(await late.store.images.missing()).toEqual([hash]);
+  net.connect(mac, late);
+  await net.settle();
+  expect(late.store.blobs.get(hash)).toEqual(bytes);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("an image whose connection dropped midway is asked for again from the start", async () => {
+  const net = new TestNetwork();
+  const [mac, phone] = [net.add("a"), net.add("b")];
+  const bytes = pictureBytes(4, 900_000);
+  await mac.copyImage(bytes);
+  // the line is cut as the first piece lands
+  const write = phone.store.images.write;
+  let cut = false;
+  phone.store.images.write = async (...piece) => {
+    const result = await write(...piece);
+    if (!cut) {
+      cut = true;
+      pair.initiator.close("test");
+    }
+    return result;
+  };
+  const pair = net.connect(mac, phone);
+  await net.settle();
+  expect(phone.store.blobs.size).toBe(0);
+  expect((await phone.store.images.missing()).length).toBe(1);
+
+  net.connect(mac, phone);
+  await net.settle();
+  expect([...phone.store.blobs.values()]).toEqual([bytes]);
+  net.stop();
+});
+
+test("bytes that are not what the hash says are dropped", async () => {
+  const net = new TestNetwork();
+  const [mac, phone] = [net.add("a"), net.add("b")];
+  const id = await mac.copyImage(pictureBytes(5, 1000));
+  // the Mac's file changed under it, or it lies
+  const hash = mac.store.snapshot().find((record) => record.id === id)!
+    .image!.hash;
+  mac.store.blobs.set(hash, pictureBytes(6, 1000));
+  net.connect(mac, phone);
+  await net.settle();
+  expect(phone.store.blobs.size).toBe(0);
+  expect(await phone.store.images.missing()).toEqual([hash]);
+  expect(net.isConnected(mac, phone)).toBe(true);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a deleted image goes on every device, and the same picture copied twice is one item", async () => {
+  const net = new TestNetwork();
+  const [mac, phone] = [net.add("a"), net.add("b")];
+  const bytes = pictureBytes(7, 2000);
+  const id = await mac.copyImage(bytes);
+  net.connect(mac, phone);
+  await net.settle();
+  phone.remove(id);
+  await net.settle();
+  expect(imagesOf(mac)).toEqual([]);
+  same(mac, phone);
+
+  net.disconnect(mac, phone);
+  await mac.copyImage(bytes);
+  await phone.copyImage(bytes);
+  net.connect(mac, phone);
+  await net.settle();
+  expect(imagesOf(mac)).toHaveLength(1);
+  same(mac, phone);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a device that keeps no images is sent none, and its texts still sync", async () => {
+  const net = new TestNetwork();
+  const mac = net.add("a");
+  // an older Teneo: it would refuse a record of a kind it doesn't know, and
+  // close over a frame it doesn't know
+  const old = net.add("b", { images: false });
+  await mac.copyImage(pictureBytes(8, 1000));
+  mac.copy("words");
+  net.connect(mac, old);
+  await net.settle();
+  expect(old.store.snapshot().map((record) => record.kind)).toEqual(["text"]);
+  expect(net.isConnected(mac, old)).toBe(true);
+  // the cursor is past the image all the same
+  expect((await old.store.getPeer(mac.id))?.receivedSeq).toBe(mac.store.head);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("an image too large, or of a kind not every device shows, stays put", async () => {
+  const net = new TestNetwork();
+  const [mac, phone] = [net.add("a"), net.add("b")];
+  await mac.copyImage(pictureBytes(9, 1000), { type: "image/heic" });
+  await mac.copyImage(pictureBytes(10, 1000));
+  net.connect(mac, phone);
+  await net.settle();
+  expect(imagesOf(phone).map((record) => record.image!.type)).toEqual([
+    "image/png",
+  ]);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});

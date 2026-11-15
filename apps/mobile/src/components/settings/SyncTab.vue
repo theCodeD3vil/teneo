@@ -112,16 +112,14 @@ const isTurnOffWarningOpen = ref(false);
         <SettingsField>
           <template #label>
             {{
-              canScanQrCode
-                ? "Type the recovery code"
-                : "Join your other devices"
+              canScanQrCode ? "Type the join code" : "Join your other devices"
             }}
           </template>
           <template #description>
             {{
               canScanQrCode
                 ? "If the camera can't be used"
-                : "Use the recovery code from your Mac"
+                : "Use the join code from your Mac"
             }}
           </template>
           <Button
@@ -129,13 +127,13 @@ const isTurnOffWarningOpen = ref(false);
             size="sm"
             :disabled="isBusy"
             @click="isJoining = !isJoining">
-            {{ isJoining ? "Cancel" : "Join…" }}
+            {{ isJoining ? "Cancel" : "Join" }}
           </Button>
           <template v-if="isJoining" #footer>
             <form class="flex gap-2" @submit.prevent="joinWithCode">
               <Input
                 :model-value="recoveryCode"
-                placeholder="Recovery code"
+                placeholder="Join code"
                 autocomplete="off"
                 autocapitalize="characters"
                 spellcheck="false"
@@ -148,7 +146,7 @@ const isTurnOffWarningOpen = ref(false);
                 class="h-9"
                 :disabled="isBusy || !recoveryCode.trim()">
                 <Spinner v-if="isBusy" />
-                Join
+                Connect
               </Button>
             </form>
           </template>
@@ -156,8 +154,8 @@ const isTurnOffWarningOpen = ref(false);
       </SettingsSection>
       <p class="text-foreground/60 -mt-3 px-1 text-xs text-balance">
         On your Mac, open Teneo's Settings › Sync and choose Add a device to see
-        the {{ canScanQrCode ? "QR code and recovery code" : "code" }}. Your
-        history syncs over Wi-Fi, encrypted, with no account or server.
+        the {{ canScanQrCode ? "QR code and join code" : "code" }}. Your history
+        syncs over Wi-Fi, encrypted, with no account or server.
       </p>
     </template>
 
@@ -178,15 +176,14 @@ const isTurnOffWarningOpen = ref(false);
             variant="outline"
             size="sm"
             @click="isTurnOffWarningOpen = true">
-            Turn off…
+            Turn off
           </Button>
         </SettingsField>
 
         <SettingsField>
           <template #label>Receive in the background</template>
           <template #description>
-            Get new items while Teneo is closed. When off, Teneo syncs only
-            while it's open
+            Get new items while the app is closed
           </template>
           <Switch v-model="backgroundReceive" />
         </SettingsField>
@@ -217,10 +214,7 @@ const isTurnOffWarningOpen = ref(false);
         <template #section-title>Privacy</template>
 
         <SettingsField>
-          <template #label>Sync items with secrets</template>
-          <template #description>
-            Secrets like API keys stay on this phone when off
-          </template>
+          <template #label>Sync sensitive items</template>
           <Switch v-model="syncSecrets" />
         </SettingsField>
       </SettingsSection>
@@ -236,14 +230,14 @@ const isTurnOffWarningOpen = ref(false);
     <ConfirmSheet
       v-model:open="isTurnOffWarningOpen"
       title="Turn off sync?"
-      description="This phone stops syncing but keeps your history. To sync again, scan the QR code or use the recovery code from another device."
+      description="This phone stops syncing but keeps your history. To sync again, scan the QR code or use the join code from another device."
       confirm-label="Turn off sync"
       @confirm="turnOff()" />
 
     <ConfirmSheet
       v-model:open="isSecretsWarningOpen"
-      title="Sync items with secrets?"
-      description="The secrets in your history, and new ones, will be sent to your other devices, encrypted on the way. Turning this off stops new ones but can't take back what a device already has."
+      title="Sync sensitive items?"
+      description="The secrets in your history, and new ones, will be sent to your other devices, encrypted. What's already sent can't be taken back."
       confirm-label="Sync secrets"
       @confirm="updateSettings({ syncSecrets: true })" />
   </div>
