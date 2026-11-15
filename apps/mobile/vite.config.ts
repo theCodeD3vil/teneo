@@ -17,4 +17,8 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },
+  build: {
+    // sync.html is the page the sync service runs with no window
+    rolldownOptions: { input: ["index.html", "sync.html"] },
+  },
 });
