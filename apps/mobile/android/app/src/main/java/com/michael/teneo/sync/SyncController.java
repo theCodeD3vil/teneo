@@ -74,6 +74,37 @@ public final class SyncController {
         preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
         keys = new VaultKeyStore(new PreferenceStorage(preferences), new KeystoreCipher());
         devices = new KnownDevices(readDevices());
+        migrate();
+    }
+
+    private void migrate() {
+        SyncMigrations.Flags flags = new SyncMigrations.Flags() {
+            @Override
+            public boolean isDone(String name) {
+                return preferences.getBoolean(name, false);
+            }
+
+            @Override
+            public void markDone(String name) {
+                preferences.edit().putBoolean(name, true).commit();
+            }
+        };
+        SyncMigrations.SavedSettings settings = new SyncMigrations.SavedSettings() {
+            @Override
+            public Map<String, Object> read() {
+                return HistoryStore.get(context).settings();
+            }
+
+            @Override
+            public void write(Map<String, Object> changes) {
+                HistoryStore.get(context).updateSettings(changes);
+            }
+        };
+        try {
+            SyncMigrations.run(flags, settings);
+        } catch (RuntimeException failed) {
+            Log.w(TAG, "could not update the settings an earlier version saved; trying again next start", failed);
+        }
     }
 
     // --- what the app asks
