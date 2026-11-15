@@ -2,10 +2,12 @@
 // the sockets and Bonjour (SyncRuntime.java). The page can't open a plain
 // WebSocket to a device on the network (it is an https page), and can't listen
 // at all, so native code does, and the page sees each connection as a Channel.
+// The phone's history database is native code's too: see history-bridge.ts.
+import type { NativeHistory } from "./history-bridge";
 
 /** What native code gives the page: the object `TeneoNative`. Every call is
  *  quick and never waits on the network. */
-export interface NativeSync {
+export interface NativeSync extends NativeHistory {
   log(line: string): void;
   /** The page is loaded: native code answers by calling `teneoSyncPage.start` */
   pageLoaded(): void;
@@ -57,6 +59,9 @@ export interface SyncPage {
    *  dial that never opened it comes alone. */
   closed(connection: number, reason: string): void;
   discovered(deviceId: string, addresses: string[], port: number): void;
+  /** The phone's history changed (a copy, a pin, a delete, made in the app or
+   *  by the share sheet): send it on */
+  localChanged(): void;
   /** Only in a debug build */
   debug: { copy(text: string): void };
 }
