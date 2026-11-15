@@ -196,8 +196,7 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
           {{ imageName }}
         </p>
 
-        <!-- one line: where it came from, size and secrets, then the time at
-             the far right, where it is on every card -->
+        <!-- one line: where it came from, size, date, secrets -->
         <div
           class="text-foreground/50 flex items-center gap-x-2 text-xs whitespace-nowrap">
           <!-- beside the name, not around it: the name truncates on its own -->
@@ -217,13 +216,14 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
             <span v-if="itemDetails.sourceApp">·</span>
             <span>{{ fileSize }}</span>
           </template>
-          <template v-if="secretLabels">
+          <template v-if="itemDetails.dateCopied">
             <span v-if="itemDetails.sourceApp || fileSize">·</span>
-            <span class="min-w-0 truncate">{{ secretLabels }}</span>
+            <span>{{ dateCopied }}</span>
           </template>
-          <span v-if="itemDetails.dateCopied" class="ml-auto shrink-0">
-            {{ dateCopied }}
-          </span>
+          <template v-if="secretLabels">
+            <span>·</span>
+            <span class="min-w-0 flex-1 truncate">{{ secretLabels }}</span>
+          </template>
         </div>
       </div>
       <!-- tapping the card copies; this opens the preview -->

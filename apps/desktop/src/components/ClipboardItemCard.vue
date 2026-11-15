@@ -68,13 +68,6 @@ function getClipboardThemeClasses() {
 const sourceAppBundleId = props.itemDetails.sourceApp?.bundleId;
 // An item copied on a phone is named after the phone, with its maker's logo
 const deviceMakerIcon = makerIcon(props.itemDetails.originMaker);
-// whether the line below starts with where the item came from: what follows
-// it is set off by a dot only then
-const showsSource = computed(
-  () =>
-    (Boolean(sourceAppBundleId) && props.sourceAppIconUrl !== null) ||
-    Boolean(deviceMakerIcon && props.itemDetails.sourceApp?.name),
-);
 const isImage = props.itemDetails.kind === "image";
 const isFiles = props.itemDetails.kind === "files";
 const firstPath = props.itemDetails.paths[0];
@@ -303,9 +296,8 @@ onUnmounted(() => {
           }}
         </p>
 
-        <!-- one line: the secrets and the paths shrink and truncate, the rest
-             (app, size, time) keep their words together instead of wrapping;
-             the time is at the far right, where it is on every card -->
+        <!-- one line: the link host and the paths shrink and truncate, the rest
+             (app, size, date) keep their words together instead of wrapping -->
         <div class="flex items-center gap-x-2 whitespace-nowrap">
           <!-- shown while the icon loads, its place kept, so the line doesn't shift -->
           <span
@@ -328,7 +320,7 @@ onUnmounted(() => {
             {{ itemDetails.sourceApp.name }}
           </span>
           <template v-if="fileSize">
-            <span v-if="showsSource" class="text-foreground/50">·</span>
+            <span class="text-foreground/50">·</span>
             <span class="text-foreground/50 text-xs">{{ fileSize }}</span>
           </template>
           <!-- <template v-if="link">
@@ -337,29 +329,22 @@ onUnmounted(() => {
               link.host
             }}</span>
           </template> -->
+          <template v-if="itemDetails.dateCopied">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 text-xs">{{ dateCopied }}</span>
+          </template>
           <template v-if="secretLabels">
-            <span v-if="showsSource || fileSize" class="text-foreground/50"
-              >·</span
-            >
-            <span class="text-foreground/50 min-w-0 truncate text-xs">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 min-w-0 flex-1 truncate text-xs">
               {{ secretLabels }}</span
             >
           </template>
           <template v-if="isFiles && firstPath">
-            <span
-              v-if="showsSource || fileSize || secretLabels"
-              class="text-foreground/50"
-              >·</span
-            >
-            <span class="text-foreground/50 min-w-0 truncate text-xs">
+            <span class="text-foreground/50">·</span>
+            <span class="text-foreground/50 min-w-0 flex-1 truncate text-xs">
               {{ firstPath }}</span
             >
           </template>
-          <span
-            v-if="itemDetails.dateCopied"
-            class="text-foreground/50 ml-auto shrink-0 text-xs">
-            {{ dateCopied }}
-          </span>
         </div>
       </div>
       <!-- quick paste, swapped for the actions when hovered or selected; both share one grid cell so nothing shifts -->
