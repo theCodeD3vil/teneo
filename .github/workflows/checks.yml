@@ -15,8 +15,10 @@ permissions:
 
 # A new commit on a PR makes its older run pointless, so cancel it. A push to
 # development is never cancelled: every commit there gets its own verdict.
+# Each push is a group of its own (its commit), because GitHub keeps only one
+# waiting run per group and would drop the middle one of three quick pushes.
 concurrency:
-  group: checks-${{ github.event.pull_request.number || github.ref }}
+  group: checks-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
