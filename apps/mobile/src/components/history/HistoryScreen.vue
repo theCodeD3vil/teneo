@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 import { ref } from "vue";
+import BetaIcon from "~icons/tabler/flask";
 import WaveIcon from "~icons/tabler/ripple";
+import DebugIcon from "~icons/tabler/tool";
 
 import { useKeyboard } from "../../composables/useKeyboard";
 import { useNavigation } from "../../composables/useNavigation";
@@ -9,6 +11,20 @@ import type { TabVariant } from "../../types/tabs";
 import HomeFooter from "./HomeFooter.vue";
 import SearchInput from "./SearchInput.vue";
 import TabManager from "./TabManager.vue";
+
+// Which build this is. Capacitor marks a debug build for the page; the
+// browser's dev server counts as one too. A beta has it in its version.
+const isDebugBuild =
+  import.meta.env.DEV ||
+  (window as { Capacitor?: { DEBUG?: boolean } }).Capacitor?.DEBUG === true;
+const badge = isDebugBuild
+  ? { icon: DebugIcon, class: "bg-warning text-warning-foreground" }
+  : __APP_VERSION__.includes("-beta.")
+    ? {
+        icon: BetaIcon,
+        class: "bg-success dark:text-success-foreground text-white",
+      }
+    : { icon: WaveIcon, class: "bg-primary text-primary-foreground" };
 
 const { openItemView } = useNavigation();
 // The keyboard shortens the window, which would lift the footer to sit on
@@ -40,12 +56,15 @@ function openPreview(item: ClipboardHistoryItem): void {
           <div class="flex min-w-0 flex-col gap-1">
             <h1
               class="font-heading flex items-center gap-2 text-[1.75rem] leading-[2rem] font-medium tracking-[-0.01em]">
-              Hello Tennerean
-              <!-- a wave of water, white on a round badge in the accent colour -->
+              Hi Tenerean
+              <!-- a round badge that tells the builds apart: a wrench on
+                   orange for a debug build, a beaker on green for a beta, a
+                   wave on the accent colour for a full release -->
               <span
-                class="bg-primary text-primary-foreground grid size-[2rem] shrink-0 place-items-center rounded-full"
+                class="grid size-[2rem] shrink-0 place-items-center rounded-full"
+                :class="badge.class"
                 aria-hidden="true">
-                <WaveIcon class="size-[1.375rem]" />
+                <component :is="badge.icon" class="size-[1.375rem]" />
               </span>
             </h1>
             <span

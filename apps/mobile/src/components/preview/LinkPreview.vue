@@ -69,7 +69,7 @@ function openInBrowser(): void {
     </p>
     <button
       type="button"
-      class="pill-button h-[3.25rem] gap-[0.625rem] px-6 text-[1rem]"
+      class="pill-button h-[3.25rem] gap-[0.625rem] border-transparent px-6 text-[1rem]"
       @click="openInBrowser">
       <OpenIcon />
       Open in browser

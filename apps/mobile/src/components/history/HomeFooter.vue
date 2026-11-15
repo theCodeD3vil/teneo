@@ -46,7 +46,7 @@ const { openSettings } = useNavigation();
 
     <nav
       aria-label="History"
-      class="bg-dock border-dock-border pointer-events-auto flex h-[4.25rem] w-full items-center justify-between rounded-full border p-[0.5625rem] shadow-[0_14px_32px_rgb(20_22_43/0.28)]">
+      class="bg-dock pointer-events-auto flex h-[4.25rem] w-full items-center justify-between rounded-full p-[0.625rem] shadow-[0_14px_32px_rgb(20_22_43/0.28)]">
       <div class="flex items-center gap-0.5">
         <button
           v-for="tab in tabValues"

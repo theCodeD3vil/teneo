@@ -18,7 +18,6 @@
 
   --color-dock: var(--dock);
   --color-dock-foreground: var(--dock-foreground);
-  --color-dock-border: var(--dock-border);
   --color-cta: var(--cta);
   --color-cta-foreground: var(--cta-foreground);
   --color-panel: var(--panel);
@@ -75,7 +74,6 @@
 
   --dock: #14162b;
   --dock-foreground: #b4b9d6;
-  --dock-border: transparent;
   --cta: #14162b;
   --cta-foreground: #ffffff;
   --panel: #14162b;
@@ -128,7 +126,6 @@
 
   --dock: #232745;
   --dock-foreground: #b4b9d6;
-  --dock-border: #363b60;
   --cta: #f2f3fa;
   --cta-foreground: #0d0f1e;
   --panel: #181b31;
@@ -460,7 +457,7 @@
 
 /* The text preview's reset button grows out of the end of its bar and
    shrinks back into it. Its width and the gap beside it close up with it, so
-   the case buttons slide over rather than jump. Unlayered, so the width here
+   the actions beside it slide over rather than jump. Unlayered, so the width here
    wins over the button's own. */
 .reset-button-enter-active {
   transition:
