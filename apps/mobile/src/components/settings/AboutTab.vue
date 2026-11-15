@@ -43,7 +43,7 @@ const updateStatus = computed(() => {
       return `Downloading Teneo ${now.update.version}… ${Math.min(percent, 100)}%`;
     }
     case "installing":
-      return "Finish in Android's installer";
+      return "Confirm in Android's installer";
     case "failed":
       return now.message;
   }
@@ -96,9 +96,6 @@ const canUseBrowser = computed(
 
       <SettingsField>
         <template #label>Check for updates</template>
-        <template #description>
-          Look for a new version once a day, when Teneo opens
-        </template>
         <Switch v-model="checkForUpdates" />
       </SettingsField>
     </SettingsSection>

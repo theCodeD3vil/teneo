@@ -175,7 +175,7 @@ const primaryAction = computed<FooterAction>(() => {
             {{
               canScanQrCode
                 ? "Scan the QR code it shows."
-                : "Type the recovery code it shows."
+                : "Type the join code it shows."
             }}
           </p>
 
@@ -183,16 +183,13 @@ const primaryAction = computed<FooterAction>(() => {
             <template #section-title>Sync</template>
             <SettingsField v-if="isSyncOn">
               <template #label>Sync is on</template>
-              <template #description>This phone already syncs</template>
               <span class="text-success flex items-center gap-1 text-sm">
                 <TickIcon /> Joined
               </span>
             </SettingsField>
             <SettingsField v-else>
               <template #label>
-                {{
-                  canScanQrCode ? "Or type the recovery code" : "Recovery code"
-                }}
+                {{ canScanQrCode ? "Or type the join code" : "Join code" }}
               </template>
               <template #description
                 >Shown under the QR code on your Mac</template
@@ -236,8 +233,8 @@ const primaryAction = computed<FooterAction>(() => {
           <p
             v-else-if="hasJoined || isSyncOn"
             class="text-foreground/60 max-w-md text-sm text-balance">
-            Joined. Teneo connects to your Mac when both are on the same Wi-Fi,
-            and what you copy there shows up here.
+            Teneo now syncs clipboard items when both devices are on the same
+            network.
           </p>
           <p v-else class="text-foreground/60 max-w-md text-sm text-balance">
             Connect to your Mac any time in Settings › Sync.
@@ -247,9 +244,6 @@ const primaryAction = computed<FooterAction>(() => {
             <template #section-title>Clipboard</template>
             <SettingsField>
               <template #label>Save clipboard on open</template>
-              <template #description>
-                Add what you copied in other apps when you open Teneo
-              </template>
               <Switch v-model="captureOnOpen" />
             </SettingsField>
           </SettingsSection>

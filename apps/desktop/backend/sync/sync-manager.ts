@@ -114,7 +114,7 @@ export class SyncManager {
       const key = await parseRecoveryCode(code);
       if (!key) {
         throw new Error(
-          "That recovery code doesn't look right. Check it and try again.",
+          "That join code doesn't look right. Check it and try again.",
         );
       }
       await this.enable(key);

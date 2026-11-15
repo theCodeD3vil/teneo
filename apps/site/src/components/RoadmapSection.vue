@@ -35,7 +35,7 @@ const items: Array<{
   {
     title: "Private by default",
     description:
-      "Password managers are skipped and API keys are hidden in history, with optional encryption for those keys.",
+      "Sensitive apps are skipped and secrets are hidden in history, with optional encryption.",
     status: "done",
   },
   {

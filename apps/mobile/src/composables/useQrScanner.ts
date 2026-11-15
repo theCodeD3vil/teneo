@@ -54,7 +54,7 @@ async function ensureScannerReady(): Promise<void> {
     await QrScanner.prepare();
   } catch (caught) {
     throw new Error(
-      "The scanner couldn't be downloaded. Check your connection, or type the recovery code",
+      "The scanner couldn't be downloaded. Check your connection, or type the join code",
       { cause: caught },
     );
   } finally {
