@@ -5,6 +5,10 @@ name: Release Android
 # the PR to ship an Android release. The Mac app releases the same way from
 # its own version (release.yml); a PR can bump either or both. A version with
 # a beta suffix, such as 0.1.0-beta.1, is published as a pre-release.
+#
+# When the PR bumps both, the APK is added to the Mac app's release as well,
+# so one release holds everything the PR shipped. The Android release is
+# still published: phones find their updates under its android-v tag.
 on:
   pull_request:
     types: [closed]
@@ -24,11 +28,15 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       is-new: ${{ steps.version.outputs.is-new }}
+      mac-version: ${{ steps.version.outputs.mac-version }}
+      mac-is-new: ${{ steps.version.outputs.mac-is-new }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
-          sparse-checkout: apps/mobile/package.json
+          sparse-checkout: |
+            apps/mobile/package.json
+            apps/desktop/tinyjs.json
           sparse-checkout-cone-mode: false
 
       - id: version
@@ -44,6 +52,16 @@ jobs:
             echo "is-new=false" >> "$GITHUB_OUTPUT"
           else
             echo "is-new=true" >> "$GITHUB_OUTPUT"
+          fi
+          # Whether this PR releases the Mac app too, by release.yml's own
+          # rule. Asked now, in the run's first seconds: the Mac build takes
+          # minutes to make its tag.
+          mac_version=$(jq -r .version apps/desktop/tinyjs.json)
+          echo "mac-version=$mac_version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$mac_version" > /dev/null; then
+            echo "mac-is-new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "mac-is-new=true" >> "$GITHUB_OUTPUT"
           fi
 
   release:
@@ -132,3 +150,25 @@ jobs:
             --latest=false \
             "${flags[@]}" \
             "$RUNNER_TEMP/Teneo-$VERSION.apk"
+
+      # One release for everything the PR shipped: the Mac app's, with the
+      # APK beside the disk images. The Mac build runs beside this one and
+      # may finish later, so wait for its release. If it never comes, the Mac
+      # build failed: the Android release above is whole without it.
+      - name: Add the APK to the Mac release
+        if: needs.version.outputs.mac-is-new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAC_VERSION: ${{ needs.version.outputs.mac-version }}
+        run: |
+          for attempt in $(seq 1 90); do
+            if gh release view "v$MAC_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              gh release upload "v$MAC_VERSION" \
+                --repo "$GITHUB_REPOSITORY" \
+                --clobber \
+                "$RUNNER_TEMP/Teneo-$VERSION.apk"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::warning::Teneo $MAC_VERSION wasn't released within 30 minutes, so the APK is only on the Teneo for Android $VERSION release."
