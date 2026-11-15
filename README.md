@@ -157,6 +157,8 @@ Run these from the repo root:
 | `bun run build` \| `typecheck` \| `test`             | Runs that task in every workspace (Turbo caches). |
 | `bun run lint` \| `lint:fix` \| `fmt` \| `fmt:check` | Lints and formats the whole repo, once.           |
 
+**The checks run on every pull request.** `bun run typecheck`, `test`, `lint` and `fmt:check` run on GitHub for each PR into `development` or `main`, and for each push to `development` (`.github/workflows/checks.yml`), so run them before you push. They need only a Linux runner, so `test:runtime` (below) isn't among them: run that yourself when you change sync storage or transport.
+
 **A dev run never touches your real history.** `bun run desktop` keeps its own database, images, link previews, settings and Keychain key apart from the installed Teneo's: files go in a `dev` folder inside the app's data and cache folders, and the settings, setup flag and Keychain entry get a `-dev` name. A packaged build is not affected. The dev data starts empty, so the setup window shows on the first dev run.
 
 - `bun run desktop:reset-dev-data` deletes the dev folders and the dev keys and Keychain entry. It leaves the installed app's data alone.
