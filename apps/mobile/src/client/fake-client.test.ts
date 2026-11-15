@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
+import { buildPairingLink, formatRecoveryCode } from "@teneo/sync";
 
 import { FakeClient } from "./fake-client";
 
@@ -349,46 +350,48 @@ describe("FakeClient", () => {
       expect(status.state).toBe("not_paired");
     });
 
-    test("accepts valid Teneo URI and recovery codes", async () => {
+    test("accepts the Mac's QR link and recovery code, as the sync core reads them", async () => {
       const client = new FakeClient([]);
       let syncStatusUpdates = 0;
       client.onSyncStatusChanged(() => {
         syncStatusUpdates++;
       });
+      const key = new Uint8Array(32).fill(7);
 
-      // QR URI format
-      const qrResult = await client.pair(
-        "teneo://pair?v=1&k=pub_secret123key456",
+      // The link a Mac's QR code holds, with its addresses
+      const linkResult = await client.pair(
+        buildPairingLink(key, ["192.168.1.20:47823", "10.0.0.4:47823"]),
       );
-      expect(qrResult.ok).toBe(true);
-      expect(qrResult.deviceName).toBe("MacBook Pro");
+      expect(linkResult.ok).toBe(true);
+      expect(linkResult.deviceName).toBe("MacBook Pro");
       expect(syncStatusUpdates).toBe(1);
 
       let status = await client.getSyncStatus();
       expect(status.state).toBe("connected");
-      expect(status.devices.length).toBe(1);
-      expect(status.devices[0].name).toBe("MacBook Pro");
+      expect(status.devices.map((device) => device.name)).toEqual([
+        "MacBook Pro",
+      ]);
 
       await client.unpair();
       expect(syncStatusUpdates).toBe(2);
-
       status = await client.getSyncStatus();
-      expect(status.state).toBe("not_paired");
-      expect(status.devices.length).toBe(0);
-
-      // The link a Mac's QR code holds, with its addresses
-      const linkResult = await client.pair(
-        "teneo://pair?v=1&k=pub_secret123key456&a=192.168.1.20:47823,10.0.0.4:47823",
-      );
-      expect(linkResult.ok).toBe(true);
-      expect(syncStatusUpdates).toBe(3);
-      await client.unpair();
+      expect(status).toEqual({ state: "not_paired", devices: [] });
 
       // Recovery code format
-      const recoveryResult = await client.pair("ABCD-1234-EFGH-5678");
+      const recoveryResult = await client.pair(await formatRecoveryCode(key));
       expect(recoveryResult.ok).toBe(true);
-      expect(recoveryResult.deviceName).toBe("MacBook Pro");
-      expect(syncStatusUpdates).toBe(5);
+      expect(syncStatusUpdates).toBe(3);
+    });
+
+    test("refuses a well-shaped code the sync core doesn't accept", async () => {
+      const client = new FakeClient([]);
+      for (const code of [
+        "teneo://pair?v=1&k=pub_secret123key456",
+        "ABCD-1234-EFGH-5678",
+      ]) {
+        expect((await client.pair(code)).ok).toBe(false);
+      }
+      expect((await client.getSyncStatus()).state).toBe("not_paired");
     });
   });
 });

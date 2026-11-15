@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- the page never loads anything but its own scripts, and never reaches
+         the network: native code does that for it -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'" />
+    <title>Teneo sync</title>
+  </head>
+  <body>
+    <script type="module" src="/src/sync-service/main.ts"></script>
+  </body>
+</html>

@@ -6,10 +6,8 @@
 // links work once. So the copied page is opened only for the image fallback
 // and only when the link doesn't look like one of those; icons come from the
 // site's home page. Links to this Mac or its local network are never fetched.
-import type {
-  ClipboardLink,
-  LinkPreviewImage,
-} from "@teneo/shared/types/clipboard";
+import { findLink } from "@teneo/shared/detection/links";
+import type { LinkPreviewImage } from "@teneo/shared/types/clipboard";
 
 import { logError, pngDataUrl } from "./files";
 import {
@@ -36,16 +34,6 @@ const MAX_FETCHES = 4;
 // Some sites turn away requests that don't look like a browser
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15 Teneo";
-
-/** The link in a copied text, when the whole text is one http(s) URL. */
-export function findLink(text: string): ClipboardLink | null {
-  const trimmed = text.trim();
-  if (trimmed.length > 2048 || /\s/.test(trimmed)) return null;
-  if (!/^https?:\/\//i.test(trimmed) || !URL.canParse(trimmed)) return null;
-  const url = new URL(trimmed);
-  if (!url.hostname) return null;
-  return { url: url.href, host: url.hostname.replace(/^www\./, "") };
-}
 
 /** A link's preview as a data: URL, or null when previews are off or the site
  *  has nothing to show. Rejects when the site can't be reached, so the page

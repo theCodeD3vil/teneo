@@ -11,13 +11,17 @@ export interface MobileSettings {
   maxItems: number;
   /** Mask secrets until revealed */
   hideSecrets: boolean;
+  /** Look for a new version once a day, when the app opens */
+  checkForUpdates: boolean;
 }
 
 export const defaultSettings: MobileSettings = {
   backgroundReceive: true,
-  syncSecrets: true,
+  // as on the Mac: secrets stay on this phone until the user allows them
+  syncSecrets: false,
   captureOnOpen: false,
   historyRetentionDays: 30,
   maxItems: 500,
   hideSecrets: true,
+  checkForUpdates: true,
 };

@@ -9,12 +9,14 @@ import {
   useNavigation,
 } from "../../composables/useNavigation";
 import { useSyncStatus } from "../../composables/useSyncStatus";
+import { useUpdates } from "../../composables/useUpdates";
 import { settingsPages } from "./pages";
 import SettingsHeader from "./SettingsHeader.vue";
 import SettingsSection from "./SettingsSection.vue";
 
 const { openSettingsPage } = useNavigation();
 const { status } = useSyncStatus();
+const { state: updateState } = useUpdates();
 
 const syncSummary = computed(() => {
   const state = status.value?.state;
@@ -28,7 +30,10 @@ const summaries = computed<Record<SettingsPageName, string>>(() => ({
   general: "Clipboard, API keys",
   sync: syncSummary.value,
   storage: "History, item limit",
-  about: `Version ${__APP_VERSION__}`,
+  about:
+    "update" in updateState.value && updateState.value.update
+      ? "Update available"
+      : `Version ${__APP_VERSION__}`,
 }));
 
 const groups: SettingsPageName[][] = [

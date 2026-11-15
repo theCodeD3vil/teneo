@@ -9,7 +9,13 @@ import {
   EmptyTitle,
 } from "@teneo/ui/components/empty";
 import { currentTime } from "@teneo/ui/composables/useRelativeTimeAgo";
-import { computed, type ComponentPublicInstance, ref, watch } from "vue";
+import {
+  computed,
+  type ComponentPublicInstance,
+  onUnmounted,
+  ref,
+  watch,
+} from "vue";
 
 import type { TabVariant } from "../../types/tabs";
 import EmptyIllustration from "../illustrations/EmptyIllustration.vue";
@@ -160,6 +166,25 @@ watch(virtualRows, (rows) => {
   }
 });
 
+// A list that loads quickly, as after a tab switch, shows a blank page
+// instead of a flash of "Loading" while it slides in; a slow one says so
+const loadingTextDelay = 400; // ms, longer than a tab switch waits for its list
+const isLoadingTextShown = ref(false);
+let loadingTextTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+  () => props.loading,
+  (isLoading) => {
+    clearTimeout(loadingTextTimer);
+    isLoadingTextShown.value = false;
+    if (!isLoading) return;
+    loadingTextTimer = setTimeout(() => {
+      isLoadingTextShown.value = true;
+    }, loadingTextDelay);
+  },
+  { immediate: true },
+);
+onUnmounted(() => clearTimeout(loadingTextTimer));
+
 // A new tab starts at the top
 watch(
   () => props.tab,
@@ -257,7 +282,10 @@ function handleContextMenu(event: MouseEvent): void {
   <div
     ref="viewport"
     class="size-full touch-pan-y overflow-y-auto overscroll-contain">
-    <p v-if="props.loading" class="text-foreground/50 p-3 text-sm">
+    <p
+      v-if="props.loading"
+      class="text-foreground/50 p-3 text-sm"
+      :class="{ invisible: !isLoadingTextShown }">
       Loading clipboard history…
     </p>
     <Empty v-else-if="props.error">

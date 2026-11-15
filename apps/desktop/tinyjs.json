@@ -3,7 +3,7 @@
   "title": "Teneo",
   "size": "560x720",
   "id": "com.michael.teneo",
-  "version": "0.4.0-beta.1",
+  "version": "0.4.0-beta.2",
   "backend": "backend/main.ts",
   "frontend": {
     "build": "bun run build",

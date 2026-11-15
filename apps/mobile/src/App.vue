@@ -7,6 +7,7 @@ import ItemViewScreen from "./components/preview/ItemViewScreen.vue";
 import SettingsPageScreen from "./components/settings/SettingsPageScreen.vue";
 import SettingsScreen from "./components/settings/SettingsScreen.vue";
 import SetupScreen from "./components/setup/SetupScreen.vue";
+import UpdatePrompt from "./components/UpdatePrompt.vue";
 import { useNavigation } from "./composables/useNavigation";
 import { useSheetDepth } from "./composables/useSheetDepth";
 
@@ -111,5 +112,6 @@ const screenKey = computed(() =>
         </Transition>
       </div>
     </div>
+    <UpdatePrompt />
   </div>
 </template>

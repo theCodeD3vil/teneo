@@ -9,7 +9,7 @@
 import type { PeerRecord, SyncEngine, SyncError } from "@teneo/sync";
 
 import type { DiscoveredDevice, Discovery } from "./discovery";
-import { isLocalNetworkAddress } from "./local-address";
+import { isAtHost, isLocalNetworkAddress } from "./local-address";
 import { syncPorts } from "./ports";
 import { SocketChannel } from "./ws-channel";
 
@@ -242,10 +242,19 @@ export class LanTransport {
       : (this.options.ports ?? syncPorts).map((port) => `${address}:${port}`);
   }
 
+  /** On a phone's hotspot the gateway is the phone, which may be a device
+   *  that is known but hasn't been seen. Not when a device is connected there
+   *  already: every dial would open another connection to that same device,
+   *  which replaces the one it has, every few seconds for as long as any
+   *  known device stays away. */
   private async dialGateway(): Promise<void> {
     await this.dial("gateway", async () => {
       const gateway = await this.options.discovery.defaultGateway();
-      return gateway ? this.withPorts(gateway) : [];
+      if (!gateway) return [];
+      const isConnectedThere = this.options.engine
+        .peers()
+        .some((peer) => isAtHost(peer.address, gateway));
+      return isConnectedThere ? [] : this.withPorts(gateway);
     });
   }
 

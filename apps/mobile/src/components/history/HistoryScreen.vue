@@ -3,12 +3,16 @@ import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 import { ref } from "vue";
 
 import logoUrl from "../../assets/logo.svg";
+import { useKeyboard } from "../../composables/useKeyboard";
 import { useNavigation } from "../../composables/useNavigation";
 import HomeFooter from "./HomeFooter.vue";
 import SearchInput from "./SearchInput.vue";
 import TabManager from "./TabManager.vue";
 
 const { openItemView } = useNavigation();
+// The keyboard shortens the window, which would lift the footer to sit on
+// top of it. While typing, the footer steps aside and the list has the room.
+const { isKeyboardOpen } = useKeyboard();
 const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const searchQuery = ref("");
 const clipboardItemsCount = ref(0);
@@ -29,6 +33,8 @@ function openPreview(item: ClipboardHistoryItem): void {
       :search-query="searchQuery"
       @tab-change="(count: number) => (clipboardItemsCount = count)"
       @preview="openPreview" />
-    <HomeFooter :clipboard-items-count="clipboardItemsCount" />
+    <HomeFooter
+      v-show="!isKeyboardOpen"
+      :clipboard-items-count="clipboardItemsCount" />
   </div>
 </template>

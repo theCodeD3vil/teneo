@@ -1,6 +1,6 @@
 {
   "name": "@teneo/mobile",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "android:build": "bun run build && CI=true cap sync android && mise exec -- ./android/gradlew -p android :app:assembleDebug",
     "android:release": "bun run build && CI=true cap sync android && mise exec -- ./android/gradlew -p android :app:assembleRelease",
     "android:run": "bun run android:build && adb install -r android/app/build/outputs/apk/debug/app-debug.apk && adb shell am start -n com.michael.teneo/.MainActivity",
+    "android:contract": "bun scripts/native-contract.ts",
     "android:dev": "adb reverse tcp:5175 tcp:5175 && CI=true TENEO_LIVE_RELOAD_URL=http://localhost:5175 cap sync android && mise exec -- ./android/gradlew -p android :app:assembleDebug && adb install -r android/app/build/outputs/apk/debug/app-debug.apk && adb shell am start -n com.michael.teneo/.MainActivity"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "@tailwindcss/vite": "catalog:",
     "@tanstack/vue-virtual": "^3.13.45",
     "@teneo/shared": "workspace:*",
+    "@teneo/sync": "workspace:*",
     "@teneo/ui": "workspace:*",
     "@vueuse/core": "catalog:",
     "tailwindcss": "catalog:",

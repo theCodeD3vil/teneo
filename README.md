@@ -130,7 +130,7 @@ Here's what's planned next. More will be added over time.
 - **Previews (in progress, beta).** Open any item in your history to see it in full, and do more with it than copy and paste. A first version is out to try; see [Features](#features).
 - **Landing page (done).** A proper home for Teneo, where you can explore what it does and download it.
 - **Sync engine.** Keep your clipboard history in your own cloud storage instead of only on your Mac (bring your own cloud).
-- **Android app (in progress).** Sync your clipboard history between your Android phone and your Mac. Its screens are built and running on sample data; saving your history on the phone and syncing it come next.
+- **Android app (in progress).** Sync your clipboard history between your Android phone and your Mac. It keeps its own history on the phone; syncing it comes next.
 
 ## Development
 
@@ -142,7 +142,7 @@ Teneo is a [Bun](https://bun.sh) workspaces monorepo, with [Turborepo](https://t
 | `apps/site`       | The landing page.                                                                                                                                   |
 | `apps/mobile`     | The Android app (see [Android app](#android-app)).                                                                                                  |
 | `packages/ui`     | `@teneo/ui`: the UI components, theme and helpers that the Mac app, the site and the Android app share.                                             |
-| `packages/shared` | `@teneo/shared`: the types and constants the app's frontend and backend share. It ships TypeScript source, with no build step.                      |
+| `packages/shared` | `@teneo/shared`: the types, constants and pure rules (such as secret detection) the apps share. It ships TypeScript source, with no build step.     |
 | `packages/sync`   | `@teneo/sync`: the clipboard sync core (merge rules, protocol, engine), with no runtime of its own. Not turned on yet; its README has the protocol. |
 
 Run these from the repo root:
@@ -156,6 +156,8 @@ Run these from the repo root:
 | `bun run mobile`                                     | Serves the Android app in a browser.              |
 | `bun run build` \| `typecheck` \| `test`             | Runs that task in every workspace (Turbo caches). |
 | `bun run lint` \| `lint:fix` \| `fmt` \| `fmt:check` | Lints and formats the whole repo, once.           |
+
+**The checks run on every pull request.** `bun run typecheck`, `test`, `lint` and `fmt:check` run on GitHub for each PR into `development` or `main`, and for each push to `development` (`.github/workflows/checks.yml`), so run them before you push. They need only a Linux runner, so `test:runtime` (below) isn't among them: run that yourself when you change sync storage or transport.
 
 **A dev run never touches your real history.** `bun run desktop` keeps its own database, images, link previews, settings and Keychain key apart from the installed Teneo's: files go in a `dev` folder inside the app's data and cache folders, and the settings, setup flag and Keychain entry get a `-dev` name. A packaged build is not affected. The dev data starts empty, so the setup window shows on the first dev run.
 
@@ -175,7 +177,11 @@ TinyJS reads everything from the current folder, so run any `tinyjs` command (`d
 
 `apps/mobile` is the Android app: Vue and Tailwind on the shared `@teneo/ui` components, wrapped with [Capacitor](https://capacitorjs.com). The native project in `apps/mobile/android` is committed.
 
-For now the app runs on sample data. `FakeClient` (`apps/mobile/src/client`) keeps a seeded history in memory and pretends to sync and pair. Screens only talk to the `TeneoClient` interface, so a real client can take its place without changing them.
+Screens only talk to the `TeneoClient` interface (`apps/mobile/src/client`). On a phone that is `NativeClient`: the history lives in a SQLite database the Android app owns (`android/app/src/main/java/com/michael/teneo/history`), so it outlives the app and a later background service can reach it. In a browser it is `FakeClient`, which keeps a seeded history in memory. Both still pretend to sync and pair.
+
+The phone saves what was copied on it in two ways (`android/app/src/main/java/com/michael/teneo/capture`): the clipboard when Teneo comes to the front, if "Save what's on the clipboard when Teneo opens" is on, and a text shared to "Save to Teneo". Native code saves the text as it is; `NativeClient` looks for secrets and links in it with the Mac's rules (`packages/shared/src/detection`) before the history is listed.
+
+Both clients pass the same tests (`client-contract.ts`): `bun run test` runs them against `FakeClient`, and `bun run --cwd apps/mobile android:contract` runs them on a phone against the native history, in a throwaway database. That needs the debug build from `bun run mobile:android:dev`, with `bun run mobile` serving. The native code's own unit tests run with `mise exec -- ./android/gradlew -p android :app:testDebugUnitTest` in `apps/mobile`.
 
 To build it for a phone you need:
 
@@ -194,6 +200,33 @@ Then, from the repo root:
 `mobile:android:dev` points the phone at your Mac through `adb reverse`, so it only works while the phone is plugged in. Run `bun run mobile:android` to go back to a build that works on its own. The debug APK lands in `apps/mobile/android/app/build/outputs/apk/debug`.
 
 The Android scripts aren't part of Turbo's `build`, so CI and the Mac release workflow don't need Java or the Android SDK.
+
+#### The sync service
+
+Sync on the phone runs in a foreground service (`apps/mobile/android/app/src/main/java/com/michael/teneo/sync`), so it keeps going with the screen off. The service owns a web view with no window that runs the sync core, the same `@teneo/sync` the Mac runs (`apps/mobile/src/sync-service`, built as a second page, `sync.html`, beside the app). The core decides everything; Java does what a page can't: it listens for devices on ports 47823 to 47827, dials the ones Bonjour finds, and announces and browses `_teneo-sync._tcp`. A permanent, low-priority notification shows while it runs. The rules for who may connect, and for retrying, are the Mac's: see `apps/desktop/backend/sync/lan-transport.ts`.
+
+Nothing in the app starts it yet, and a release build has no service to start: the service, its permissions and its starter are in `apps/mobile/android/app/src/debug`. A debug build starts it from `adb shell` only, with the recovery code of a vault (a throwaway one, from `bun backend/sync/new-recovery-code.ts` in `apps/desktop`, then `bun run sync:peer "<code>"` for a Mac to sync with). The code is kept in memory, so a restart of the whole app forgets it and sync stops until it is given again.
+
+Sync works on the phone's own history, the database the app lists from. The page can't open SQLite, so it asks native code through `TeneoNative`: `history*` calls that answer in JSON (`SyncStoreBridge.java`, answered by `HistoryStore.java`), which `apps/mobile/src/sync-service/native-store.ts` turns into the `SyncStore` the engine needs. The rules are the Mac's (`apps/desktop/backend/sync/sync-store.ts` and `records.ts`, whose row-to-record mapping is copied into `records.ts` beside it, so keep the two the same). A few things differ because the page and the database are apart:
+
+- **A transaction is saved at once.** What the engine writes is kept in the page, and read back by the reads that follow it, until the transaction ends; then one call saves it all in one database transaction, with the cursor. If the app wrote to the history meanwhile (a pin, a copy), nothing is saved, and the engine's work runs again on what is there now.
+- **One source of pin stamps.** The device id is the one in `SYNC_META`, and the clock that stamps a pin is `HistoryStore`'s (`Hlc.java`); the page has none. Every stamp the page saves from another device is seen by that clock as it is saved, so a pin made on the phone afterwards wins, whatever the phone's clock says.
+- **Secrets are looked for before a text is sent.** The capture and the share sheet save a text without looking (the app does that before it lists), so the page looks at each text it is about to send, in TypeScript with `@teneo/shared/detection`, and stores what it finds. A text it can't look at is held back. A text that arrives is looked at the same way before it is stored, with the detection version.
+- **Both ways are live.** A change to the history made by anything in the app reaches the page (`teneoSyncPage.localChanged`), which sends it on; a change that arrives is saved through `HistoryStore`, so the app's list hears of it through the history's change event, as for a copy made on the phone.
+
+The in-memory store of `@teneo/sync/testing` is for tests only. `bun run test` runs the store against a fake of the native side (`fake-history.ts`), and the real engine against it; the SQL has Java tests (`SyncQueriesTest`), which only check its text, as there is no SQLite on the JVM. In a debug build `--es copy` saves a copy as the capture does, so it travels like any other.
+
+```sh
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --es code '<recovery code>'"
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --es copy 'text to copy on the phone'"
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --ez dial false"  # only listen, never dial
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --ez stop true"
+adb logcat -s TeneoSync                                                                                             # what it does
+```
+
+Before the Sync screen starts this service for real, one thing has to be settled: the sync page and the app's own page share one web view process. If that process dies while the app's window is alive, Capacitor lets Android end the whole app, and the service comes back with no recovery code to start with. Either the service runs in a process of its own, or the app handles the loss of its page.
+
+The Java tests (WebSocket framing, handshake, limits, and the listener and dialer on loopback) run with `cd apps/mobile && mise exec -- ./android/gradlew -p android testDebugUnitTest`. They need the same Java and SDK as a build, so CI doesn't run them. The TypeScript side is in `bun run test` as usual.
 
 #### Releasing the Android app
 
