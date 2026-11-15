@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { isLocalNetworkAddress } from "./local-address";
+import { isAtHost, isLocalNetworkAddress } from "./local-address";
 
 test("private, link-local and loopback addresses are allowed", () => {
   for (const address of [
@@ -56,4 +56,17 @@ test("what is not an address is refused, not waved through", () => {
   ]) {
     expect(isLocalNetworkAddress(text)).toBe(false);
   }
+});
+
+test("a connection is at a host with or without its port", () => {
+  // one this Mac dialed, and one that came in
+  expect(isAtHost("192.168.43.1:47823", "192.168.43.1")).toBe(true);
+  expect(isAtHost("192.168.43.1", "192.168.43.1")).toBe(true);
+});
+
+test("another host, a longer one, or no address is not at the host", () => {
+  expect(isAtHost("192.168.43.10:47823", "192.168.43.1")).toBe(false);
+  expect(isAtHost("192.168.43.2", "192.168.43.1")).toBe(false);
+  expect(isAtHost(undefined, "192.168.43.1")).toBe(false);
+  expect(isAtHost("", "192.168.43.1")).toBe(false);
 });

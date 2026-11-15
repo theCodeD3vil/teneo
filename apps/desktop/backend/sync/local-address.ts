@@ -35,6 +35,15 @@ export function isLocalNetworkAddress(address: string): boolean {
   );
 }
 
+/** Whether a connection's address, with or without its port, is at `host`.
+ *  A connection this Mac opened is known by `host:port`, one that came in
+ *  by the host alone. */
+export function isAtHost(address: string | undefined, host: string): boolean {
+  if (!address) return false;
+  const colon = address.lastIndexOf(":");
+  return (colon < 0 ? address : address.slice(0, colon)) === host;
+}
+
 export interface NetworkAddress {
   name: string;
   address: string;
