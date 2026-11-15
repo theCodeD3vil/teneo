@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { canOpenPage, isLocalAddress } from "./link-safety";
+import { canOpenPage, isLocalAddress } from "./safety";
 
 const isLocal = (url: string) => isLocalAddress(new URL(url));
 

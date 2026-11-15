@@ -1,5 +1,6 @@
 import type {
   ClipboardHistoryItem,
+  LinkPreviewImage,
   ClipboardListPage,
   ClipboardListRequest,
 } from "@teneo/shared/types/clipboard";
@@ -25,6 +26,12 @@ export interface TeneoClient {
    *  text in another case. Rejects like `copyToClipboard`. */
   copyText(text: string): Promise<void>;
   onHistoryChanged(listener: () => void): () => void;
+  /** A link's small picture for its card, as a data: URL. Null when
+   *  previews are off or the site has none; rejects when the site can't
+   *  be reached, so it can be asked again. */
+  getLinkPreview(url: string): Promise<string | null>;
+  /** The picture for a link's own preview, and where it came from */
+  getLinkPreviewImage(url: string): Promise<LinkPreviewImage | null>;
   getSettings(): Promise<MobileSettings>;
   updateSettings(changes: Partial<MobileSettings>): Promise<MobileSettings>;
   getSyncStatus(): Promise<SyncStatus>;

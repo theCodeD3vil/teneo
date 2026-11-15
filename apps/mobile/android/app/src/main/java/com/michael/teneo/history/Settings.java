@@ -41,6 +41,7 @@ public final class Settings {
         types.put(HIDE_SECRETS, Type.BOOLEAN);
         // read by the app only
         types.put("checkForUpdates", Type.BOOLEAN);
+        types.put("showLinkPreviews", Type.BOOLEAN);
         TYPES = Collections.unmodifiableMap(types);
     }
 

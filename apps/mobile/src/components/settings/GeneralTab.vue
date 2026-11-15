@@ -15,6 +15,11 @@ const captureOnOpen = computed({
   set: (enabled) => updateSettings({ captureOnOpen: enabled }),
 });
 
+const showLinkPreviews = computed({
+  get: () => settings.value.showLinkPreviews,
+  set: (enabled) => updateSettings({ showLinkPreviews: enabled }),
+});
+
 // Turning this off shows keys in full in history, so it asks first
 const isHideSecretsWarningOpen = ref(false);
 const hideSecrets = computed({
@@ -41,7 +46,7 @@ const hideSecrets = computed({
     </SettingsSection>
 
     <SettingsSection>
-      <template #section-title>API Keys</template>
+      <template #section-title>Secrets</template>
 
       <SettingsField>
         <template #label>
@@ -54,6 +59,15 @@ const hideSecrets = computed({
           Mask secrets in history. Copying still gives the full secret.
         </template>
         <Switch v-model="hideSecrets" />
+      </SettingsField>
+    </SettingsSection>
+
+    <SettingsSection>
+      <template #section-title>Links</template>
+
+      <SettingsField>
+        <template #label>Show link previews</template>
+        <Switch v-model="showLinkPreviews" />
       </SettingsField>
     </SettingsSection>
 

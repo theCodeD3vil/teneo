@@ -3,10 +3,12 @@ import { findSecrets } from "@teneo/shared/detection/secrets";
 import { detectionVersion } from "@teneo/shared/detection/version";
 import type {
   ClipboardHistoryItem,
+  LinkPreviewImage,
   ClipboardListPage,
   ClipboardListRequest,
 } from "@teneo/shared/types/clipboard";
 
+import type { LinkPreviews } from "../previews/link-previews";
 import type { PairResult, TeneoClient } from "../types/client";
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
@@ -96,6 +98,9 @@ export class NativeClient implements TeneoClient {
   private readonly databaseName: string;
   private historyListeners = new Set<() => void>();
   private readonly sync: NativeSync | null;
+  private readonly linkPreviews: LinkPreviews | null;
+  // null until the settings have been read
+  private showLinkPreviews: boolean | null = null;
   private removeNativeListener: Promise<() => Promise<void>>;
   private mayHaveUndetected = true;
   // texts whose detections couldn't be made or saved: left out of later
@@ -105,10 +110,15 @@ export class NativeClient implements TeneoClient {
 
   constructor(
     plugin: HistoryPlugin,
-    options: DatabaseOption & { sync?: NativeSync } = {},
+    options: DatabaseOption & {
+      sync?: NativeSync;
+      linkPreviews?: LinkPreviews;
+    } = {},
   ) {
     this.plugin = plugin;
     this.sync = options.sync ?? null;
+    this.linkPreviews = options.linkPreviews ?? null;
+    void this.linkPreviews?.removeStale().catch(() => undefined);
     this.database = options.database ? { database: options.database } : {};
     this.databaseName = options.database ?? appDatabase;
     this.removeNativeListener = plugin
@@ -262,6 +272,21 @@ export class NativeClient implements TeneoClient {
     await this.plugin.copyText({ ...this.database, text });
   }
 
+  /** Without a preview service (a test database) there are none */
+  private async previews(): Promise<LinkPreviews | null> {
+    if (!this.linkPreviews) return null;
+    this.showLinkPreviews ??= (await this.getSettings()).showLinkPreviews;
+    return this.showLinkPreviews ? this.linkPreviews : null;
+  }
+
+  async getLinkPreview(url: string): Promise<string | null> {
+    return (await (await this.previews())?.icon(url)) ?? null;
+  }
+
+  async getLinkPreviewImage(url: string): Promise<LinkPreviewImage | null> {
+    return (await (await this.previews())?.image(url)) ?? null;
+  }
+
   onHistoryChanged(listener: () => void): () => void {
     this.historyListeners.add(listener);
     return () => {
@@ -275,7 +300,9 @@ export class NativeClient implements TeneoClient {
       Object.entries(defaultSettings).filter(([key]) => !(key in settings)),
     );
     if (Object.keys(unsaved).length === 0) {
-      return { ...defaultSettings, ...settings };
+      const saved = { ...defaultSettings, ...settings };
+      this.showLinkPreviews = saved.showLinkPreviews;
+      return saved;
     }
     // The first start saves the defaults: native code that reads a setting
     // without the app (the history limits, later the capture and sync)
@@ -291,6 +318,7 @@ export class NativeClient implements TeneoClient {
       changes,
     });
     const saved = { ...defaultSettings, ...settings };
+    this.showLinkPreviews = saved.showLinkPreviews;
     if (
       this.sync &&
       ("backgroundReceive" in changes || "syncSecrets" in changes)

@@ -10,6 +10,7 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
 import com.michael.teneo.capture.Capture;
 import com.michael.teneo.history.HistoryPlugin;
+import com.michael.teneo.links.LinkFetchPlugin;
 import com.michael.teneo.sync.SyncController;
 import com.michael.teneo.sync.SyncPlugin;
 import com.michael.teneo.updates.UpdatePlugin;
@@ -29,6 +30,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(HistoryPlugin.class);
         registerPlugin(SyncPlugin.class);
         registerPlugin(UpdatePlugin.class);
+        registerPlugin(LinkFetchPlugin.class);
         super.onCreate(savedInstanceState);
 
         // The app's page and the sync service's share one web view process.

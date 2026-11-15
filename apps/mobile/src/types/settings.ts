@@ -13,6 +13,8 @@ export interface MobileSettings {
   hideSecrets: boolean;
   /** Look for a new version once a day, when the app opens */
   checkForUpdates: boolean;
+  /** Fetch and show a picture for copied links */
+  showLinkPreviews: boolean;
 }
 
 export const defaultSettings: MobileSettings = {
@@ -24,4 +26,5 @@ export const defaultSettings: MobileSettings = {
   maxItems: 500,
   hideSecrets: true,
   checkForUpdates: true,
+  showLinkPreviews: true,
 };

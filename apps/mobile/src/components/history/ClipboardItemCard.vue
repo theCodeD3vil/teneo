@@ -16,6 +16,7 @@ import ImageIcon from "~icons/tabler/photo";
 
 import { useClient } from "../../client";
 import { showCopiedNotice } from "../../composables/useCopiedNotice";
+import { useLinkPreviews } from "../../composables/useLinkPreviews";
 import { useSettings } from "../../composables/useSettings";
 import BetaBadge from "../BetaBadge.vue";
 
@@ -31,6 +32,10 @@ const emit = defineEmits<{
 
 const client = useClient();
 const { settings } = useSettings();
+// A link shows its site's icon, fetched from the site itself. Until it
+// loads, or when previews are off, the link icon holds its place.
+const { linkIcon } = useLinkPreviews();
+const siteIcon = computed(() => linkIcon(props.itemDetails));
 
 const isCopying = ref(false);
 // Bumped on each copy so the sweep across the card plays again
@@ -132,7 +137,13 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
     "
     @click="copyItem">
     <div class="flex items-start gap-4">
-      <div :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
+      <!-- a link's icon fills the square like an app icon -->
+      <img
+        v-if="siteIcon"
+        :src="siteIcon"
+        :alt="itemDetails.link?.host"
+        class="size-9 shrink-0 rounded-md object-cover" />
+      <div v-else :class="cn(['rounded-md p-2', getClipboardThemeClasses()])">
         <LinkIcon v-if="itemDetails.link" class="size-5" />
         <TextAlignLeftIcon
           v-else-if="itemDetails.kind === 'text'"
