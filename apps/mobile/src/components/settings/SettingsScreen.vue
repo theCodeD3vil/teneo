@@ -31,7 +31,7 @@ const summaries = computed<Record<SettingsPageName, string>>(() => ({
   sync: syncSummary.value,
   storage: "History, item limit",
   about:
-    "update" in updateState.value
+    "update" in updateState.value && updateState.value.update
       ? "Update available"
       : `Version ${__APP_VERSION__}`,
 }));

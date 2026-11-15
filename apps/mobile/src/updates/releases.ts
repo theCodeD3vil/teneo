@@ -40,6 +40,16 @@ interface Release {
 
 export class UpdateCheckError extends Error {}
 
+/** 600 tags: far more Android releases than there will be for years */
+const maxTagPages = 20;
+
+/** The address of the next page from GitHub's Link header, if there is one,
+ *  and only when it is GitHub's own API */
+function nextPage(link: string | null): string | null {
+  const match = /<([^>]+)>\s*;\s*rel="next"/.exec(link ?? "");
+  return match?.[1]?.startsWith(`${api}/`) ? match[1] : null;
+}
+
 /**
  * The newest Android release newer than `current`, or null when there is
  * none. A beta install is offered betas and full releases; a full release
@@ -57,10 +67,18 @@ export async function findUpdate(
   }
   const get = (path: string) => request(`${api}${path}`, options);
 
-  const refs = await get(`/git/matching-refs/tags/${tagPrefix}`);
-  if (!refs.ok) throw failure(refs);
-  const list = (await refs.json()) as unknown;
-  const candidates = (Array.isArray(list) ? (list as Ref[]) : [])
+  // GitHub hands the tags over a page at a time, in name order, so the newest
+  // need not be on the first: follow the pages (a few; each holds 30 tags)
+  const list: Ref[] = [];
+  let next: string | null = `${api}/git/matching-refs/tags/${tagPrefix}`;
+  for (let page = 0; next && page < maxTagPages; page++) {
+    const refs: Response = await request(next, options);
+    if (!refs.ok) throw failure(refs);
+    const entries = (await refs.json()) as unknown;
+    if (Array.isArray(entries)) list.push(...(entries as Ref[]));
+    next = nextPage(refs.headers.get("link"));
+  }
+  const candidates = list
     .map((entry) => {
       const ref = typeof entry.ref === "string" ? entry.ref : "";
       const text = ref.startsWith(`refs/tags/${tagPrefix}`)

@@ -78,8 +78,10 @@ export class Updater {
 
   /** Look now, for "Check now". A check already under way is shared. */
   check(): Promise<Update | null> {
+    if (this.checking) return this.checking;
+    // mid-download or mid-install the update is already known
     if (this.isBusy()) return Promise.resolve(this.update());
-    this.checking ??= this.runCheck().finally(() => {
+    this.checking = this.runCheck().finally(() => {
       this.checking = null;
     });
     return this.checking;
@@ -187,9 +189,13 @@ export class Updater {
     return "update" in this.current ? this.current.update : null;
   }
 
+  /** Checking, downloading, or with Android's installer: starting another
+   *  download then would make a second install of the same update */
   private isBusy(): boolean {
     return (
-      this.current.kind === "checking" || this.current.kind === "downloading"
+      this.current.kind === "checking" ||
+      this.current.kind === "downloading" ||
+      this.current.kind === "installing"
     );
   }
 

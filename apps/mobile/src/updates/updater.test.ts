@@ -108,8 +108,29 @@ describe("Updater", () => {
         return update;
       },
     });
-    await Promise.all([instance.check(), instance.check()]);
+    const answers = await Promise.all([instance.check(), instance.check()]);
     expect(finds).toBe(1);
+    // the second caller gets what the check finds, not "nothing yet"
+    expect(answers).toEqual([update, update]);
+  });
+
+  test("an update with Android's installer isn't downloaded a second time", async () => {
+    const fake = fakePlugin();
+    const { instance } = updater({ plugin: fake.plugin });
+    await instance.check();
+    const installing = instance.install();
+    await flush();
+    fake.handedOver();
+    await installing;
+    expect(instance.state.kind).toBe("installing");
+
+    await instance.install(); // "Update" tapped again in About
+    expect(fake.calls).toEqual([`install ${update.apkUrl}`]);
+    // once Android says the install was called off, it can be started again
+    fake.status({ status: "cancelled" });
+    void instance.install();
+    await flush();
+    expect(fake.calls).toHaveLength(2);
   });
 
   test("reports a failed check", async () => {

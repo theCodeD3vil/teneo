@@ -181,6 +181,8 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
 
     @Override
     public void failed(String reason) {
+        // a page on its way out says nothing that still matters
+        if (destroyed) return;
         Log.e(TAG, "sync can't run: " + reason);
         if (runtime != null) runtime.abandon();
         runtime = null;
@@ -191,11 +193,14 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
 
     @Override
     public void peersChanged(List<KnownDevices.Peer> peers) {
+        // after an unpair the devices are forgotten: the closing page must not bring them back
+        if (destroyed) return;
         controller.peersChanged(peers);
     }
 
     @Override
     public void listening(int port) {
+        if (destroyed) return;
         if (port < 0) controller.problem("Teneo couldn't open a port, so only this phone can start a connection.");
     }
 

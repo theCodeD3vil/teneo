@@ -64,6 +64,12 @@ public final class SyncController {
     private Running service;
     private String pendingDebugCode;
 
+    // The two settings sync goes by, read from the database when the app
+    // starts and when it says they changed, never on the way to deciding
+    // whether the service runs: that is asked on the main thread
+    private volatile boolean backgroundReceiveSetting = DEFAULT_BACKGROUND_RECEIVE;
+    private volatile boolean syncSecretsSetting = DEFAULT_SYNC_SECRETS;
+
     public static synchronized SyncController get(Context context) {
         if (instance == null) instance = new SyncController(context.getApplicationContext());
         return instance;
@@ -75,6 +81,17 @@ public final class SyncController {
         keys = new VaultKeyStore(new PreferenceStorage(preferences), new KeystoreCipher());
         devices = new KnownDevices(readDevices());
         migrate();
+        readSettings();
+    }
+
+    private void readSettings() {
+        try {
+            Map<String, Object> settings = HistoryStore.get(context).settings();
+            backgroundReceiveSetting = Settings.bool(settings, BACKGROUND_RECEIVE, DEFAULT_BACKGROUND_RECEIVE);
+            syncSecretsSetting = Settings.bool(settings, SYNC_SECRETS, DEFAULT_SYNC_SECRETS);
+        } catch (RuntimeException unreadable) {
+            Log.w(TAG, "could not read the settings", unreadable);
+        }
     }
 
     private void migrate() {
@@ -145,6 +162,7 @@ public final class SyncController {
 
     /** A setting that sync reads changed: start, stop or tell the service */
     public void settingsChanged() {
+        readSettings();
         Running current;
         synchronized (this) {
             current = service;
@@ -221,25 +239,17 @@ public final class SyncController {
         } catch (RuntimeException refused) {
             // not allowed to start a service right now; the next open of the app tries again
             Log.w(TAG, "could not " + (mode == SyncRules.Mode.OFF ? "stop" : "start") + " the sync service", refused);
+            // said, not only logged: otherwise the Sync tab goes on saying it is looking for devices
+            if (mode != SyncRules.Mode.OFF) problem("Android didn't let sync start. Open Teneo to start it.");
         }
     }
 
     boolean backgroundReceive() {
-        return setting(BACKGROUND_RECEIVE, DEFAULT_BACKGROUND_RECEIVE);
+        return backgroundReceiveSetting;
     }
 
     boolean syncSecrets() {
-        return setting(SYNC_SECRETS, DEFAULT_SYNC_SECRETS);
-    }
-
-    private boolean setting(String key, boolean fallback) {
-        try {
-            Map<String, Object> settings = HistoryStore.get(context).settings();
-            return Settings.bool(settings, key, fallback);
-        } catch (RuntimeException unreadable) {
-            Log.w(TAG, "could not read the settings", unreadable);
-            return fallback;
-        }
+        return syncSecretsSetting;
     }
 
     // --- what the service says

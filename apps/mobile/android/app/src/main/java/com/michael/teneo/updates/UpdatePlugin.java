@@ -69,6 +69,15 @@ public class UpdatePlugin extends Plugin {
 
     private static final class Cancelled extends Exception {}
 
+    private static boolean isResumed(Activity activity) {
+        return (
+            activity instanceof androidx.lifecycle.LifecycleOwner &&
+            ((androidx.lifecycle.LifecycleOwner) activity).getLifecycle()
+                .getCurrentState()
+                .isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+        );
+    }
+
     /** A failure with what to tell the user */
     private static final class UpdateFailure extends Exception {
         UpdateFailure(String message) {
@@ -101,7 +110,11 @@ public class UpdatePlugin extends Plugin {
             // never registered
         }
         Download download = running.get();
-        if (download != null) download.cancel();
+        if (download != null) {
+            download.cancelled = true;
+            // closing a connection is network work, which may not happen on this (the main) thread
+            new Thread(download::cancel, "teneo-update-cancel").start();
+        }
         worker.shutdown();
     }
 
@@ -319,9 +332,30 @@ public class UpdatePlugin extends Plugin {
         notifyListeners("installStatus", event);
     }
 
+    /** Android's confirmation, held until Teneo is on screen: started from
+     *  the background it is silently not shown */
+    private Intent heldConfirmation;
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        Intent held = heldConfirmation;
+        heldConfirmation = null;
+        if (held != null && !openConfirmation(held)) {
+            JSObject event = new JSObject();
+            event.put("status", "failed");
+            event.put("message", "Couldn't open Android's installer");
+            notifyListeners("installStatus", event);
+        }
+    }
+
     private boolean openConfirmation(Intent confirm) {
         Activity activity = getActivity();
         try {
+            if (activity != null && !activity.hasWindowFocus() && !isResumed(activity)) {
+                heldConfirmation = confirm;
+                return true;
+            }
             if (activity != null) {
                 activity.startActivity(confirm);
             } else {

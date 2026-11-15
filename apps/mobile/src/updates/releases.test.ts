@@ -65,6 +65,49 @@ describe("findUpdate", () => {
     ]);
   });
 
+  test("follows GitHub's pages of tags, where the newest may be on a later one", async () => {
+    const requested: string[] = [];
+    const second = `${api}/git/matching-refs/tags/android-v?page=2`;
+    const fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url.slice(api.length));
+      if (url === `${api}/git/matching-refs/tags/android-v`) {
+        return Response.json([{ ref: "refs/tags/android-v0.10.0" }], {
+          headers: { link: `<${second}>; rel="next", <${second}>; rel="last"` },
+        });
+      }
+      if (url === second) {
+        // names sort as text, so 0.2.0 and 1.0.0 come after 0.10.0
+        return Response.json([
+          { ref: "refs/tags/android-v0.2.0" },
+          { ref: "refs/tags/android-v1.0.0" },
+        ]);
+      }
+      if (url === `${api}/releases/tags/android-v1.0.0`) {
+        return Response.json({ assets: [asset("1.0.0")] });
+      }
+      return new Response("", { status: 404 });
+    }) as typeof globalThis.fetch;
+    expect((await findUpdate("0.10.0", { fetch }))?.version).toBe("1.0.0");
+    expect(requested).toEqual([
+      "/git/matching-refs/tags/android-v",
+      "/git/matching-refs/tags/android-v?page=2",
+      "/releases/tags/android-v1.0.0",
+    ]);
+  });
+
+  test("a next page that isn't GitHub's API is not followed", async () => {
+    const requested: string[] = [];
+    const fetch = (async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+      return Response.json([], {
+        headers: { link: '<https://example.org/tags?page=2>; rel="next"' },
+      });
+    }) as typeof globalThis.fetch;
+    expect(await findUpdate("0.1.0", { fetch })).toBeNull();
+    expect(requested).toHaveLength(1);
+  });
+
   test("offers a beta install betas and full releases", async () => {
     const releases = {
       "0.2.0-beta.2": { assets: [asset("0.2.0-beta.2")] },
