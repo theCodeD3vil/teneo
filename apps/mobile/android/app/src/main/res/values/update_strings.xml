@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_channel_name">Updates</string>
+    <string name="update_channel_description">Shown when a newer version of Teneo is available</string>
+    <string name="update_notification_title">Teneo %1$s is available</string>
+    <string name="update_notification_text">Tap to update</string>
+</resources>

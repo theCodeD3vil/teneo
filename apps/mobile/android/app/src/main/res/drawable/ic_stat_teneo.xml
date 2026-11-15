@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Teneo's logo for notifications, in the status bar and on the card: the
+     two sheets of the app icon in one colour, the sheet behind fainter so the
+     two still read as two. Android draws it from its alpha alone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <group
+        android:pivotX="24"
+        android:pivotY="24"
+        android:rotation="12"
+        android:scaleX="1.1"
+        android:scaleY="1.1">
+        <path
+            android:fillAlpha="0.5"
+            android:fillColor="#FFFFFF"
+            android:pathData="M23,6h10a6,6 0,0 1,6 6v16a6,6 0,0 1,-6 6h-2v-14a6,6 0,0 0,-6 -6h-8v-2a6,6 0,0 1,6 -6z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M15,14h10a6,6 0,0 1,6 6v16a6,6 0,0 1,-6 6h-10a6,6 0,0 1,-6 -6v-16a6,6 0,0 1,6 -6z" />
+    </group>
+</vector>

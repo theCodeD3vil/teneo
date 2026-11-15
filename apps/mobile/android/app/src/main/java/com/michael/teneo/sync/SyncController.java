@@ -255,6 +255,7 @@ public final class SyncController {
         try {
             if (mode == SyncRules.Mode.OFF) {
                 context.stopService(intent);
+                SyncService.clearNotification(context);
             } else if (mode == SyncRules.Mode.BACKGROUND && !visible) {
                 // with no window on screen only a foreground service may start
                 intent.putExtra(SyncService.EXTRA_FOREGROUND, true);
@@ -267,6 +268,8 @@ public final class SyncController {
             Log.w(TAG, "could not " + (mode == SyncRules.Mode.OFF ? "stop" : "start") + " the sync service", refused);
             // said, not only logged: otherwise the Sync tab goes on saying it is looking for devices
             if (mode != SyncRules.Mode.OFF) problem("Android didn't let sync start. Open Teneo to start it.");
+            // and where the sync notification would be, since nobody may be looking at the app
+            if (mode == SyncRules.Mode.BACKGROUND) SyncService.showPaused(context);
         }
     }
 

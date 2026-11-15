@@ -26,6 +26,9 @@ export function useUpdates() {
     checkIfDue: () => requireUpdater().checkIfDue(),
     install: () => requireUpdater().install(),
     cancel: () => requireUpdater().cancel(),
+    askToNotify: () => requireUpdater().askToNotify(),
+    onOpenedFromNotification: (listener: () => void) =>
+      requireUpdater().onOpenedFromNotification(listener),
     dismiss: (...args: Parameters<Updater["dismiss"]>) =>
       requireUpdater().dismiss(...args),
   };

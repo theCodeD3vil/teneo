@@ -1,5 +1,6 @@
 package com.michael.teneo.updates;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
@@ -11,15 +12,20 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.Settings;
 import android.util.Log;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.IntentCompat;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+import com.michael.teneo.Notifications;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -39,9 +45,18 @@ import java.util.concurrent.atomic.AtomicReference;
  * which asks the user and keeps their data: an update of a sideloaded app.
  * The page finds the release (src/updates/releases.ts); this checks what it
  * downloads before Android sees it.
+ *
+ * It also has Android look for a release daily without the app open
+ * (UpdateCheckJob), and tells the page when the app was opened from the
+ * notification that says there is one.
  */
-@CapacitorPlugin(name = "Updates")
+@CapacitorPlugin(
+    name = "Updates",
+    permissions = { @Permission(alias = UpdatePlugin.NOTIFICATIONS, strings = { Manifest.permission.POST_NOTIFICATIONS }) }
+)
 public class UpdatePlugin extends Plugin {
+
+    static final String NOTIFICATIONS = "notifications";
 
     private static final String TAG = "TeneoUpdates";
     private static final String INSTALL_STATUS = "com.michael.teneo.updates.INSTALL_STATUS";
@@ -100,6 +115,40 @@ public class UpdatePlugin extends Plugin {
             new IntentFilter(INSTALL_STATUS),
             ContextCompat.RECEIVER_NOT_EXPORTED
         );
+        UpdateCheckJob.schedule(getContext());
+        UpdateCheckJob.clearIfInstalled(getContext());
+        openedFrom(getActivity().getIntent());
+    }
+
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        openedFrom(intent);
+    }
+
+    /** The app was opened from the notification that says an update is available */
+    private void openedFrom(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(Notifications.EXTRA_OPEN_UPDATE, false)) return;
+        // once: the activity keeps its intent when it is made again
+        intent.removeExtra(Notifications.EXTRA_OPEN_UPDATE);
+        // kept until the page listens: it may still be loading
+        notifyListeners("openedFromNotification", new JSObject(), true);
+    }
+
+    /** Ask to show the notification that says an update is available. Resolves with `granted`. */
+    @PluginMethod
+    public void requestNotifications(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 33 || getPermissionState(NOTIFICATIONS) == PermissionState.GRANTED) {
+            answerNotifications(call);
+            return;
+        }
+        requestPermissionForAlias(NOTIFICATIONS, call, "answerNotifications");
+    }
+
+    @PermissionCallback
+    private void answerNotifications(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("granted", Build.VERSION.SDK_INT < 33 || getPermissionState(NOTIFICATIONS) == PermissionState.GRANTED);
+        call.resolve(result);
     }
 
     @Override

@@ -27,6 +27,7 @@ export interface UpdaterOptions {
 const oneDayMs = 24 * 60 * 60 * 1000;
 const lastCheckKey = "teneo.updates.lastCheck";
 const dismissedKey = "teneo.updates.dismissed";
+const askedToNotifyKey = "teneo.updates.askedToNotify";
 
 /**
  * Looks for a newer Android release on GitHub and installs it: the app
@@ -40,6 +41,9 @@ export class Updater {
   private readonly listeners = new Set<(state: UpdateState) => void>();
   private current: UpdateState = { kind: "idle" };
   private checking: Promise<Update | null> | null = null;
+  private readonly openedListeners = new Set<() => void>();
+  /** Opened from the notification before anything listened */
+  private wasOpened = false;
 
   constructor(options: UpdaterOptions) {
     this.options = options;
@@ -56,6 +60,10 @@ export class Updater {
       void plugin.addListener("installStatus", (status) =>
         this.installStatus(status),
       );
+      void plugin.addListener("openedFromNotification", () => {
+        if (this.openedListeners.size === 0) this.wasOpened = true;
+        for (const listener of this.openedListeners) listener();
+      });
     }
   }
 
@@ -68,6 +76,35 @@ export class Updater {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  /**
+   * Told when the app is opened from the notification that says an update is
+   * available, and at once if that happened before anything listened.
+   */
+  onOpenedFromNotification(listener: () => void): () => void {
+    this.openedListeners.add(listener);
+    if (this.wasOpened) {
+      this.wasOpened = false;
+      listener();
+    }
+    return () => {
+      this.openedListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Ask, once, to show the notification that says an update is available.
+   * Android's own question; a no stays a no.
+   */
+  async askToNotify(): Promise<void> {
+    if (!this.options.plugin || this.storage.getItem(askedToNotifyKey)) return;
+    this.storage.setItem(askedToNotifyKey, "1");
+    try {
+      await this.options.plugin.requestNotifications();
+    } catch {
+      // the app still offers the update when it opens
+    }
   }
 
   /** Look now, for "Check now". A check already under way is shared. */
