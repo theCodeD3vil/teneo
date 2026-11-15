@@ -1,11 +1,13 @@
 import type { Component } from "vue";
 import AppleIcon from "~icons/tabler/brand-apple-filled";
-import GoogleIcon from "~icons/tabler/brand-google-filled";
+
+import GoogleLogo from "../components/device-maker/GoogleLogo.vue";
 
 // A phone says who made it when it connects (Android's Build.MANUFACTURER, in
-// lower case). Only these have a logo so far; any other shows none.
+// lower case). Only these have a logo so far; any other shows none. Google's
+// is its own four-colour G; Apple's logo has one colour, the text's.
 const makerIcons: Record<string, Component> = {
-  google: GoogleIcon,
+  google: GoogleLogo,
   apple: AppleIcon,
 };
 

@@ -15,6 +15,9 @@ export interface NativeItem {
   text: string | null;
   sourceAppName: string | null;
   sourceAppBundleId: string | null;
+  /** who made the device it was copied on, such as "google"; null when
+   *  that device didn't say */
+  originMaker?: string | null;
   pinned: boolean;
   secrets: SecretSpan[];
   linkUrl: string | null;

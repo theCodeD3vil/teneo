@@ -392,6 +392,7 @@ public class HistoryPlugin extends Plugin {
         json.put("text", orNull(item.text));
         json.put("sourceAppName", orNull(item.sourceAppName));
         json.put("sourceAppBundleId", orNull(item.sourceAppBundleId));
+        json.put("originMaker", item.originMaker == null || item.originMaker.isEmpty() ? JSONObject.NULL : item.originMaker);
         json.put("pinned", item.pinnedAt != null);
         json.put("secrets", secrets);
         json.put("linkUrl", orNull(item.linkUrl));

@@ -14,7 +14,8 @@ import java.security.SecureRandom;
 public final class HistoryDatabase extends SQLiteOpenHelper {
 
     public static final String NAME = "teneo.sqlite";
-    private static final int VERSION = 1;
+    /** 2: SYNC_PEERS has a maker */
+    private static final int VERSION = 2;
 
     HistoryDatabase(Context context, String name) {
         super(context, name, null, VERSION);
@@ -72,6 +73,7 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
               deviceId TEXT PRIMARY KEY,
               name TEXT NOT NULL DEFAULT '',
               platform TEXT NOT NULL DEFAULT '',
+              maker TEXT NOT NULL DEFAULT '',
               epoch TEXT,
               receivedSeq INTEGER NOT NULL DEFAULT 0,
               lastAddress TEXT,
@@ -93,7 +95,8 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // no other version yet
+        // who made a device ("google"), as it said: its logo shows by the items copied on it
+        if (oldVersion < 2) db.execSQL("ALTER TABLE SYNC_PEERS ADD COLUMN maker TEXT NOT NULL DEFAULT ''");
     }
 
     private static String randomHex(int bytes) {

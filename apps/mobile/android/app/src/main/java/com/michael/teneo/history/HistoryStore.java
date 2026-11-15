@@ -4,6 +4,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.os.Build;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -12,6 +13,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -41,6 +43,8 @@ public final class HistoryStore {
         public final String text;
         public final String sourceAppName;
         public final String sourceAppBundleId;
+        /** who made the device it was copied on, such as "google"; null when that device didn't say */
+        public final String originMaker;
         public final Long pinnedAt;
         public final List<SecretSpan> secrets;
         public final String linkUrl;
@@ -55,6 +59,7 @@ public final class HistoryStore {
             String text,
             String sourceAppName,
             String sourceAppBundleId,
+            String originMaker,
             Long pinnedAt,
             List<SecretSpan> secrets,
             String linkUrl,
@@ -67,6 +72,7 @@ public final class HistoryStore {
             this.text = text;
             this.sourceAppName = sourceAppName;
             this.sourceAppBundleId = sourceAppBundleId;
+            this.originMaker = originMaker;
             this.pinnedAt = pinnedAt;
             this.secrets = secrets;
             this.linkUrl = linkUrl;
@@ -128,15 +134,27 @@ public final class HistoryStore {
     private static final String LAST_SEEN_CLIP = "lastSeenClip";
     private static final String LAST_SEEN_CLIP_TEXT = "lastSeenClipText";
 
+    // Who made the device an item was copied on: this phone for its own copies
+    // (kept in SYNC_META when the history opens), else what that device said
+    // when it connected. Empty or NULL when it never said.
+    private static final String ORIGIN_MAKER =
+        "CASE WHEN originDevice = (SELECT value FROM SYNC_META WHERE key = 'deviceId') " +
+        "THEN (SELECT value FROM SYNC_META WHERE key = 'maker') " +
+        "ELSE (SELECT maker FROM SYNC_PEERS WHERE deviceId = originDevice) END AS originMaker";
+
     // A text holding a secret is read whole, so the search can tell the
     // secret from the rest; any other only as far as the list shows it
     private static final String LIST_COLUMNS =
         "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
+        ORIGIN_MAKER +
+        ", " +
         "CASE WHEN secrets IS NOT NULL THEN value ELSE substr(value, 1, " +
         HistoryText.PREVIEW_LENGTH +
         ") END AS value, length(value) AS valueLength";
     private static final String ITEM_COLUMNS =
-        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, value, length(value) AS valueLength";
+        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
+        ORIGIN_MAKER +
+        ", value, length(value) AS valueLength";
 
     private static final Map<String, HistoryStore> stores = new HashMap<>();
 
@@ -151,6 +169,9 @@ public final class HistoryStore {
         db = helper.getWritableDatabase();
         deviceId = metaString("deviceId");
         clock = new Hlc(deviceId, System::currentTimeMillis);
+        // for the logo by this phone's own copies (ORIGIN_MAKER)
+        String maker = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(Locale.ROOT);
+        db.execSQL("INSERT OR REPLACE INTO SYNC_META (key, value) VALUES ('maker', ?)", new Object[] { maker });
         // the clock starts past every pin made before, even if the phone's
         // time has since gone back
         try (Cursor latest = db.rawQuery("SELECT max(pinnedStamp) FROM CLIPBOARD_ITEMS", null)) {
@@ -919,6 +940,7 @@ public final class HistoryStore {
             text,
             string(row, "sourceAppName"),
             string(row, "sourceAppBundleId"),
+            string(row, "originMaker"),
             nullableLong(row, "pinnedAt"),
             secrets,
             hasLink ? linkUrl : null,

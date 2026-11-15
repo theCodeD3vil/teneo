@@ -12,6 +12,7 @@ const maxTextBytes = 1024 * 1024;
 const peerFields = [
   "name",
   "platform",
+  "maker",
   "epoch",
   "receivedSeq",
   "lastAddress",

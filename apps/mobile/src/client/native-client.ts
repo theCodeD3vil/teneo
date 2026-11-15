@@ -77,6 +77,7 @@ export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
       item.sourceAppName === null && item.sourceAppBundleId === null
         ? null
         : { name: item.sourceAppName, bundleId: item.sourceAppBundleId },
+    originMaker: item.originMaker ?? null,
     sourceURL: null,
     pinned: item.pinned,
     pasteAsFile: false,

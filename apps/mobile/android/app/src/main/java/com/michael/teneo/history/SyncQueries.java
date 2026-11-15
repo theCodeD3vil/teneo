@@ -42,7 +42,7 @@ public final class SyncQueries {
 
     /** The fields of a device that can be changed: the page's patch may name no others */
     public static final List<String> PEER_FIELDS = Collections.unmodifiableList(
-        Arrays.asList("name", "platform", "epoch", "receivedSeq", "lastAddress", "lastSeenAt")
+        Arrays.asList("name", "platform", "maker", "epoch", "receivedSeq", "lastAddress", "lastSeenAt")
     );
 
     /** A skip list this long is more than one batch can make (two rows per received change) */

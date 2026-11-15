@@ -182,6 +182,13 @@ if (!appMode) {
 
 // --- commands
 
+// the app the next copies are from: `from <bundle id> <name>` changes it, to
+// try what goes by an item's app, such as the icon a phone asks for
+let sourceApp: { name: string; bundleId: string | null } = {
+  name: "sync:peer",
+  bundleId: null,
+};
+
 const textItem = (text: string): Parameters<typeof saveClipboardItem>[0] => ({
   kind: "text",
   changeCount: 0,
@@ -192,7 +199,7 @@ const textItem = (text: string): Parameters<typeof saveClipboardItem>[0] => ({
   imageSize: null,
   color: null,
   concealed: false,
-  sourceApp: { name: "sync:peer", bundleId: null },
+  sourceApp,
   sourceURL: null,
 });
 
@@ -203,6 +210,12 @@ async function handle(line: string): Promise<void> {
     case "copy": {
       const item = await saveClipboardItem(textItem(argument), app);
       console.log(`ok copy ${item.id}`);
+      break;
+    }
+    case "from": {
+      const [bundleId = "", ...name] = rest;
+      sourceApp = { name: name.join(" ") || bundleId, bundleId };
+      console.log(`ok from ${sourceApp.name}`);
       break;
     }
     case "pin":
@@ -226,7 +239,7 @@ async function handle(line: string): Promise<void> {
       });
       for (const item of page.items) {
         console.log(
-          `item ${item.id} ${item.pinned ? "pinned" : "-"} ${JSON.stringify(item.text)}`,
+          `item ${item.id} ${item.pinned ? "pinned" : "-"} ${JSON.stringify(item.text)}${item.originMaker ? ` maker=${item.originMaker}` : ""}`,
         );
       }
       console.log("end list");

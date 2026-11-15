@@ -1,11 +1,12 @@
 <script lang="ts" setup>
+import { shortTimeAgo } from "@teneo/shared/time/ago";
 import type { ClipboardHistoryItem } from "@teneo/shared/types/clipboard";
 import Button from "@teneo/ui/components/button/Button.vue";
 import { currentTime } from "@teneo/ui/composables/useRelativeTimeAgo";
 import { cn } from "@teneo/ui/lib/utils";
+import { makerIcon } from "@teneo/ui/utils/device-makers";
 import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { maskSecrets, type TextPart } from "@teneo/ui/utils/secrets";
-import { formatTimeAgo } from "@vueuse/core";
 import { computed, onUnmounted, ref } from "vue";
 import TextAlignLeftIcon from "~icons/tabler/align-left";
 import OpenIcon from "~icons/tabler/chevron-right";
@@ -43,6 +44,10 @@ const { appIcon } = useAppIcons();
 const sourceAppIcon = computed(() =>
   appIcon(props.itemDetails.sourceApp?.name),
 );
+// An item copied on a phone is named after the phone, with its maker's logo
+const deviceMakerIcon = computed(() =>
+  makerIcon(props.itemDetails.originMaker),
+);
 
 const isCopying = ref(false);
 // Bumped on each copy so the sweep across the card plays again
@@ -76,12 +81,9 @@ const imageName = computed(() =>
     : "Image",
 );
 
+// a copy made again moves the item's time, so it is read from the item each time
 const dateCopied = computed(() =>
-  formatTimeAgo(
-    new Date(props.itemDetails.dateCopied),
-    undefined,
-    currentTime.value,
-  ),
+  shortTimeAgo(props.itemDetails.dateCopied, currentTime.value.getTime()),
 );
 
 // Secrets show as asterisks unless hiding is off in Settings; copying always
@@ -197,17 +199,18 @@ onUnmounted(() => clearTimeout(copyFinishedTimeout));
         <!-- one line: where it came from, size, date, secrets -->
         <div
           class="text-foreground/50 flex items-center gap-x-2 text-xs whitespace-nowrap">
-          <span
-            v-if="itemDetails.sourceApp"
-            class="flex min-w-0 items-center gap-x-1">
-            <img
-              v-if="sourceAppIcon"
-              :src="sourceAppIcon"
-              alt=""
-              class="size-4 shrink-0 rounded" />
-            <span class="min-w-0 truncate">
-              {{ itemDetails.sourceApp.name }}
-            </span>
+          <!-- beside the name, not around it: the name truncates on its own -->
+          <img
+            v-if="itemDetails.sourceApp && sourceAppIcon"
+            :src="sourceAppIcon"
+            alt=""
+            class="-mr-1 size-4 shrink-0 rounded" />
+          <component
+            :is="deviceMakerIcon"
+            v-else-if="itemDetails.sourceApp && deviceMakerIcon"
+            class="-mr-1 size-3.5 shrink-0" />
+          <span v-if="itemDetails.sourceApp" class="min-w-0 truncate">
+            {{ itemDetails.sourceApp.name }}
           </span>
           <template v-if="fileSize">
             <span v-if="itemDetails.sourceApp">·</span>

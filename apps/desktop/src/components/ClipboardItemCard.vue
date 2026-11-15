@@ -2,6 +2,7 @@
 import Button from "@teneo/ui/components/button/Button.vue";
 import { useRelativeTimeAgo } from "@teneo/ui/composables/useRelativeTimeAgo";
 import { cn } from "@teneo/ui/lib/utils";
+import { makerIcon } from "@teneo/ui/utils/device-makers";
 import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { maskSecrets, type TextPart } from "@teneo/ui/utils/secrets";
 import { computed, onUnmounted, ref } from "vue";
@@ -21,7 +22,6 @@ import { useSettings } from "@/composables/useSettings";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
 import { getClipboardData, getImageName } from "@/utils/clipboard-items";
 import { copyItemToClipboard } from "@/utils/copy-item";
-import { makerIcon } from "@/utils/device-makers";
 
 const props = defineProps<{
   itemDetails: ClipboardHistoryItem;
