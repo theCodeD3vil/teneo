@@ -1,0 +1,48 @@
+name: Checks
+
+# Runs the repo's checks on every pull request into development or main, and
+# on every push to development, so the branch itself is known to be green.
+# It needs only a Linux runner: it builds no app, and the tests that need the
+# TinyJS runtime (bun run test:runtime) are not part of Turbo's "test".
+on:
+  pull_request:
+    branches: [development, main]
+  push:
+    branches: [development]
+
+permissions:
+  contents: read
+
+# A new commit on a PR makes its older run pointless, so cancel it. A push to
+# development is never cancelled: every commit there gets its own verdict.
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # One job per check, none cancelled by another's failure, so one run
+      # shows everything that is wrong
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Typecheck, script: typecheck }
+          - { name: Test, script: test }
+          - { name: Lint, script: lint }
+          - { name: Format, script: "fmt:check" }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false # nothing here pushes
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run ${{ matrix.script }}
