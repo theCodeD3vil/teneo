@@ -9,13 +9,14 @@ export interface BrowseEvent {
 }
 
 /** A line of `dns-sd -B <type> local`, when it is an Add or Rmv of `serviceType`.
- *  The same instance shows once for every network interface it is on. */
+ *  The same instance shows once for every network interface it is on. Before
+ *  ten in the morning the hour is one digit behind a space (` 7:48:17.493`). */
 export function parseBrowseLine(
   line: string,
   serviceType: string,
 ): BrowseEvent | null {
   const match =
-    /^\d\d:\d\d:\d\d\.\d+\s+(Add|Rmv)\s+\d+\s+\d+\s+\S+\s+(\S+)\s+(.+?)\s*$/.exec(
+    /^\s*\d{1,2}:\d\d:\d\d\.\d+\s+(Add|Rmv)\s+\d+\s+\d+\s+\S+\s+(\S+)\s+(.+?)\s*$/.exec(
       line,
     );
   if (!match || match[2] !== `${serviceType}.`) return null;
@@ -63,7 +64,7 @@ export function parseTxt(line: string): Record<string, string> {
 /** A line of `dns-sd -G v4 <host>`: an address the host has. */
 export function parseAddressLine(line: string): string | null {
   const match =
-    /^\d\d:\d\d:\d\d\.\d+\s+Add\s+\S+\s+\d+\s+\S+\s+(\d{1,3}(?:\.\d{1,3}){3})\s+\d+\s*$/.exec(
+    /^\s*\d{1,2}:\d\d:\d\d\.\d+\s+Add\s+\S+\s+\d+\s+\S+\s+(\d{1,3}(?:\.\d{1,3}){3})\s+\d+\s*$/.exec(
       line,
     );
   return match ? match[1]! : null;

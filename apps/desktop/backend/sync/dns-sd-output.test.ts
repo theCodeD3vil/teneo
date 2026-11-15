@@ -47,6 +47,27 @@ test("browse lines give the instances that appear and go, of our type only", () 
   ]);
 });
 
+// dns-sd pads the hour with a space, so a morning line starts with one
+test("lines printed before ten in the morning are read like any other", () => {
+  expect(
+    parseBrowseLine(
+      " 7:48:17.493  Add        2  11 local.               _teneo-sync._tcp.    teneo-7005fa37acb2",
+      "_teneo-sync._tcp",
+    ),
+  ).toEqual({ added: true, name: "teneo-7005fa37acb2" });
+  expect(
+    parseBrowseLine(
+      " 0:00:01.002  Rmv        0  11 local.               _teneo-sync._tcp.    teneo-7005fa37acb2",
+      "_teneo-sync._tcp",
+    ),
+  ).toEqual({ added: false, name: "teneo-7005fa37acb2" });
+  expect(
+    parseAddressLine(
+      " 7:48:37.678  Add  40000002      11  Android_R9E3DGZG.local.                10.103.147.116                               120",
+    ),
+  ).toBe("10.103.147.116");
+});
+
 test("a lookup gives the host, the port and the TXT once it has both", () => {
   const reader = new LookupReader();
   const found = lookup
