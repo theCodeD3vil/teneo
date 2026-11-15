@@ -10,13 +10,13 @@ import type {
 import type { PairResult, TeneoClient } from "../types/client";
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
-import { FakeSync } from "./fake-sync";
 import {
   appDatabase,
   type DatabaseOption,
   type HistoryPlugin,
   type NativeItem,
 } from "./history-plugin";
+import type { NativeSync } from "./native-sync";
 
 // texts looked at per round trip: few, as a text can be long
 const detectionBatch = 10;
@@ -86,15 +86,16 @@ export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
 
 /**
  * The phone's own history, kept by the Android app in its database
- * (HistoryPlugin.java), so it outlives the app and a later background
- * service can reach it. Pairing and sync are still the fake ones.
+ * (HistoryPlugin.java), so it outlives the app and the sync service can
+ * reach it. Pairing and sync status come from the sync service, through
+ * NativeSync; without one (a test database) the phone is never paired.
  */
 export class NativeClient implements TeneoClient {
   private readonly plugin: HistoryPlugin;
   private readonly database: DatabaseOption;
   private readonly databaseName: string;
   private historyListeners = new Set<() => void>();
-  private sync = new FakeSync();
+  private readonly sync: NativeSync | null;
   private removeNativeListener: Promise<() => Promise<void>>;
   private mayHaveUndetected = true;
   // texts whose detections couldn't be made or saved: left out of later
@@ -102,8 +103,12 @@ export class NativeClient implements TeneoClient {
   private readonly unsavable = new Set<string>();
   private detecting: Promise<void> | null = null;
 
-  constructor(plugin: HistoryPlugin, options: DatabaseOption = {}) {
+  constructor(
+    plugin: HistoryPlugin,
+    options: DatabaseOption & { sync?: NativeSync } = {},
+  ) {
     this.plugin = plugin;
+    this.sync = options.sync ?? null;
     this.database = options.database ? { database: options.database } : {};
     this.databaseName = options.database ?? appDatabase;
     this.removeNativeListener = plugin
@@ -285,22 +290,55 @@ export class NativeClient implements TeneoClient {
       ...this.database,
       changes,
     });
-    return { ...defaultSettings, ...settings };
+    const saved = { ...defaultSettings, ...settings };
+    if (
+      this.sync &&
+      ("backgroundReceive" in changes || "syncSecrets" in changes)
+    ) {
+      // the service starts, stops or changes what it sends by them
+      try {
+        await this.sync.settingsChanged();
+      } catch {
+        // saved all the same; the service reads them again when it next starts
+      }
+      if (changes.backgroundReceive) void this.askForNotifications();
+    }
+    return saved;
   }
 
   getSyncStatus(): Promise<SyncStatus> {
-    return this.sync.getSyncStatus();
+    return this.sync?.getSyncStatus() ?? Promise.resolve(notPaired());
   }
 
   onSyncStatusChanged(listener: (status: SyncStatus) => void): () => void {
-    return this.sync.onSyncStatusChanged(listener);
+    return this.sync?.onSyncStatusChanged(listener) ?? (() => {});
   }
 
-  pair(code: string): Promise<PairResult> {
-    return this.sync.pair(code);
+  async pair(code: string): Promise<PairResult> {
+    if (!this.sync) return { ok: false, error: "Sync isn't available here" };
+    const result = await this.sync.pair(code);
+    if (result.ok) void this.askForNotifications();
+    return result;
   }
 
-  unpair(): Promise<void> {
-    return this.sync.unpair();
+  async unpair(): Promise<void> {
+    await this.sync?.unpair();
   }
+
+  /** Sync in the background shows a notification: ask for it once sync is
+   *  on in the background, when the user can see why */
+  private async askForNotifications(): Promise<void> {
+    try {
+      const { backgroundReceive } = await this.getSettings();
+      const status = await this.getSyncStatus();
+      if (!backgroundReceive || status.state === "not_paired") return;
+      await this.sync?.requestNotifications();
+    } catch {
+      // sync runs without it; the notification is only hidden
+    }
+  }
+}
+
+function notPaired(): SyncStatus {
+  return { state: "not_paired", devices: [] };
 }

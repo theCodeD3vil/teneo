@@ -15,6 +15,8 @@ export function useSyncStatus() {
   const client = useClient();
   const isBusy = ref(false);
   const error = ref("");
+  /** What the last action did, when that is worth saying */
+  const notice = ref("");
   if (!isSubscribed) {
     isSubscribed = true;
     void client.getSyncStatus().then((loaded) => (status.value = loaded));
@@ -24,6 +26,7 @@ export function useSyncStatus() {
   async function run<T>(action: () => Promise<T>): Promise<T | undefined> {
     isBusy.value = true;
     error.value = "";
+    notice.value = "";
     try {
       return await action();
     } catch (caught) {
@@ -34,9 +37,13 @@ export function useSyncStatus() {
     }
   }
 
-  /** Join the devices whose recovery code or QR link this is. Does nothing
-   *  with no code, or while this screen is already joining or turning off. */
-  async function join(code: string): Promise<string | null> {
+  /** Join the devices whose recovery code or QR link this is. Null when it
+   *  didn't join (the reason is in `error`), or with the name of the device
+   *  it connected to, if one did straight away. Does nothing with no code, or
+   *  while this screen is already joining or turning off. */
+  async function join(
+    code: string,
+  ): Promise<{ deviceName: string | null } | null> {
     if (isBusy.value || !code.trim()) return null;
     const result = await run(() => client.pair(code));
     if (!result) return null;
@@ -44,13 +51,20 @@ export function useSyncStatus() {
       error.value = result.error ?? "Couldn't join with that code";
       return null;
     }
-    return result.deviceName ?? "your Mac";
+    return { deviceName: result.deviceName ?? null };
   }
 
   async function turnOff(): Promise<void> {
     if (isBusy.value) return;
-    await run(() => client.unpair());
+    const done = await run(async () => {
+      await client.unpair();
+      return true;
+    });
+    if (done) {
+      notice.value =
+        "Sync is off. This phone forgot its sync key and devices; your history stays.";
+    }
   }
 
-  return { status, isBusy, error, join, turnOff };
+  return { status, isBusy, error, notice, join, turnOff };
 }

@@ -51,6 +51,25 @@
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode_ui" />
 
+        <!-- Clipboard sync (sync/SyncService.java): only the app starts it.
+             connectedDevice: it keeps a network connection to the user's
+             other devices -->
+        <service
+            android:name=".sync.SyncService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- brings sync back after a reboot or an update, if it was on in
+             the background; both broadcasts come only from the system -->
+        <receiver
+            android:name=".sync.SyncBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -65,4 +84,13 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- sync in the background -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- what a connectedDevice service has to hold at least one of; this one
+         is the one for network connections -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- the sync notification; asked for when sync is turned on in the background -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 </manifest>

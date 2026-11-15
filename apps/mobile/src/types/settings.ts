@@ -15,7 +15,8 @@ export interface MobileSettings {
 
 export const defaultSettings: MobileSettings = {
   backgroundReceive: true,
-  syncSecrets: true,
+  // as on the Mac: secrets stay on this phone until the user allows them
+  syncSecrets: false,
   captureOnOpen: false,
   historyRetentionDays: 30,
   maxItems: 500,

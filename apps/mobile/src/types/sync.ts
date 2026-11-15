@@ -8,8 +8,11 @@ export type SyncState =
 export interface PairedDevice {
   id: string;
   name: string;
-  model: string;
+  /** What kind of device it is, as shown: "Mac", "Android" */
+  platform: string;
+  /** When it was last connected; for a connected one, when it connected */
   lastSeen: number;
+  connected: boolean;
 }
 
 export interface SyncStatus {

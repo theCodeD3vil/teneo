@@ -15,7 +15,7 @@ import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
 const { settings, updateSettings } = useSettings();
-const { status, isBusy, error, join, turnOff } = useSyncStatus();
+const { status, isBusy, error, notice, join, turnOff } = useSyncStatus();
 
 const isOn = computed(
   () =>
@@ -52,20 +52,18 @@ async function scanAndJoin(): Promise<void> {
 // --- what the tab says
 
 const summary = computed(() => {
+  if (status.value?.state === "error") return "Not syncing";
   if (status.value?.state !== "connected") return "Looking for other devices…";
-  const count = status.value.devices.length;
+  const count = status.value.devices.filter(
+    (device) => device.connected,
+  ).length;
   return count === 1
     ? "Connected to 1 device"
     : `Connected to ${count} devices`;
 });
 
-const isConnected = computed(() => status.value?.state === "connected");
-
-const platformName = (device: PairedDevice): string =>
-  device.model.startsWith("Mac") ? "Mac" : device.model;
-
 const lastSeen = (device: PairedDevice): string =>
-  isConnected.value
+  device.connected
     ? "Connected"
     : `Last seen ${new Date(device.lastSeen).toLocaleString([], {
         dateStyle: "medium",
@@ -187,7 +185,8 @@ const isTurnOffWarningOpen = ref(false);
         <SettingsField>
           <template #label>Receive in the background</template>
           <template #description>
-            Get new items from your other devices while Teneo is closed
+            Get new items while Teneo is closed. When off, Teneo syncs only
+            while it's open
           </template>
           <Switch v-model="backgroundReceive" />
         </SettingsField>
@@ -204,10 +203,10 @@ const isTurnOffWarningOpen = ref(false);
         <SettingsField v-for="device in status.devices" :key="device.id">
           <template #label>{{ device.name }}</template>
           <template #description>
-            {{ platformName(device) }} · {{ lastSeen(device) }}
+            {{ device.platform }} · {{ lastSeen(device) }}
           </template>
           <span
-            v-if="isConnected"
+            v-if="device.connected"
             class="bg-success size-2 rounded-full"
             role="img"
             aria-label="Connected" />
@@ -229,6 +228,9 @@ const isTurnOffWarningOpen = ref(false);
 
     <p v-if="scanError || error" class="text-destructive text-sm">
       {{ scanError || error }}
+    </p>
+    <p v-else-if="notice && !isOn" class="text-foreground/60 text-sm">
+      {{ notice }}
     </p>
 
     <ConfirmSheet

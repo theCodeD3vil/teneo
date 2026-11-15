@@ -9,8 +9,10 @@ export interface NativeSync {
   log(line: string): void;
   /** The page is loaded: native code answers by calling `teneoSyncPage.start` */
   pageLoaded(): void;
-  /** The page can't run (the recovery code is no good): nothing would help */
+  /** The page can't run (the key is no good): nothing would help */
   failed(reason: string): void;
+  /** The devices connected now, as a JSON array of `ConnectedDevice` */
+  peersChanged(devices: string): void;
   /** The core has its keys: listen, announce this device and look for the
    *  others, all with the vault's tag */
   ready(tag: string, deviceId: string): void;
@@ -42,11 +44,21 @@ export interface DiscoveredDevice {
   port: number;
 }
 
+/** A device connected now, as the page tells native code */
+export interface ConnectedDevice {
+  deviceId: string;
+  name: string;
+  platform: string;
+}
+
 /** What native code calls on the page: the object `teneoSyncPage`. Messages
  *  and closes of one connection arrive in order. */
 export interface SyncPage {
-  /** Run sync with this recovery code */
-  start(recoveryCode: string): Promise<void>;
+  /** Run sync with this vault key (base64), which native code keeps. Items
+   *  holding secrets travel only while `syncSecrets` is true. */
+  start(vaultKey: string, syncSecrets: boolean): Promise<void>;
+  /** The user changed whether items holding secrets travel */
+  setSyncSecrets(allowed: boolean): void;
   /** End sync: close every connection */
   stop(): void;
   /** A connection is ready. `address` is `host:port` for one this phone
