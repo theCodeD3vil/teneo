@@ -8,13 +8,13 @@ import { useUpdates } from "../composables/useUpdates";
 import type { Update } from "../updates/releases";
 import { formatSize } from "../updates/updater";
 import BottomSheet from "./BottomSheet.vue";
+import UpdateProgress from "./UpdateProgress.vue";
 
 /** Offers a new version when the app opens, at most once a day, if "Check
  *  for updates" is on; the Mac opens its update window the same way. */
 const client = useClient();
 const { currentState } = useNavigation();
-const { state, checkIfDue, install, cancel, openInBrowser, dismiss } =
-  useUpdates();
+const { state, checkIfDue, install, cancel, dismiss } = useUpdates();
 
 const offered = ref<Update | null>(null);
 const isOpen = ref(false);
@@ -54,10 +54,6 @@ const title = computed(() =>
 );
 const description = computed(() => {
   const now = state.value;
-  if (now.kind === "downloading" && offered.value) {
-    const percent = Math.floor((now.received / offered.value.size) * 100);
-    return `Downloading… ${Math.min(percent, 100)}%`;
-  }
   if (now.kind === "needs_permission") {
     return "Allow Teneo to install apps in the settings that opened, then come back and tap Update.";
   }
@@ -66,10 +62,6 @@ const description = computed(() => {
   return `You have ${__APP_VERSION__}. The download is ${formatSize(offered.value.size)}.`;
 });
 const isDownloading = computed(() => state.value.kind === "downloading");
-const canUseBrowser = computed(
-  () =>
-    state.value.kind === "failed" || state.value.kind === "needs_permission",
-);
 
 function later(): void {
   if (offered.value) dismiss(offered.value);
@@ -80,6 +72,11 @@ function later(): void {
 <template>
   <BottomSheet v-model:open="isOpen" :title="title" :description="description">
     <div class="grid gap-2 pt-2">
+      <UpdateProgress
+        v-if="state.kind === 'downloading'"
+        class="mb-2"
+        :received="state.received"
+        :size="state.update.size" />
       <Button class="h-12 text-sm" :disabled="isDownloading" @click="install()">
         {{ isDownloading ? "Downloading…" : "Update" }}
       </Button>
@@ -92,13 +89,6 @@ function later(): void {
       </Button>
       <Button v-else variant="secondary" class="h-12 text-sm" @click="later">
         Later
-      </Button>
-      <Button
-        v-if="canUseBrowser"
-        variant="ghost"
-        class="h-12 text-sm"
-        @click="openInBrowser()">
-        Download in the browser instead
       </Button>
     </div>
   </BottomSheet>

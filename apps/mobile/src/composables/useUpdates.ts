@@ -26,7 +26,6 @@ export function useUpdates() {
     checkIfDue: () => requireUpdater().checkIfDue(),
     install: () => requireUpdater().install(),
     cancel: () => requireUpdater().cancel(),
-    openInBrowser: () => requireUpdater().openInBrowser(),
     dismiss: (...args: Parameters<Updater["dismiss"]>) =>
       requireUpdater().dismiss(...args),
   };

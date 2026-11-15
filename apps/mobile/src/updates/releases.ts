@@ -9,7 +9,7 @@ const api = `https://api.github.com/repos/${repository}`;
 export interface Update {
   version: string;
   versionCode: number;
-  /** The APK on GitHub: the browser can download it too */
+  /** The APK on GitHub */
   apkUrl: string;
   /** In bytes */
   size: number;

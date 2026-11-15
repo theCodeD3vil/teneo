@@ -7,6 +7,7 @@ import { useNavigation } from "../../composables/useNavigation";
 import { useSettings } from "../../composables/useSettings";
 import { useUpdates } from "../../composables/useUpdates";
 import { formatSize } from "../../updates/updater";
+import UpdateProgress from "../UpdateProgress.vue";
 import ExternalLink from "./ExternalLink.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
@@ -14,7 +15,7 @@ import SettingsSection from "./SettingsSection.vue";
 const version = __APP_VERSION__;
 const { openSetup } = useNavigation();
 const { settings, updateSettings } = useSettings();
-const { state, check, install, cancel, openInBrowser } = useUpdates();
+const { state, check, install, cancel } = useUpdates();
 
 const checkForUpdates = computed({
   get: () => settings.value.checkForUpdates,
@@ -38,12 +39,10 @@ const updateStatus = computed(() => {
       return `Teneo ${now.update.version} is available (${formatSize(now.update.size)})`;
     case "needs_permission":
       return "Allow Teneo to install apps, then tap Update again";
-    case "downloading": {
-      const percent = Math.floor((now.received / now.update.size) * 100);
-      return `Downloading Teneo ${now.update.version}… ${Math.min(percent, 100)}%`;
-    }
+    case "downloading":
+      return `Downloading Teneo ${now.update.version}…`;
     case "installing":
-      return "Confirm in Android's installer";
+      return `Installing Teneo ${now.update.version}…`;
     case "failed":
       return now.message;
   }
@@ -60,9 +59,6 @@ const action = computed<Action>(() => {
   if (update.value) return { label: "Update", run: install };
   return { label: "Check now", run: check };
 });
-const canUseBrowser = computed(
-  () => update.value !== null && state.value.kind !== "downloading",
-);
 </script>
 
 <template>
@@ -83,14 +79,10 @@ const canUseBrowser = computed(
           @click="action.run()">
           {{ action.label }}
         </Button>
-        <template v-if="canUseBrowser" #footer>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="text-foreground/60 -ml-2"
-            @click="openInBrowser()">
-            Download in the browser instead
-          </Button>
+        <template v-if="state.kind === 'downloading'" #footer>
+          <UpdateProgress
+            :received="state.received"
+            :size="state.update.size" />
         </template>
       </SettingsField>
 
