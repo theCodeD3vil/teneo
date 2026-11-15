@@ -197,6 +197,22 @@ Then, from the repo root:
 
 The Android scripts aren't part of Turbo's `build`, so CI and the Mac release workflow don't need Java or the Android SDK.
 
+#### The sync service
+
+Sync on the phone runs in a foreground service (`apps/mobile/android/app/src/main/java/com/michael/teneo/sync`), so it keeps going with the screen off. The service owns a web view with no window that runs the sync core, the same `@teneo/sync` the Mac runs (`apps/mobile/src/sync-service`, built as a second page, `sync.html`, beside the app). The core decides everything; Java does what a page can't: it listens for devices on ports 47823 to 47827, dials the ones Bonjour finds, and announces and browses `_teneo-sync._tcp`. A permanent, low-priority notification shows while it runs. The rules for who may connect, and for retrying, are the Mac's: see `apps/desktop/backend/sync/lan-transport.ts`.
+
+Nothing in the app starts it yet, and a release build has no service to start: the service, its permissions and its starter are in `apps/mobile/android/app/src/debug`. A debug build starts it from `adb shell` only, with the recovery code of a vault (a throwaway one, from `bun backend/sync/new-recovery-code.ts` in `apps/desktop`, then `bun run sync:peer "<code>"` for a Mac to sync with). The code is kept in memory, and storage is in memory too, so each start is a new device with an empty history.
+
+```sh
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --es code '<recovery code>'"
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --es copy 'text to copy on the phone'"
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --ez dial false"  # only listen, never dial
+adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sync.DebugSyncService --ez stop true"
+adb logcat -s TeneoSync                                                                                             # what it does
+```
+
+The Java tests (WebSocket framing, handshake, limits, and the listener and dialer on loopback) run with `cd apps/mobile && mise exec -- ./android/gradlew -p android testDebugUnitTest`. They need the same Java and SDK as a build, so CI doesn't run them. The TypeScript side is in `bun run test` as usual.
+
 #### Releasing the Android app
 
 The Android app releases the way the Mac app does, from its own version: `"version"` in `apps/mobile/package.json`. When a PR is merged into `main` and that version has no `android-v<version>` tag yet, `.github/workflows/release-android.yml` builds a signed APK and publishes it as the GitHub release "Teneo for Android `<version>`", with the PR's title and description as the notes. So bump the version in the PR to ship a release. A PR can bump the Mac version, the Android version or both.

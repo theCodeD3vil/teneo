@@ -19,6 +19,7 @@
     "@tailwindcss/vite": "catalog:",
     "@tanstack/vue-virtual": "^3.13.45",
     "@teneo/shared": "workspace:*",
+    "@teneo/sync": "workspace:*",
     "@teneo/ui": "workspace:*",
     "@vueuse/core": "catalog:",
     "tailwindcss": "catalog:",
