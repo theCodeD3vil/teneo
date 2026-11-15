@@ -32,7 +32,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "desktop": "cd apps/desktop && tinyjs dev",
+    "desktop": "cd apps/desktop && bun scripts/dev.ts",
     "desktop:reset-dev-data": "cd apps/desktop && bun scripts/reset-dev-data.ts",
     "sync:peer": "cd apps/desktop && bun run sync:peer",
     "sync:check": "cd apps/desktop && bun run sync:check",

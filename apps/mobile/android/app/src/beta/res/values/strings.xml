@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- Beta releases (build.gradle adds this folder when the version is a beta):
+     named apart from the full release, which they install beside -->
+<resources>
+    <string name="app_name">Teneo Beta</string>
+    <string name="title_activity_main">Teneo Beta</string>
+    <string name="share_target">Save to Teneo Beta</string>
+</resources>

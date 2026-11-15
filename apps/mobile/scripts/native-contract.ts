@@ -8,7 +8,8 @@
 /* oxlint-disable no-console -- a command-line script reports on the console */
 import { $ } from "bun";
 
-const appId = "com.michael.teneo";
+// the debug build's id (android/app/build.gradle)
+const appId = "com.michael.teneo.debug";
 const port = 9333;
 
 const pid = (await $`adb shell pidof ${appId}`.nothrow().text()).trim();
