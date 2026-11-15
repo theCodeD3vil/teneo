@@ -29,7 +29,11 @@ const emit = defineEmits<{
 }>();
 
 const selectedTab = ref<TabVariant>("all");
-const debouncedSearchQuery = ref(normalizeSearchQuery(props.searchQuery));
+// what was typed, once typing pauses: shown as typed, searched for in lower case
+const debouncedSearchText = ref(props.searchQuery.trim());
+const debouncedSearchQuery = computed(() =>
+  debouncedSearchText.value.toLowerCase(),
+);
 const { items, total, error, loading, hasMore, loadingMore, loadMore } =
   useClipboardList(() => ({
     kind: selectedTab.value,
@@ -37,16 +41,12 @@ const { items, total, error, loading, hasMore, loadingMore, loadMore } =
   }));
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | undefined;
 
-function normalizeSearchQuery(searchQuery: string): string {
-  return searchQuery.trim().toLowerCase();
-}
-
 watch(
   () => props.searchQuery,
   (searchQuery) => {
     clearTimeout(searchDebounceTimeout);
     searchDebounceTimeout = setTimeout(() => {
-      debouncedSearchQuery.value = normalizeSearchQuery(searchQuery);
+      debouncedSearchText.value = searchQuery.trim();
     }, 200);
   },
 );
@@ -256,7 +256,7 @@ watch(selectedTab, async (tab, previous) => {
           :has-more="hasMore"
           :loading-more="loadingMore"
           :empty-message="emptyMessages[selectedTab]"
-          :search-query="debouncedSearchQuery"
+          :search-query="debouncedSearchText"
           @preview="emit('preview', $event)"
           @load-more="loadMore" />
       </div>
