@@ -365,6 +365,7 @@ public class HistoryPlugin extends Plugin {
         json.put("linkUrl", orNull(item.linkUrl));
         json.put("linkHost", orNull(item.linkHost));
         json.put("isTruncated", item.isTruncated);
+        json.put("detectorVersion", item.detectorVersion == null ? JSONObject.NULL : item.detectorVersion);
         return json;
     }
 

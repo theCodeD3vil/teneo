@@ -21,6 +21,42 @@ import {
 // texts looked at per round trip: few, as a text can be long
 const detectionBatch = 10;
 
+type Detection = Parameters<
+  HistoryPlugin["saveDetections"]
+>[0]["items"][number];
+
+/**
+ * The secrets and link of an item. Native code saves a captured or shared
+ * text without looking for them, and the app looks before it lists
+ * (detectNewTexts). A text saved between that look and the list still comes
+ * through unlooked-at, so it is looked at here: a secret is never shown
+ * unmasked. The list carries only the start of a long text, which is all it
+ * shows; a link is the whole text or nothing, so a cut text keeps what is
+ * stored.
+ */
+function detected(
+  item: NativeItem,
+): Pick<ClipboardHistoryItem, "secrets" | "link"> {
+  const stored = {
+    secrets: item.secrets,
+    link:
+      item.linkUrl && item.linkHost
+        ? { url: item.linkUrl, host: item.linkHost }
+        : null,
+  };
+  const isLookedAt =
+    item.detectorVersion !== null && item.detectorVersion >= detectionVersion;
+  if (isLookedAt || item.text === null) return stored;
+  try {
+    return {
+      secrets: findSecrets(item.text),
+      link: item.isTruncated ? stored.link : findLink(item.text),
+    };
+  } catch {
+    return stored;
+  }
+}
+
 /** The item the app shows for one the native history handed over */
 export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
   return {
@@ -43,11 +79,7 @@ export function toHistoryItem(item: NativeItem): ClipboardHistoryItem {
     pinned: item.pinned,
     pasteAsFile: false,
     fileSize: null,
-    secrets: item.secrets,
-    link:
-      item.linkUrl && item.linkHost
-        ? { url: item.linkUrl, host: item.linkHost }
-        : null,
+    ...detected(item),
     isTruncated: item.isTruncated,
   };
 }
@@ -65,6 +97,9 @@ export class NativeClient implements TeneoClient {
   private sync = new FakeSync();
   private removeNativeListener: Promise<() => Promise<void>>;
   private mayHaveUndetected = true;
+  // texts whose detections couldn't be made or saved: left out of later
+  // rounds, so one bad text never holds up the others
+  private readonly unsavable = new Set<string>();
   private detecting: Promise<void> | null = null;
 
   constructor(plugin: HistoryPlugin, options: DatabaseOption = {}) {
@@ -128,22 +163,58 @@ export class NativeClient implements TeneoClient {
 
   private async detectAll(): Promise<void> {
     for (;;) {
+      // the newest come first, so ask past the ones that are being left out
+      const limit = detectionBatch + this.unsavable.size;
       const { items } = await this.plugin.undetected({
         ...this.database,
         detectorVersion: detectionVersion,
-        limit: detectionBatch,
+        limit,
       });
-      if (items.length === 0) return;
-      await this.plugin.saveDetections({
+      const found: Detection[] = [];
+      for (const { id, text } of items) {
+        if (this.unsavable.has(id)) continue;
+        try {
+          found.push({ id, secrets: findSecrets(text), link: findLink(text) });
+        } catch {
+          this.unsavable.add(id);
+        }
+      }
+      if (found.length === 0) return;
+      await this.saveDetections(found);
+      if (items.length < limit) return;
+    }
+  }
+
+  /** Save them together; if native code refuses the lot, one by one, so a
+   *  text it won't take doesn't cost the others theirs */
+  private async saveDetections(found: Detection[]): Promise<void> {
+    const save = (items: Detection[]) =>
+      this.plugin.saveDetections({
         ...this.database,
         detectorVersion: detectionVersion,
-        items: items.map(({ id, text }) => ({
-          id,
-          secrets: findSecrets(text),
-          link: findLink(text),
-        })),
+        items,
       });
-      if (items.length < detectionBatch) return;
+    try {
+      await save(found);
+    } catch (error) {
+      if (found.length === 1) {
+        this.unsavable.add(found[0]!.id);
+        return;
+      }
+      let savedAny = false;
+      for (const one of found) {
+        try {
+          await save([one]);
+          savedAny = true;
+        } catch {
+          this.unsavable.add(one.id);
+        }
+      }
+      // none could be saved: the history itself is the trouble, not a text
+      if (!savedAny) {
+        for (const one of found) this.unsavable.delete(one.id);
+        throw error;
+      }
     }
   }
 

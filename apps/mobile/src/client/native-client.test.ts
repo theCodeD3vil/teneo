@@ -15,6 +15,7 @@ const nativeItem: NativeItem = {
   linkUrl: "https://example.org",
   linkHost: "example.org",
   isTruncated: false,
+  detectorVersion: 1,
 };
 
 /** A plugin with only what a test needs; the rest throws */
@@ -200,6 +201,74 @@ describe("NativeClient", () => {
     emit({ database: "teneo.sqlite" });
     await client.listItems(request);
     expect(calls).toEqual(["list", "undetected v1", "list"]);
+  });
+
+  test("a text nothing has looked at yet is listed with its secret found", async () => {
+    // saved by the capture between the look and the list
+    const captured: NativeItem = {
+      ...nativeItem,
+      id: "captured",
+      text: "postgres://user:pa55@db.example.com/app",
+      linkUrl: null,
+      linkHost: null,
+      detectorVersion: null,
+    };
+    const { plugin } = fakePlugin({
+      undetected: async () => ({ items: [] }),
+      list: async () => ({ items: [captured], nextCursor: null, total: 1 }),
+      get: async () => ({ item: captured }),
+    });
+    const client = new NativeClient(plugin);
+    const page = await client.listItems({ kind: "all", search: "", limit: 10 });
+    const expected = [{ start: 16, end: 20, label: "Password in URL" }];
+    expect(page.items[0]?.secrets).toEqual(expected);
+    expect((await client.getItem("captured"))?.secrets).toEqual(expected);
+  });
+
+  test("a text looked at by older rules is looked at again when shown", () => {
+    const old = toHistoryItem({
+      ...nativeItem,
+      text: "plain words",
+      secrets: [{ start: 0, end: 5, label: "Old rule" }],
+      linkUrl: null,
+      linkHost: null,
+      detectorVersion: 0,
+    });
+    expect(old.secrets).toEqual([]);
+  });
+
+  test("a text native code won't take detections for doesn't hold up the others", async () => {
+    const saved: string[] = [];
+    let waiting = [
+      { id: "bad", text: "one" },
+      { id: "good", text: "two" },
+    ];
+    let looks = 0;
+    const { plugin, emit } = fakePlugin({
+      undetected: async () => {
+        looks++;
+        return { items: waiting };
+      },
+      saveDetections: async ({ items }) => {
+        if (items.some((item) => item.id === "bad")) {
+          throw new Error("A secret is outside the text");
+        }
+        for (const item of items) saved.push(item.id);
+        waiting = waiting.filter((text) => !saved.includes(text.id));
+      },
+      list: async () => ({ items: [], nextCursor: null, total: 0 }),
+    });
+    const client = new NativeClient(plugin);
+    const request = { kind: "all" as const, search: "", limit: 10 };
+    await client.listItems(request);
+    expect(saved).toEqual(["good"]);
+
+    // the bad one is left out from then on, not tried on every list
+    looks = 0;
+    emit({ database: "teneo.sqlite" });
+    await client.listItems(request);
+    expect(looks).toBe(1);
+    expect(saved).toEqual(["good"]);
   });
 
   test("a text saved while it looks is looked at before the list", async () => {

@@ -40,4 +40,28 @@ public class CaptureRulesTest {
         assertEquals(now, CaptureRules.dateCopied(0, now));
         assertEquals(now, CaptureRules.dateCopied(86_400_000L, now));
     }
+
+    @Test
+    public void teneosOwnClipIsToldByItsTextAndItsTime() {
+        // the clip Teneo wrote, read back
+        assertTrue(CaptureRules.isOwnWrite(true, COPIED, COPIED));
+        // the same text copied again in another app, later
+        assertFalse(CaptureRules.isOwnWrite(true, COPIED, COPIED + 60_000));
+        // another text is never Teneo's
+        assertFalse(CaptureRules.isOwnWrite(false, COPIED, COPIED));
+    }
+
+    @Test
+    public void withoutATimeTheTextAloneDecides() {
+        assertTrue(CaptureRules.isOwnWrite(true, 0, COPIED));
+        assertTrue(CaptureRules.isOwnWrite(true, COPIED, 0));
+    }
+
+    @Test
+    public void aClipWithNoTimeIsSavedOnceNotOnEveryFocus() {
+        assertTrue(CaptureRules.isSameUntimedClip(0, true));
+        assertFalse(CaptureRules.isSameUntimedClip(0, false));
+        // a clip with a time is told apart by it, even with the same text
+        assertFalse(CaptureRules.isSameUntimedClip(COPIED, true));
+    }
 }

@@ -50,6 +50,14 @@ public final class HistoryText {
         return new Preview(text.substring(0, cut), kept, true);
     }
 
+    /** Whether sqlite's LIKE can match `search` whatever its case: it only folds the case of ASCII letters */
+    public static boolean isAscii(String search) {
+        for (int i = 0; i < search.length(); i++) {
+            if (search.charAt(i) > 127) return false;
+        }
+        return true;
+    }
+
     /** A LIKE pattern that finds `search` anywhere, with its own wildcards escaped by \ */
     public static String likePattern(String search) {
         return "%" + search.toLowerCase(Locale.ROOT).replaceAll("[\\\\%_]", "\\\\$0") + "%";

@@ -93,4 +93,18 @@ public class HistoryTextTest {
         assertEquals("********", HistoryText.maskSecret("short"));
         assertEquals("********wxyz", HistoryText.maskSecret("abcdefghijklmnopwxyz"));
     }
+
+    @Test
+    public void onlyAnAsciiSearchIsLeftToSqlite() {
+        assertTrue(HistoryText.isAscii(""));
+        assertTrue(HistoryText.isAscii("api key_100%"));
+        assertFalse(HistoryText.isAscii("\u00e9cole"));
+        assertFalse(HistoryText.isAscii("z\u00fcrich"));
+    }
+
+    @Test
+    public void aSearchMatchesWhateverTheCaseOfAccentedLetters() {
+        assertTrue(HistoryText.matchesSearch("\u00c9COLE Z\u00fcrich", java.util.Collections.emptyList(), null, null, "\u00e9cole", true));
+        assertTrue(HistoryText.matchesSearch("plain", java.util.Collections.emptyList(), "\u00dcberblick", null, "\u00fcber", true));
+    }
 }

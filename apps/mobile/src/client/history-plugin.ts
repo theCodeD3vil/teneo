@@ -20,6 +20,8 @@ export interface NativeItem {
   linkUrl: string | null;
   linkHost: string | null;
   isTruncated: boolean;
+  /** which detection rules found `secrets` and the link; null if none looked */
+  detectorVersion: number | null;
 }
 
 /** Which database a call is for: a test database's name (debug builds

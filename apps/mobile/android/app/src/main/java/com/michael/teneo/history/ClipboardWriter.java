@@ -1,6 +1,7 @@
 package com.michael.teneo.history;
 
 import android.content.ClipData;
+import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.PersistableBundle;
@@ -32,5 +33,9 @@ public final class ClipboardWriter {
         // must already know not to save it again
         store.rememberWrittenClip(text);
         clipboard.setPrimaryClip(clip);
+        // The clip's time tells Teneo's clip from the same text copied again
+        // elsewhere. It can only be read back while Teneo has focus.
+        ClipDescription written = clipboard.getPrimaryClipDescription();
+        if (written != null) store.rememberWrittenClipTime(written.getTimestamp());
     }
 }

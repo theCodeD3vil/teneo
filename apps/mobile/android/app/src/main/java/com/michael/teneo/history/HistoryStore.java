@@ -45,6 +45,8 @@ public final class HistoryStore {
         public final String linkUrl;
         public final String linkHost;
         public final boolean isTruncated;
+        /** which detection rules found the secrets and link; null if none looked */
+        public final Integer detectorVersion;
 
         Item(
             String id,
@@ -56,7 +58,8 @@ public final class HistoryStore {
             List<SecretSpan> secrets,
             String linkUrl,
             String linkHost,
-            boolean isTruncated
+            boolean isTruncated,
+            Integer detectorVersion
         ) {
             this.id = id;
             this.dateCopied = dateCopied;
@@ -68,6 +71,7 @@ public final class HistoryStore {
             this.linkUrl = linkUrl;
             this.linkHost = linkHost;
             this.isTruncated = isTruncated;
+            this.detectorVersion = detectorVersion;
         }
     }
 
@@ -119,17 +123,19 @@ public final class HistoryStore {
 
     private static final String SETTING_PREFIX = "setting.";
     private static final String LAST_WRITTEN_CLIP = "lastWrittenClip";
+    private static final String LAST_WRITTEN_CLIP_TIME = "lastWrittenClipTime";
     private static final String LAST_SEEN_CLIP = "lastSeenClip";
+    private static final String LAST_SEEN_CLIP_TEXT = "lastSeenClipText";
 
     // A text holding a secret is read whole, so the search can tell the
     // secret from the rest; any other only as far as the list shows it
     private static final String LIST_COLUMNS =
-        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, " +
+        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
         "CASE WHEN secrets IS NOT NULL THEN value ELSE substr(value, 1, " +
         HistoryText.PREVIEW_LENGTH +
         ") END AS value, length(value) AS valueLength";
     private static final String ITEM_COLUMNS =
-        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, value, length(value) AS valueLength";
+        "id, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, value, length(value) AS valueLength";
 
     private static final Map<String, HistoryStore> stores = new HashMap<>();
 
@@ -213,18 +219,22 @@ public final class HistoryStore {
         String query = search == null ? "" : search.trim().toLowerCase(java.util.Locale.ROOT);
         int wanted = Math.max(1, limit);
         boolean hideSecrets = hideSecrets();
+        // sqlite's LIKE ignores case for ASCII letters only. Any other search
+        // ("école" for "ÉCOLE") is matched row by row instead, on whole texts.
+        boolean likeFinds = HistoryText.isAscii(query);
+        String columns = likeFinds ? LIST_COLUMNS : ITEM_COLUMNS;
         List<Item> items = new ArrayList<>();
         HistoryQueries.ListCursor after = cursor;
         boolean exhausted = false;
 
         while (items.size() < wanted && !exhausted) {
             int batchSize = Math.max(wanted - items.size(), 20);
-            HistoryQueries.Condition where = HistoryQueries.listConditions(kind, query, after);
+            HistoryQueries.Condition where = HistoryQueries.listConditions(kind, likeFinds ? query : "", after);
             List<Object> values = new ArrayList<>(where.values);
             values.add(batchSize);
             String sql =
                 "SELECT " +
-                LIST_COLUMNS +
+                columns +
                 " FROM CLIPBOARD_ITEMS WHERE " +
                 where.sql +
                 " ORDER BY " +
@@ -238,7 +248,7 @@ public final class HistoryStore {
                     after = new HistoryQueries.ListCursor(nullableLong(row, "pinnedAt"), longColumn(row, "dateCopied"), string(row, "id"));
                     List<SecretSpan> secrets = parseSecrets(string(row, "secrets"));
                     String text = string(row, "value");
-                    if (!query.isEmpty() && !secrets.isEmpty()) {
+                    if (!query.isEmpty() && (!likeFinds || !secrets.isEmpty())) {
                         boolean matches = HistoryText.matchesSearch(
                             text,
                             secrets,
@@ -264,12 +274,19 @@ public final class HistoryStore {
     }
 
     private int count(String kind, String query, boolean hideSecrets) {
-        HistoryQueries.Condition where = HistoryQueries.listConditions(kind, query, null);
+        boolean likeFinds = HistoryText.isAscii(query);
+        HistoryQueries.Condition where = HistoryQueries.listConditions(kind, likeFinds ? query : "", null);
         if (query.isEmpty()) {
             return (int) longQuery("SELECT COUNT(*) FROM CLIPBOARD_ITEMS WHERE " + where.sql, where.values);
         }
-        long count = longQuery("SELECT COUNT(*) FROM CLIPBOARD_ITEMS WHERE " + where.sql + " AND secrets IS NULL", where.values);
-        String sql = "SELECT value, secrets, sourceAppName, linkHost FROM CLIPBOARD_ITEMS WHERE " + where.sql + " AND secrets IS NOT NULL";
+        // rows sqlite could judge by itself are counted there; the rest row by row
+        long count = likeFinds
+            ? longQuery("SELECT COUNT(*) FROM CLIPBOARD_ITEMS WHERE " + where.sql + " AND secrets IS NULL", where.values)
+            : 0;
+        String sql =
+            "SELECT value, secrets, sourceAppName, linkHost FROM CLIPBOARD_ITEMS WHERE " +
+            where.sql +
+            (likeFinds ? " AND secrets IS NOT NULL" : "");
         try (Cursor row = db.rawQuery(sql, args(where.values))) {
             while (row.moveToNext()) {
                 List<SecretSpan> secrets = parseSecrets(row.getString(1));
@@ -348,12 +365,12 @@ public final class HistoryStore {
             id = inTransaction(() -> {
                 String repeated = repeatedCopy(copy.text);
                 if (repeated != null) {
-                    ContentValues values = new ContentValues();
-                    values.put("dateCopied", dateCopied);
-                    values.put("sourceAppName", copy.sourceAppName);
-                    values.put("sourceAppBundleId", copy.sourceAppBundleId);
-                    values.put("syncSeq", nextSyncSeq());
-                    db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { repeated });
+                    // never back in time: the clip may be older than the row, as
+                    // when the text was shared to Teneo after it was copied
+                    db.execSQL(
+                        "UPDATE CLIPBOARD_ITEMS SET dateCopied = MAX(dateCopied, ?), sourceAppName = ?, sourceAppBundleId = ?, syncSeq = ? WHERE id = ?",
+                        new Object[] { dateCopied, copy.sourceAppName, copy.sourceAppBundleId, nextSyncSeq(), repeated }
+                    );
                     return repeated;
                 }
                 String newId = UUID.randomUUID().toString();
@@ -413,17 +430,20 @@ public final class HistoryStore {
         );
         long keepNewest = HistoryQueries.keepNewest(Settings.count(settings, Settings.MAX_ITEMS, Settings.DEFAULT_MAX_ITEMS));
         return inTransaction(() -> {
-            int deleted = 0;
-            if (HistoryQueries.limitsHistory(copiedBefore, keepNewest)) {
-                Object[] values = HistoryQueries.deletionValues(now, copiedBefore, keepNewest);
-                deleted += db.delete("CLIPBOARD_ITEMS", HistoryQueries.DELETION_CONDITION, args(java.util.Arrays.asList(values)));
-            }
-            // these are already out of the list: deleting them changes nothing shown
+            // Tombstones past their 30 days go first: "Maximum items" keeps the
+            // newest N rows that are not young tombstones, and an old one left
+            // in would take a live item's place among them. They are already
+            // out of the list, so deleting them changes nothing shown.
             db.delete(
                 "CLIPBOARD_ITEMS",
                 HistoryQueries.TOMBSTONE_ROW + " AND deletedAt < ?",
                 new String[] { String.valueOf(now - HistoryQueries.TOMBSTONE_LIFETIME_MS) }
             );
+            int deleted = 0;
+            if (HistoryQueries.limitsHistory(copiedBefore, keepNewest)) {
+                Object[] values = HistoryQueries.deletionValues(now, copiedBefore, keepNewest);
+                deleted += db.delete("CLIPBOARD_ITEMS", HistoryQueries.DELETION_CONDITION, args(java.util.Arrays.asList(values)));
+            }
             return deleted > 0;
         });
     }
@@ -480,24 +500,58 @@ public final class HistoryStore {
     /** Note that Teneo put `text` on the clipboard. Only a hash is kept: the text may be a secret. */
     public synchronized void rememberWrittenClip(String text) {
         writeState(LAST_WRITTEN_CLIP, sha256(text));
+        writeState(LAST_WRITTEN_CLIP_TIME, "0");
+    }
+
+    /** The time Android gave the clip Teneo just wrote, so the same text copied again later isn't taken for it */
+    public synchronized void rememberWrittenClipTime(long copiedAt) {
+        writeState(LAST_WRITTEN_CLIP_TIME, String.valueOf(copiedAt));
     }
 
     /** Whether `text` is what Teneo last put on the clipboard */
     public synchronized boolean isWrittenClip(String text) {
-        try (Cursor row = db.rawQuery("SELECT value FROM APP_STATE WHERE key = ?", new String[] { LAST_WRITTEN_CLIP })) {
-            return row.moveToFirst() && row.getString(0).equals(sha256(text));
-        }
+        String written = readState(LAST_WRITTEN_CLIP);
+        return written != null && written.equals(sha256(text));
+    }
+
+    /** The time of the clip Teneo last wrote, 0 if it isn't known */
+    public synchronized long writtenClipTime() {
+        return longState(LAST_WRITTEN_CLIP_TIME);
+    }
+
+    /** Another clip is on the clipboard now: what Teneo wrote is no longer there to skip */
+    public synchronized void forgetWrittenClip() {
+        db.delete("APP_STATE", "key IN (?, ?)", new String[] { LAST_WRITTEN_CLIP, LAST_WRITTEN_CLIP_TIME });
     }
 
     /** The time of the last clip the capture read, 0 for none */
     public synchronized long seenClip() {
-        try (Cursor row = db.rawQuery("SELECT value FROM APP_STATE WHERE key = ?", new String[] { LAST_SEEN_CLIP })) {
-            if (!row.moveToFirst()) return 0;
-            try {
-                return Long.parseLong(row.getString(0));
-            } catch (NumberFormatException ignored) {
-                return 0;
-            }
+        return longState(LAST_SEEN_CLIP);
+    }
+
+    /** Whether `text` is what the capture last read. Only a hash is kept. */
+    public synchronized boolean isSeenClipText(String text) {
+        String seen = readState(LAST_SEEN_CLIP_TEXT);
+        return seen != null && seen.equals(sha256(text));
+    }
+
+    public synchronized void rememberSeenClipText(String text) {
+        writeState(LAST_SEEN_CLIP_TEXT, sha256(text));
+    }
+
+    private String readState(String key) {
+        try (Cursor row = db.rawQuery("SELECT value FROM APP_STATE WHERE key = ?", new String[] { key })) {
+            return row.moveToFirst() ? row.getString(0) : null;
+        }
+    }
+
+    private long longState(String key) {
+        String value = readState(key);
+        if (value == null) return 0;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException ignored) {
+            return 0;
         }
     }
 
@@ -559,7 +613,9 @@ public final class HistoryStore {
 
     /**
      * Store what the rules of `version` found. A text deleted since is left
-     * alone. Throws, saving none, if a secret lies outside its text.
+     * alone. Throws, saving none, if a secret lies outside its text. Listeners
+     * only hear of it when what an item shows changed: a text with nothing
+     * found in it looks the same as before.
      */
     public void saveDetections(List<Detection> detections, int version) {
         boolean changed;
@@ -568,8 +624,19 @@ public final class HistoryStore {
                 boolean any = false;
                 for (Detection found : detections) {
                     String text = null;
-                    try (Cursor row = db.rawQuery("SELECT value FROM CLIPBOARD_ITEMS WHERE id = ?", new String[] { found.id })) {
-                        if (row.moveToFirst() && !row.isNull(0)) text = row.getString(0);
+                    String oldSecrets = null;
+                    String oldLinkUrl = null;
+                    try (
+                        Cursor row = db.rawQuery(
+                            "SELECT value, secrets, linkUrl FROM CLIPBOARD_ITEMS WHERE id = ?",
+                            new String[] { found.id }
+                        )
+                    ) {
+                        if (row.moveToFirst() && !row.isNull(0)) {
+                            text = row.getString(0);
+                            oldSecrets = row.isNull(1) ? null : row.getString(1);
+                            oldLinkUrl = row.isNull(2) ? null : row.getString(2);
+                        }
                     }
                     if (text == null) continue;
                     for (SecretSpan secret : found.secrets) {
@@ -579,11 +646,14 @@ public final class HistoryStore {
                     }
                     boolean hasLink = found.linkUrl != null && found.linkHost != null;
                     ContentValues values = new ContentValues();
-                    values.put("secrets", serializeSecrets(found.secrets));
-                    values.put("linkUrl", hasLink ? found.linkUrl : null);
+                    String newSecrets = serializeSecrets(found.secrets);
+                    String newLinkUrl = hasLink ? found.linkUrl : null;
+                    values.put("secrets", newSecrets);
+                    values.put("linkUrl", newLinkUrl);
                     values.put("linkHost", hasLink ? found.linkHost : null);
                     values.put("detectorVersion", version);
-                    any |= db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { found.id }) > 0;
+                    boolean saved = db.update("CLIPBOARD_ITEMS", values, "id = ?", new String[] { found.id }) > 0;
+                    any |= saved && !(Objects.equals(oldSecrets, newSecrets) && Objects.equals(oldLinkUrl, newLinkUrl));
                 }
                 return any;
             });
@@ -666,7 +736,8 @@ public final class HistoryStore {
             secrets,
             hasLink ? linkUrl : null,
             hasLink ? linkHost : null,
-            isTruncated
+            isTruncated,
+            nullableInt(row, "detectorVersion")
         );
     }
 
@@ -677,6 +748,11 @@ public final class HistoryStore {
 
     private static long longColumn(Cursor row, String column) {
         return row.getLong(row.getColumnIndexOrThrow(column));
+    }
+
+    private static Integer nullableInt(Cursor row, String column) {
+        int index = row.getColumnIndexOrThrow(column);
+        return row.isNull(index) ? null : row.getInt(index);
     }
 
     private static Long nullableLong(Cursor row, String column) {

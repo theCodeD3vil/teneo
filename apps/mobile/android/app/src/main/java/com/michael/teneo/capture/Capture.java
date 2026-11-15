@@ -68,7 +68,13 @@ public final class Capture {
         CharSequence copied = clip.getItemAt(0).getText();
         if (copied == null || copied.length() == 0) return;
         String text = copied.toString();
-        if (store.isWrittenClip(text)) return;
+        boolean isSameUntimedClip = CaptureRules.isSameUntimedClip(copiedAt, store.isSeenClipText(text));
+        store.rememberSeenClipText(text);
+        if (isSameUntimedClip) return;
+        if (CaptureRules.isOwnWrite(store.isWrittenClip(text), store.writtenClipTime(), copiedAt)) return;
+        // another clip is on the clipboard now, so what Teneo wrote is gone
+        // from it: the same text copied later is the user's own copy
+        store.forgetWrittenClip();
         store.saveText(newText(context, text), CaptureRules.dateCopied(copiedAt, System.currentTimeMillis()));
     }
 
