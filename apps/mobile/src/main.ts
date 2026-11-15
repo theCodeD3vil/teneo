@@ -10,6 +10,9 @@ import { NativeSync } from "./client/native-sync";
 import { Sync } from "./client/native-sync-plugin";
 import { initNavigation } from "./composables/useNavigation";
 import { isSetupDone } from "./composables/useSetup";
+import { provideUpdater } from "./composables/useUpdates";
+import { Updates } from "./updates/native-update-plugin";
+import { Updater } from "./updates/updater";
 
 import "./style.css";
 
@@ -42,4 +45,12 @@ function nativeClient(): NativeClient {
   const client = new NativeClient(History, { sync });
   return client;
 }
+
+// in a browser an update can only be a download link
+provideUpdater(
+  new Updater({
+    current: async () => __APP_VERSION__,
+    plugin: Capacitor.isNativePlatform() ? Updates : null,
+  }),
+);
 app.mount("#app");

@@ -11,6 +11,8 @@ export interface MobileSettings {
   maxItems: number;
   /** Mask secrets until revealed */
   hideSecrets: boolean;
+  /** Look for a new version once a day, when the app opens */
+  checkForUpdates: boolean;
 }
 
 export const defaultSettings: MobileSettings = {
@@ -21,4 +23,5 @@ export const defaultSettings: MobileSettings = {
   historyRetentionDays: 30,
   maxItems: 500,
   hideSecrets: true,
+  checkForUpdates: true,
 };

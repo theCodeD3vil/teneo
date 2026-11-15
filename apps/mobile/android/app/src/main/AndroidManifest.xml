@@ -93,4 +93,7 @@
     <!-- the sync notification; asked for when sync is turned on in the background -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- installs an update downloaded in Settings › About; the user allows
+         it in "Install unknown apps" and confirms each install -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>
