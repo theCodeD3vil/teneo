@@ -121,6 +121,12 @@ final class WebSocketConnection {
         return !finished.get();
     }
 
+    private boolean isClosing() {
+        synchronized (closing) {
+            return closeQueued;
+        }
+    }
+
     private boolean enqueue(byte[] frame) {
         synchronized (closing) {
             if (finished.get() || closeQueued) return false;
@@ -165,7 +171,8 @@ final class WebSocketConnection {
                         return;
                     default:
                         String message = assembler.add(frame);
-                        if (message != null) listener.onMessage(message);
+                        // once this side has closed, what still arrives is for nobody
+                        if (message != null && !isClosing()) listener.onMessage(message);
                 }
             }
         } catch (ProtocolViolation error) {

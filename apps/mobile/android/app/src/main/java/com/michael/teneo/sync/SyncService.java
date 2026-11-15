@@ -59,6 +59,11 @@ public abstract class SyncService extends Service implements SyncRuntime.Host {
         return true;
     }
 
+    /** Whether sync is running in this service */
+    protected final boolean isRunning() {
+        return runtime != null;
+    }
+
     /** Runs script in the sync page, if it is up. For the debug starter. */
     protected final void runInPage(String script) {
         if (runtime != null) runtime.evaluate(script);

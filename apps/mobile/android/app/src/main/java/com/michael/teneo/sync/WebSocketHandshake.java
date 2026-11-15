@@ -75,9 +75,13 @@ final class WebSocketHandshake {
         ByteArrayOutputStream head = new ByteArrayOutputStream();
         int matched = 0; // how much of \r\n\r\n the last bytes are
         while (matched < 4) {
-            long remaining = deadlineMs - System.currentTimeMillis();
-            if (remaining <= 0) throw new SocketTimeoutException("the request head took too long");
-            socket.setSoTimeout((int) Math.min(remaining, Integer.MAX_VALUE));
+            // only a read that has to wait for the network can run past the
+            // deadline: bytes already here cost no time, and no system call
+            if (in.available() == 0) {
+                long remaining = deadlineMs - System.currentTimeMillis();
+                if (remaining <= 0) throw new SocketTimeoutException("the request head took too long");
+                socket.setSoTimeout((int) Math.min(remaining, Integer.MAX_VALUE));
+            }
             int value = in.read();
             if (value < 0) throw new java.io.EOFException();
             head.write(value);

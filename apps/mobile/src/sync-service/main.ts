@@ -34,11 +34,14 @@ interface Run {
 }
 let run: Run | null = null;
 let starting = false;
+// a stop that came while starting: start gives up at its next step
+let stopWanted = false;
 
 const page: SyncPage = {
   async start(recoveryCode) {
     if (run || starting) return;
     starting = true;
+    stopWanted = false;
     try {
       if (!isSecureContext || typeof crypto?.subtle !== "object") {
         native.failed(
@@ -51,6 +54,7 @@ const page: SyncPage = {
         native.failed("that is not a valid recovery code");
         return;
       }
+      if (stopWanted) return;
 
       const deviceId = toHex(randomBytes(16));
       const clock = new Hlc(deviceId);
@@ -79,16 +83,25 @@ const page: SyncPage = {
       // set before starting: native code begins sending events once told ready
       run = { engine, transport, store, stopStatus: undefined };
       await transport.start();
+      // a stop during that has already taken everything down
+      const started = run;
+      if (!started) return;
       log(`sync running as ${deviceId.slice(0, 8)}`);
       if (debuggable) {
-        run.stopStatus = window.setInterval(() => log(status(run)), 30_000);
+        started.stopStatus = window.setInterval(() => log(status(run)), 30_000);
       }
+    } catch (error) {
+      // Nothing is listening for this promise, so say it: otherwise the
+      // service's notification stays up over a sync that never started
+      if (run) page.stop();
+      native.failed(`sync could not start: ${String(error)}`);
     } finally {
       starting = false;
     }
   },
 
   stop() {
+    if (starting) stopWanted = true;
     if (!run) return;
     window.clearInterval(run.stopStatus);
     run.transport.stop();

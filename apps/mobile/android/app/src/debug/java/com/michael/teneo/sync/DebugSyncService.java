@@ -1,6 +1,7 @@
 package com.michael.teneo.sync;
 
 import android.content.Intent;
+import android.util.Log;
 import org.json.JSONObject;
 
 /**
@@ -20,6 +21,8 @@ import org.json.JSONObject;
  * (not of the service) forgets it, and sync stops until it is given again.
  */
 public final class DebugSyncService extends SyncService {
+
+    private static final String TAG = "TeneoSync";
 
     private static String code;
     private static boolean dial = true;
@@ -44,8 +47,17 @@ public final class DebugSyncService extends SyncService {
         }
         String copy = intent == null ? null : intent.getStringExtra("copy");
         if (copy != null) {
+            if (!isRunning()) {
+                // this command created the service: don't leave it up with nothing running
+                Log.w(TAG, "sync isn't running, so there is nowhere to copy to: start it with --es code first");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             runInPage("teneoSyncPage.debug.copy(" + JSONObject.quote(copy) + ")");
             return START_STICKY;
+        }
+        if (isRunning() && intent != null && intent.hasExtra("dial") && intent.getBooleanExtra("dial", true) != dial) {
+            Log.w(TAG, "--ez dial is read when sync starts: stop it (--ez stop true) and start it again");
         }
         return super.onStartCommand(intent, flags, startId);
     }

@@ -215,6 +215,8 @@ adb shell "am start-foreground-service -n com.michael.teneo/com.michael.teneo.sy
 adb logcat -s TeneoSync                                                                                             # what it does
 ```
 
+Before the Sync screen starts this service for real, one thing has to be settled: the sync page and the app's own page share one web view process. If that process dies while the app's window is alive, Capacitor lets Android end the whole app, and the service comes back with no recovery code to start with. Either the service runs in a process of its own, or the app handles the loss of its page.
+
 The Java tests (WebSocket framing, handshake, limits, and the listener and dialer on loopback) run with `cd apps/mobile && mise exec -- ./android/gradlew -p android testDebugUnitTest`. They need the same Java and SDK as a build, so CI doesn't run them. The TypeScript side is in `bun run test` as usual.
 
 #### Releasing the Android app

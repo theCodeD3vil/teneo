@@ -76,6 +76,8 @@ final class SyncNetwork {
 
     private volatile ServerSocket server;
     private volatile boolean stopped;
+    /** stopNow has run: whatever is still open is to be cut, not closed politely */
+    private volatile boolean cut;
 
     private static final class Connection {
 
@@ -102,6 +104,10 @@ final class SyncNetwork {
         this.ledger = new FailureLedger(limits.failureCount, limits.failureWindowMs, clock);
         // a write's watchdog is cancelled almost every time: don't keep the husks
         timers.setRemoveOnCancelPolicy(true);
+        // A connection's threads may ask for a timer just after stopNow shut
+        // them down. Its socket is cut by then, so the timer has nothing left
+        // to do: drop it instead of throwing on a thread nobody catches for.
+        timers.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy());
     }
 
     /** Listens on the first free of the ports, and returns it: -1 when none was free */
@@ -144,6 +150,7 @@ final class SyncNetwork {
     /** Cuts everything now */
     void stopNow() {
         stopped = true;
+        cut = true;
         closeQuietly(server);
         for (Connection connection : connections.values()) {
             WebSocketConnection socket = connection.socket;
@@ -308,6 +315,8 @@ final class SyncNetwork {
 
     /** Takes the socket over: from here on `closed` is told for `id` */
     private void open(int id, Socket socket, InputStream in, boolean initiator, String address) throws IOException {
+        // an upgrade that finished after the network stopped: nobody would cut it
+        if (stopped) throw new IOException("sync has stopped");
         Connection connection = new Connection(initiator, address);
         WebSocketConnection ws = new WebSocketConnection(
             socket,
@@ -345,6 +354,8 @@ final class SyncNetwork {
         } catch (IOException error) {
             ws.abort(); // told as closed, like any other end
         }
+        // stopNow may have run between the check above and the map: it missed this one
+        if (cut) ws.abort();
     }
 
     private static String addressOf(Socket socket) {

@@ -479,6 +479,41 @@ public class SyncNetworkTest {
     }
 
     @Test
+    public void whatArrivesAfterThisSideClosedIsForNobody() throws Exception {
+        Recorder recorder = new Recorder();
+        SyncLimits limits = quick();
+        limits.closeGraceMs = 1500; // long enough to send into the closing connection
+        SyncNetwork network = network(limits, ANY, recorder);
+        Raw raw = connectedRaw(network.start());
+        int id = Integer.parseInt(recorder.next("opened").split(" ")[1]);
+
+        network.close(id, "done");
+        assertEquals(1000, raw.closeCodeReceived());
+        // a device that keeps talking after being told goodbye
+        for (int i = 0; i < 5; i++) raw.text("ignored " + i);
+        assertTrue("only the close is told", recorder.next().startsWith("closed " + id));
+        recorder.assertQuiet(200);
+    }
+
+    @Test
+    public void aNetworkThatWasCutTakesNoNewConnection() throws Exception {
+        Recorder recorder = new Recorder();
+        SyncNetwork network = network(quick(), ANY, recorder);
+        int port = network.start();
+        // connected, but its upgrade request not sent yet
+        Raw raw = new Raw(port);
+        Thread.sleep(100);
+        network.stopNow();
+        try {
+            raw.upgrade();
+        } catch (IOException cut) {
+            // the socket was closed under it: as good as refused
+        }
+        recorder.assertQuiet(500);
+        assertEquals(0, network.connectionCount());
+    }
+
+    @Test
     public void stoppingFreesThePortAndEndsEveryConnection() throws Exception {
         Recorder recorder = new Recorder();
         SyncNetwork network = network(quick(), ANY, recorder);

@@ -11,6 +11,7 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +47,10 @@ final class NsdDiscovery {
     private static final long RESOLVE_TIMEOUT_MS = 4_000;
     /** How long to wait for the old announcement to be withdrawn before a new one */
     private static final long WITHDRAW_MS = 1_500;
+    /** Every instance in view is resolved again this often: a device that
+     *  moved to another address or port without leaving is not found again
+     *  by the browse, and one that could not be resolved gets another try */
+    private static final long REFRESH_MS = 30_000;
 
     private final NsdManager nsd;
     private final Handler handler;
@@ -63,8 +68,14 @@ final class NsdDiscovery {
     private NsdManager.DiscoveryListener discovery;
     /** Browse reports an instance once for each network it is on */
     private final Set<String> handled = new HashSet<>();
+    /** Every instance the browse has in view, by name, to resolve again */
+    private final Map<String, NsdServiceInfo> inView = new HashMap<>();
+    /** Where each device was last told to be, so only a move is told again */
+    private final Map<String, String> told = new HashMap<>();
     private final ArrayDeque<Pending> resolveQueue = new ArrayDeque<>();
     private boolean resolving;
+    /** Names with a resolve under way, first or refresh */
+    private final Set<String> resolvingNow = new HashSet<>();
     private final List<NsdManager.ServiceInfoCallback> infoCallbacks = new ArrayList<>();
 
     private static final class Pending {
@@ -117,8 +128,21 @@ final class NsdDiscovery {
     private void begin() {
         int mine = ++generation;
         handled.clear();
+        inView.clear();
+        told.clear();
         if (port > 0) announce(mine);
         browse(mine);
+        handler.postDelayed(() -> refresh(mine), REFRESH_MS);
+    }
+
+    /** Resolve again whatever is in view and not being resolved right now */
+    private void refresh(int mine) {
+        if (generation != mine) return;
+        for (Map.Entry<String, NsdServiceInfo> seen : new ArrayList<>(inView.entrySet())) {
+            // one whose resolve is still running is left to it
+            if (resolvingNow.add(seen.getKey())) resolve(mine, seen.getValue(), RESOLVE_ATTEMPTS);
+        }
+        handler.postDelayed(() -> refresh(mine), REFRESH_MS);
     }
 
     /** Withdraws everything, and returns the generation this leaves behind */
@@ -126,6 +150,7 @@ final class NsdDiscovery {
         int mine = ++generation;
         resolveQueue.clear();
         resolving = false;
+        resolvingNow.clear();
         if (Build.VERSION.SDK_INT >= 34) unregisterInfoCallbacks();
         infoCallbacks.clear();
         if (registration != null) {
@@ -223,7 +248,10 @@ final class NsdDiscovery {
                 handler.post(() -> {
                     if (generation != mine) return;
                     String name = found.getServiceName();
-                    if (isOwn(name) || !handled.add(name)) return;
+                    if (isOwn(name)) return;
+                    inView.put(name, found);
+                    if (!handled.add(name)) return;
+                    resolvingNow.add(name);
                     resolve(mine, found, 1);
                 });
             }
@@ -231,13 +259,23 @@ final class NsdDiscovery {
             @Override
             public void onServiceLost(NsdServiceInfo lost) {
                 // it may come back, at another address
-                handler.post(() -> handled.remove(lost.getServiceName()));
+                handler.post(() -> {
+                    if (generation != mine) return;
+                    String name = lost.getServiceName();
+                    handled.remove(name);
+                    inView.remove(name);
+                    resolvingNow.remove(name);
+                    // found again later, it is told again even at the same place
+                    told.keySet().removeIf(device -> name.startsWith("teneo-" + device.substring(0, 12)));
+                });
             }
 
             @Override
             public void onStartDiscoveryFailed(String serviceType, int errorCode) {
                 handler.post(() -> {
                     Log.w(TAG, "could not browse: error " + errorCode);
+                    // a browse of an earlier start: the one running now is not its to drop
+                    if (generation != mine) return;
                     discovery = null;
                     retryLater(mine, () -> browse(mine));
                 });
@@ -322,7 +360,10 @@ final class NsdDiscovery {
 
             @Override
             public void onServiceLost() {
-                handler.post(finish);
+                handler.post(() -> {
+                    finish.run();
+                    resolvingNow.remove(found.getServiceName());
+                });
             }
 
             @Override
@@ -414,6 +455,7 @@ final class NsdDiscovery {
         } else {
             Log.i(TAG, "could not resolve " + found.getServiceName() + ": " + why);
             handled.remove(found.getServiceName());
+            resolvingNow.remove(found.getServiceName());
         }
     }
 
@@ -421,6 +463,7 @@ final class NsdDiscovery {
      *  can't be reached; true also for a service of another vault or this
      *  device, which are not ours and not to be tried again. */
     private boolean deliver(int mine, String name, Map<String, byte[]> attributes, List<String> found, int servicePort) {
+        resolvingNow.remove(name);
         String vaultTag = text(attributes.get("vt"));
         String device = text(attributes.get("dev"));
         if (!tag.equals(vaultTag) || device == null || !DEVICE_ID.matcher(device).matches() || device.equals(deviceId)) return true;
@@ -431,6 +474,10 @@ final class NsdDiscovery {
             if (address != null && !address.contains(":") && isLocal.test(address)) addresses.add(address);
         }
         if (addresses.isEmpty() || servicePort < 1) return false;
+        // a refresh that finds the device where it was says nothing: telling
+        // it again would reset the wait after a failed dial
+        String where = addresses + ":" + servicePort;
+        if (where.equals(told.put(device, where))) return true;
         listener.onDevice(device, addresses, servicePort);
         return true;
     }
