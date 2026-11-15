@@ -5,14 +5,11 @@ import vue from "@vitejs/plugin-vue";
 import Icons from "unplugin-icons/vite";
 import { defineConfig } from "vite";
 
-// The app's one version number, which build.gradle makes the Android
-// build's versionName too
-const appVersion =
-  (
-    JSON.parse(
-      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
-    ) as { version?: string }
-  ).version ?? "dev";
+// The app's one version number: Gradle reads the same one for the Android
+// build's versionName, and a bump of it is what makes a release
+const { version: appVersion } = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+) as { version: string };
 
 export default defineConfig({
   plugins: [vue(), tailwindcss(), Icons({ compiler: "vue3" })],

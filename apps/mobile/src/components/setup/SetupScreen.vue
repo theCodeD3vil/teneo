@@ -4,12 +4,12 @@ import { Input } from "@teneo/ui/components/input";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { cn } from "@teneo/ui/lib/utils";
-import { type Component, computed, ref } from "vue";
+import { type Component, computed, onScopeDispose, ref, watch } from "vue";
 import TickIcon from "~icons/tabler/check";
 import ScanIcon from "~icons/tabler/scan";
 
 import logoUrl from "../../assets/logo.svg";
-import { useNavigation } from "../../composables/useNavigation";
+import { holdBack, useNavigation } from "../../composables/useNavigation";
 import { canScanQrCode, useQrScanner } from "../../composables/useQrScanner";
 import { useSettings } from "../../composables/useSettings";
 import { markSetupDone } from "../../composables/useSetup";
@@ -23,6 +23,29 @@ const steps = ["welcome", "sync", "ready"] as const;
 const currentStep = ref<(typeof steps)[number]>("welcome");
 
 const { currentState, goBack, replaceScreen } = useNavigation();
+
+// Past the first step, the back gesture goes to the step before instead of
+// leaving setup (which, on first run, would leave the app)
+let letGoOfBack: (() => void) | null = null;
+
+function holdBackPastFirstStep(): void {
+  if (letGoOfBack || currentStep.value === steps[0]) return;
+  letGoOfBack = holdBack(() => {
+    letGoOfBack = null;
+    const index = steps.indexOf(currentStep.value);
+    if (index > 0) currentStep.value = steps[index - 1]!;
+    holdBackPastFirstStep();
+  });
+}
+
+// sync: the hold is taken before anything else can change the history
+watch(currentStep, holdBackPastFirstStep, { flush: "sync" });
+
+function letGoOfBackGesture(): void {
+  letGoOfBack?.();
+  letGoOfBack = null;
+}
+onScopeDispose(letGoOfBackGesture);
 const { status, isBusy, error, join } = useSyncStatus();
 const { settings, updateSettings } = useSettings();
 
@@ -69,6 +92,7 @@ const captureOnOpen = computed({
 // First run replaces itself with the history; opened from Settings, it goes back
 function finishSetup(): void {
   markSetupDone();
+  letGoOfBackGesture();
   if (currentState.value.index > 0) goBack();
   else replaceScreen("history");
 }

@@ -1,9 +1,17 @@
-import { type Hlc, type SyncStore } from "@teneo/sync";
-import { MemoryStore } from "@teneo/sync/testing";
+import { type SyncStore } from "@teneo/sync";
 
-/** Where sync keeps its history on this phone. For now that is memory, so a
- *  restart of the service starts empty; the database replaces this one
- *  function and nothing else changes: the rest only knows `SyncStore`. */
-export function openSyncStore(deviceId: string, clock: Hlc): SyncStore {
-  return new MemoryStore(deviceId, clock, Date.now);
+import { HistoryBridge, type NativeHistory } from "./history-bridge";
+import { NativeSyncStore } from "./native-store";
+
+/** Where sync keeps its history on this phone: the app's own database, which
+ *  native code owns. The device id is the one made with it, so a restart is the
+ *  same device. The rest only knows `SyncStore`; the in-memory store of
+ *  `@teneo/sync/testing` is for tests. */
+export function openSyncStore(native: NativeHistory): {
+  deviceId: string;
+  store: SyncStore;
+} {
+  const history = new HistoryBridge(native);
+  const deviceId = history.deviceId();
+  return { deviceId, store: new NativeSyncStore(history, deviceId) };
 }

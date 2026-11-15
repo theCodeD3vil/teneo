@@ -4,11 +4,11 @@
 //
 // This page never touches the network itself: the service serves it from the
 // app and answers every other request with a 404.
-import { Hlc, SyncEngine, fromBase64, randomBytes, toHex } from "@teneo/sync";
-import { MemoryStore } from "@teneo/sync/testing";
+import { SyncEngine, fromBase64 } from "@teneo/sync";
 
 import type { ConnectedDevice, NativeSync, SyncPage } from "./native";
 import { openSyncStore } from "./store";
+import { loggedStore } from "./store-log";
 import { PhoneTransport } from "./transport";
 
 /** Put there by `addJavascriptInterface` */
@@ -23,7 +23,6 @@ const debuggable = native.isDebuggable();
 interface Run {
   engine: SyncEngine;
   transport: PhoneTransport;
-  store: ReturnType<typeof openSyncStore>;
   stopStatus: number | undefined;
 }
 let run: Run | null = null;
@@ -62,19 +61,22 @@ const page: SyncPage = {
       }
       if (stopWanted) return;
 
-      const deviceId = toHex(randomBytes(16));
-      const clock = new Hlc(deviceId);
-      const store = openSyncStore(deviceId, clock);
+      // The device id is the one made with the database, so a restart is the
+      // same device. There is no clock here: a pin is stamped where it is made
+      // (HistoryStore.java), and every stamp that is saved from another
+      // device is seen by that clock as it is saved.
+      const opened = openSyncStore(native);
+      const { deviceId } = opened;
+      const store = debuggable ? loggedStore(opened.store, log) : opened.store;
       const engine = new SyncEngine({
         deviceId,
         name: native.deviceName(),
         platform: "android",
         vaultKey,
         store,
-        clock,
         syncSecrets: () => allowSecrets,
         onItemsChanged: () => {
-          if (debuggable) reportItems(store);
+          if (debuggable) log("items changed by another device");
         },
         onPeersChanged: () => {
           reportPeers(engine);
@@ -89,7 +91,7 @@ const page: SyncPage = {
         onError: (error) => log(`transport error: ${String(error)}`),
       });
       // set before starting: native code begins sending events once told ready
-      run = { engine, transport, store, stopStatus: undefined };
+      run = { engine, transport, stopStatus: undefined };
       await transport.start();
       // a stop during that has already taken everything down
       const started = run;
@@ -131,33 +133,32 @@ const page: SyncPage = {
   closed: (id, reason) => run?.transport.closed(id, reason),
   discovered: (deviceId, addresses, port) =>
     run?.transport.found({ deviceId, addresses, port }),
+  localChanged: () => run?.engine.localChanged(),
 
   debug: {
-    /** A copy made on this phone, to see it reach the other devices. */
+    /** A copy made on this phone, saved as the capture saves one: the
+     *  history tells the core, which sends it on. */
     copy(text) {
       if (!debuggable || !run) return;
-      // only the in-memory store has a way to copy: the database's own app does that
-      if (!(run.store instanceof MemoryStore)) return;
-      run.store.copy(text);
-      run.engine.localChanged();
-      log(`copied here "${text.slice(0, 40)}"`);
+      // native code answers in JSON and never throws: a failure is in the answer
+      const answer = native.debugSaveText(text);
+      const failure = (() => {
+        try {
+          return (JSON.parse(answer) as { error?: string }).error;
+        } catch {
+          return "no answer";
+        }
+      })();
+      log(
+        failure
+          ? `the copy was not saved: ${failure}`
+          : `copied here "${text.slice(0, 40)}"`,
+      );
     },
   },
 };
 
 // --- what a person debugging wants to see
-
-let seenTexts = new Set<string>();
-
-function reportItems(store: Run["store"]): void {
-  if (!(store instanceof MemoryStore)) return;
-  const texts = store.liveTexts();
-  for (const text of texts) {
-    if (seenTexts.has(text)) continue;
-    seenTexts.add(text);
-    log(`item "${text.slice(0, 40)}" total=${texts.length}`);
-  }
-}
 
 function describePeers(engine: SyncEngine): string {
   return (
@@ -170,9 +171,7 @@ function describePeers(engine: SyncEngine): string {
 
 function status(current: Run | null): string {
   if (!current) return "status: not running";
-  const items =
-    current.store instanceof MemoryStore ? current.store.liveTexts().length : 0;
-  return `status: peers=${current.engine.peers().length} items=${items}`;
+  return `status: peers=${current.engine.peers().length}`;
 }
 
 (globalThis as unknown as { teneoSyncPage: SyncPage }).teneoSyncPage = page;

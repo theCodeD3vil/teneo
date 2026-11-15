@@ -162,7 +162,19 @@ public final class SyncController {
 
     /** A setting that sync reads changed: start, stop or tell the service */
     public void settingsChanged() {
+        boolean secretsWereAllowed = syncSecretsSetting;
         readSettings();
+        if (!secretsWereAllowed && syncSecretsSetting) {
+            // The items with secrets were held back, and the other devices have
+            // read past them. A new change number each is what sends them now,
+            // whether or not sync is running at this moment.
+            try {
+                int restamped = HistoryStore.get(context).restampSecretItems();
+                Log.i(TAG, "items with secrets may sync now: " + restamped + " to send");
+            } catch (RuntimeException failed) {
+                Log.w(TAG, "could not mark the items with secrets to be sent", failed);
+            }
+        }
         Running current;
         synchronized (this) {
             current = service;
