@@ -164,24 +164,38 @@ public final class SyncController {
     public void settingsChanged() {
         boolean secretsWereAllowed = syncSecretsSetting;
         readSettings();
-        if (!secretsWereAllowed && syncSecretsSetting) {
-            // The items with secrets were held back, and the other devices have
-            // read past them. A new change number each is what sends them now,
-            // whether or not sync is running at this moment.
-            try {
-                int restamped = HistoryStore.get(context).restampSecretItems();
-                Log.i(TAG, "items with secrets may sync now: " + restamped + " to send");
-            } catch (RuntimeException failed) {
-                Log.w(TAG, "could not mark the items with secrets to be sent", failed);
-            }
-        }
+        boolean secretsNowAllowed = !secretsWereAllowed && syncSecretsSetting;
         Running current;
         synchronized (this) {
             current = service;
         }
-        if (current != null) main.post(current::settingsChanged);
+        if (current != null) {
+            main.post(() -> {
+                // The page is told first. Only then are the held-back items
+                // marked to be sent: marked before it knew they may go, it
+                // would pass over them again, and nothing would send them.
+                current.settingsChanged();
+                if (secretsNowAllowed) new Thread(this::sendHeldBackSecrets, "teneo-sync-secrets").start();
+            });
+        } else if (secretsNowAllowed) {
+            // sync isn't running: when it next starts, it starts allowed
+            sendHeldBackSecrets();
+        }
         apply();
         notifyStatus();
+    }
+
+    /**
+     * The items with secrets were held back, and the other devices have read
+     * past them. A new change number each is what sends them now.
+     */
+    private void sendHeldBackSecrets() {
+        try {
+            int restamped = HistoryStore.get(context).restampSecretItems();
+            Log.i(TAG, "items with secrets may sync now: " + restamped + " to send");
+        } catch (RuntimeException failed) {
+            Log.w(TAG, "could not mark the items with secrets to be sent", failed);
+        }
     }
 
     public void setAppVisible(boolean visible) {
