@@ -1,15 +1,24 @@
 name: Release
 
-# A PR merged into main releases the "version" in apps/desktop/tinyjs.json,
+# A PR merged into main builds the "version" in apps/desktop/tinyjs.json,
 # unless that version is already tagged — so bump it in the PR to ship a
-# release. A version with a suffix, such as 0.4.0-beta.1, is published as a
+# release. CI builds it as a DRAFT with an unsigned manifest.json. Installed
+# apps accept only manifests signed with Teneo's update key, which never
+# leaves the maintainer's Mac: `bun run release:publish` (in apps/desktop)
+# checks the draft, signs the manifest and publishes it. See
+# docs/release-process.md.
+#
+# A version with a suffix, such as 0.4.0-beta.1, is published as a
 # pre-release: it is never "latest", so installed apps are not updated to it.
 # A beta is an app of its own, Teneo Beta, that installs beside Teneo and
 # updates from the "beta-channel" release, which holds the newest beta's
 # manifest.json and nothing else.
+# Runs on the push a merge into main makes: main's own copy of this workflow
+# runs (a pull_request run would use the PR's copy, which anyone with a
+# branch can write), and only main may use the "release" environment's
+# signing secrets.
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [main]
 
 permissions:
@@ -21,15 +30,15 @@ concurrency:
 
 jobs:
   version:
-    if: github.event.pull_request.merged
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       is-new: ${{ steps.version.outputs.is-new }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
           sparse-checkout: apps/desktop/tinyjs.json
           sparse-checkout-cone-mode: false
 
@@ -48,16 +57,23 @@ jobs:
     needs: version
     if: needs.version.outputs.is-new == 'true'
     runs-on: macos-15
+    # The signing certificate is a secret of this environment, which only
+    # main can use (docs/release-process.md › GitHub settings)
+    environment: release
     permissions:
       contents: write
+      pull-requests: read # the merged PR's title and body are the notes
+      id-token: write # build provenance attestations
+      attestations: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
 
@@ -66,12 +82,21 @@ jobs:
       # From v0.72 the app's updater compares whole versions. Before it, only
       # the three numbers were read, so a beta never saw a newer beta of the
       # same release: 0.4.0-beta.3 took 0.4.0-beta.4 for itself.
+      # Pinned by hash: this job holds the signing certificate, so it runs
+      # only the TinyJS checked here, not whatever tinyjs.app serves today.
       - name: Install tinyjs
         env:
           TINYJS_VERSION: v0.72.1
+          TINYJS_SHA256: 986e65361276de44b36580bfc2d901bb68a81f709f8f0781512754aced84ceb0 # tinyjs-macos-arm64.tar.gz
         run: |
-          curl -fsSL https://tinyjs.app/install | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH" # the installer's fallback link folder
+          archive="$RUNNER_TEMP/tinyjs.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/tarwin/tinyjsapp/releases/download/$TINYJS_VERSION/tinyjs-macos-arm64.tar.gz"
+          echo "$TINYJS_SHA256  $archive" | shasum -a 256 -c -
+          mkdir -p "$HOME/.tinyjs" "$HOME/.local/bin"
+          tar -xzf "$archive" -C "$HOME/.tinyjs" --strip-components 1
+          ln -sf "$HOME/.tinyjs/tinyjs" "$HOME/.local/bin/tinyjs"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Self-signed rather than ad-hoc: macOS ties the Accessibility grant to
       # the signing certificate, so it survives updates. An ad-hoc signature
@@ -82,7 +107,7 @@ jobs:
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           if [ -z "$CERTIFICATE_P12" ]; then
-            echo "::error::MACOS_CERTIFICATE_P12 is missing: add it in Doppler and sync the prd config to GitHub (see README › Releasing)."
+            echo "::error::MACOS_CERTIFICATE_P12 is missing from the release environment: copy it from 1Password with `bun run release:secrets` (docs/release-process.md)."
             exit 1
           fi
           keychain="$RUNNER_TEMP/signing.keychain-db"
@@ -109,85 +134,57 @@ jobs:
         working-directory: apps/desktop
         run: bun scripts/set-release-identity.ts
 
-      # Shown on the release page and in the in-app update prompt
+      # Shown on the release page and in the in-app update prompt: the title
+      # and body of the pull request this push merged
       - name: Write release notes
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/notes.md"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0] // empty')
+          if [ -z "$pr" ]; then
+            echo "::error::$GITHUB_SHA isn't the merge of a pull request into main, so it has no release notes."
+            exit 1
+          fi
+          printf '%s\n\n%s\n' "$(jq -r .title <<< "$pr")" "$(jq -r '.body // ""' <<< "$pr")" > "$RUNNER_TEMP/notes.md"
 
-      # One runner builds both CPUs. Each publish builds the app, its dmg and
-      # its zip, and merges the zip into one manifest.json. The frontend
-      # build (Vite) empties dist/ at the start of every publish, so each dmg
-      # moves out before the next one; publish keeps dist/publish safe itself.
-      # Apple's timestamp server, which codesign calls, drops the odd request,
-      # hence one retry per publish.
+      # One runner builds both CPUs: apps, disk images, zips and one plain
+      # manifest.json pinned to this release's tag. `tinyjs build`, not
+      # `publish`: publish signs the manifest, and CI never has the key.
       - name: Build and package
         working-directory: apps/desktop
-        run: |
-          retry() { "$@" || "$@"; }
-          mkdir "$RUNNER_TEMP/dmg"
-          for arch in arm64 x86_64; do
-            retry tinyjs publish --arch "$arch" --dmg --notes-file "$RUNNER_TEMP/notes.md"
-            mv dist/*.dmg "$RUNNER_TEMP/dmg/"
-          done
-          # Installed apps only update from the manifest: both CPUs must be in it
-          jq -e '.mac.arm64 and .mac.x86_64' dist/publish/manifest.json > /dev/null
-          # tinyjs points the zips at update.url's folder (releases/latest, or
-          # the beta channel's); pin them to this release's tag instead
-          sed -i '' \
-            -e "s#/releases/latest/download/#/releases/download/v$VERSION/#" \
-            -e "s#/releases/download/beta-channel/#/releases/download/v$VERSION/#" \
-            dist/publish/manifest.json
+        run: bun scripts/package-release.ts --notes-file "$RUNNER_TEMP/notes.md" --out "$RUNNER_TEMP/release"
 
-      - name: Create release
-        working-directory: apps/desktop
+      # A signed record, kept by GitHub, that these exact files came from this
+      # workflow on this commit of main. release:publish checks it.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/*
+
+      # A draft: nobody sees it and no app updates to it until it is signed
+      # and published from the maintainer's Mac
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGE_COMMIT: ${{ github.sha }}
         run: |
+          # drafts have no tag yet, and GitHub allows several with the same one
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "::error::A v$VERSION release already exists. Publish or delete it before building another."
+            exit 1
+          fi
           # A beta must not become "latest": installed apps update from there
           flags=()
           if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "v$VERSION" \
+            --draft \
             --target "$MERGE_COMMIT" \
             --title "Teneo $VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             "${flags[@]}" \
-            "$RUNNER_TEMP"/dmg/*.dmg dist/publish/*.zip dist/publish/manifest.json
-
-      # Teneo Beta looks here for updates. The release only carries the
-      # manifest, which points at the zips of the beta just published
-      - name: Point the beta channel at this beta
-        if: contains(needs.version.outputs.version, '-')
-        working-directory: apps/desktop
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
-        run: |
-          if ! gh release view beta-channel > /dev/null 2>&1; then
-            gh release create beta-channel \
-              --target "$MERGE_COMMIT" \
-              --title "Teneo Beta update channel" \
-              --notes "Teneo Beta reads its updates from the manifest.json here. To install a beta, download it from its own release." \
-              --prerelease \
-              --latest=false
-          fi
-          gh release upload beta-channel dist/publish/manifest.json --clobber
-
-      # A dead link here is an updater failing silently on users' Macs
-      - name: Verify update links
-        working-directory: apps/desktop
-        run: |
-          if [[ "$VERSION" == *-* ]]; then
-            # a beta leaves "latest" where it was, on the last full release,
-            # and is what the beta channel now offers
-            curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
-              | jq -e --arg version "$VERSION" '.version != $version' > /dev/null
-            curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/beta-channel/manifest.json" \
-              | jq -e --arg version "$VERSION" '.version == $version' > /dev/null
-          else
-            curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/manifest.json" \
-              | jq -e --arg version "$VERSION" '.version == $version' > /dev/null
-          fi
-          jq -r '.. | .url? // empty' dist/publish/manifest.json | sort -u | xargs -n 1 curl -fsSIL -o /dev/null
+            "$RUNNER_TEMP"/release/*
+          {
+            echo "### Teneo $VERSION is a draft"
+            echo "Sign and publish it on your Mac: \`cd apps/desktop && bun run release:publish $VERSION\`"
+          } >> "$GITHUB_STEP_SUMMARY"

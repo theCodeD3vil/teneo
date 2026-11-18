@@ -7,11 +7,15 @@
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "vue-tsc -b && vite build --base=./",
     "preview": "vite preview",
-    "test": "bun test backend",
+    "test": "bun test backend scripts",
     "typecheck": "vue-tsc -b && tsc -p backend/tsconfig.json --noEmit",
     "test:runtime": "bun scripts/run-on-tjs.ts backend/sync/storage.tjs.ts && bun scripts/run-on-tjs.ts backend/sync/transport.tjs.ts && bun scripts/run-on-tjs.ts backend/sync/dns-sd-registry.tjs.ts",
     "sync:peer": "bun scripts/run-on-tjs.ts backend/sync/peer.tjs.ts",
-    "sync:check": "bun scripts/check-sync-peers.ts"
+    "sync:check": "bun scripts/check-sync-peers.ts",
+    "release:key": "bun scripts/create-update-key.ts",
+    "release:publish": "bun scripts/publish-release.ts",
+    "release:github-settings": "bun scripts/github-settings.ts",
+    "release:secrets": "bun scripts/set-signing-secrets.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "catalog:",

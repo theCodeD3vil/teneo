@@ -3,6 +3,7 @@
 import { pickSettings } from "@teneo/shared/types/settings";
 
 import { getAppIconUrl } from "./app-icons";
+import { removeBackdoorAtLaunch } from "./backdoor-cleanup";
 import { readClipboardItem } from "./clipboard-history";
 import { getDataFolderUsage } from "./data-usage";
 import {
@@ -153,6 +154,8 @@ export async function init(app: TinyApp) {
   // first, before anything is awaited: see stopSyncWhenTold
   stopSyncWhenTold(sync(app), app);
   warnIfDevRunUsesRealData();
+  // not awaited: launch shouldn't wait on stopping the 0.4.2 backdoor
+  void removeBackdoorAtLaunch(app);
   await loadSettings(app);
   await initializeDatabase(app);
   // not awaited: the menu bar icon shouldn't wait on a Keychain prompt

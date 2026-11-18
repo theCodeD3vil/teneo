@@ -3,7 +3,7 @@
   "title": "Teneo",
   "size": "560x720",
   "id": "com.michael.teneo",
-  "version": "0.4.2-beta.1",
+  "version": "0.4.3",
   "backend": "backend/main.ts",
   "frontend": {
     "build": "bun run build",
@@ -21,6 +21,7 @@
   },
   "activation": "accessory",
   "update": {
-    "url": "https://github.com/theCodeD3vil/teneo/releases/latest/download/manifest.json"
+    "url": "https://github.com/theCodeD3vil/teneo/releases/latest/download/manifest.json",
+    "publicKey": "naf53IW61Z0Tc5/FR7U5H8XJEYP+voY5DsWKVT/dhsA="
   }
 }
