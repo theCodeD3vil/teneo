@@ -9,9 +9,12 @@ name: Release Android
 # When the PR bumps both, the APK is added to the Mac app's release as well,
 # so one release holds everything the PR shipped. The Android release is
 # still published: phones find their updates under its android-v tag.
+# Runs on the push a merge into main makes: main's own copy of this workflow
+# runs (a pull_request run would use the PR's copy, which anyone with a
+# branch can write), and only main may use the "release" environment's
+# signing secrets.
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [main]
 
 permissions:
@@ -23,7 +26,6 @@ concurrency:
 
 jobs:
   version:
-    if: github.event.pull_request.merged
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -31,9 +33,10 @@ jobs:
       mac-version: ${{ steps.version.outputs.mac-version }}
       mac-is-new: ${{ steps.version.outputs.mac-is-new }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
           sparse-checkout: |
             apps/mobile/package.json
             apps/desktop/tinyjs.json
@@ -68,22 +71,26 @@ jobs:
     needs: version
     if: needs.version.outputs.is-new == 'true'
     runs-on: ubuntu-latest
+    # The keystore is a secret of this environment, which only main can use
+    environment: release
     permissions:
       contents: write
+      pull-requests: read # the merged PR's title and body are the notes
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
 
       # The version apps/mobile/mise.toml pins: newer ones break the Android
       # build tools
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: 21
@@ -98,7 +105,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_P12" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::ANDROID_KEYSTORE_P12 or ANDROID_KEYSTORE_PASSWORD is missing: add them in Doppler and sync the prd config to GitHub (see README › Releasing the Android app)."
+            echo "::error::ANDROID_KEYSTORE_P12 or ANDROID_KEYSTORE_PASSWORD is missing from the release environment: copy them from 1Password with `bun run release:secrets` (docs/release-process.md)."
             exit 1
           fi
           echo "$KEYSTORE_P12" | base64 --decode > "$RUNNER_TEMP/release.p12"
@@ -127,18 +134,26 @@ jobs:
           "$build_tools/aapt2" dump badging "$RUNNER_TEMP/Teneo-$VERSION.apk" \
             | grep -q "^package: name='$package' .*versionName='$VERSION'"
 
+      # Shown on the release page and in the in-app update prompt: the title
+      # and body of the pull request this push merged
       - name: Write release notes
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/notes.md"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0] // empty')
+          if [ -z "$pr" ]; then
+            echo "::error::$GITHUB_SHA isn't the merge of a pull request into main, so it has no release notes."
+            exit 1
+          fi
+          printf '%s\n\n%s\n' "$(jq -r .title <<< "$pr")" "$(jq -r '.body // ""' <<< "$pr")" > "$RUNNER_TEMP/notes.md"
 
       # Never "latest": the Mac app updates from releases/latest, which must
       # stay a Mac release
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGE_COMMIT: ${{ github.sha }}
         run: |
           flags=()
           if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
@@ -164,7 +179,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MAC_VERSION: ${{ needs.version.outputs.mac-version }}
           MAC_IS_NEW: ${{ needs.version.outputs.mac-is-new }}
-          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGE_COMMIT: ${{ github.sha }}
         run: |
           for attempt in $(seq 1 90); do
             target=$(gh release view "v$MAC_VERSION" --repo "$GITHUB_REPOSITORY" \

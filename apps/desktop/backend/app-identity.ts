@@ -60,7 +60,7 @@ export interface TinyConfig {
   title?: string;
   id?: string;
   icon?: string;
-  update?: { url?: string };
+  update?: { url?: string; publicKey?: string | string[] };
   [key: string]: unknown;
 }
 
