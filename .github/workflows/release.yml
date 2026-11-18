@@ -27,7 +27,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       is-new: ${{ steps.version.outputs.is-new }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           sparse-checkout: apps/desktop/tinyjs.json
@@ -53,7 +53,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
 

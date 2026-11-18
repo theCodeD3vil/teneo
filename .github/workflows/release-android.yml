@@ -31,7 +31,7 @@ jobs:
       mac-version: ${{ steps.version.outputs.mac-version }}
       mac-is-new: ${{ steps.version.outputs.mac-is-new }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           sparse-checkout: |
@@ -73,7 +73,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
 
@@ -83,7 +83,7 @@ jobs:
 
       # The version apps/mobile/mise.toml pins: newer ones break the Android
       # build tools
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
