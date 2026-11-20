@@ -53,47 +53,52 @@ test("parseHeaders reads the last response's status and fields", () => {
 
 // The arguments as macOS's curl takes them: a name no DNS knows reaches the
 // pinned address, which is the whole point
-describe.skipIf(!existsSync("/usr/bin/curl"))("with the real curl", () => {
-  let server: ReturnType<typeof Bun.serve>;
-  beforeAll(() => {
-    server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: (request) =>
-        new URL(request.url).pathname === "/away"
-          ? Response.redirect("http://elsewhere.invalid/", 302)
-          : new Response(`<title>${request.headers.get("host")}</title>`, {
-              headers: { "content-type": "text/html" },
-            }),
+// macOS's own curl, the one the app runs: CI's Linux runner has a curl at the
+// same path that these exact arguments don't suit, and it never runs Teneo
+describe.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/curl"))(
+  "with the real curl",
+  () => {
+    let server: ReturnType<typeof Bun.serve>;
+    beforeAll(() => {
+      server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch: (request) =>
+          new URL(request.url).pathname === "/away"
+            ? Response.redirect("http://elsewhere.invalid/", 302)
+            : new Response(`<title>${request.headers.get("host")}</title>`, {
+                headers: { "content-type": "text/html" },
+              }),
+      });
     });
-  });
-  afterAll(() => server.stop(true));
+    afterAll(() => server.stop(true));
 
-  const run = async (path: string) => {
-    const args = curlArguments(
-      new URL(`http://rebind.invalid:${server.port}${path}`),
-      "127.0.0.1",
-      options,
-    );
-    const child = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-    const [body, dump] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-    await child.exited;
-    return { body, ...parseHeaders(dump) };
-  };
+    const run = async (path: string) => {
+      const args = curlArguments(
+        new URL(`http://rebind.invalid:${server.port}${path}`),
+        "127.0.0.1",
+        options,
+      );
+      const child = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+      const [body, dump] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      await child.exited;
+      return { body, ...parseHeaders(dump) };
+    };
 
-  test("connects to the pinned address, sending the site's own name", async () => {
-    const { status, headers, body } = await run("/");
-    expect(status).toBe(200);
-    expect(headers.get("content-type")).toBe("text/html");
-    expect(body).toBe(`<title>rebind.invalid:${server.port}</title>`);
-  });
+    test("connects to the pinned address, sending the site's own name", async () => {
+      const { status, headers, body } = await run("/");
+      expect(status).toBe(200);
+      expect(headers.get("content-type")).toBe("text/html");
+      expect(body).toBe(`<title>rebind.invalid:${server.port}</title>`);
+    });
 
-  test("hands a redirect back instead of following it", async () => {
-    const { status, headers } = await run("/away");
-    expect(status).toBe(302);
-    expect(headers.get("location")).toBe("http://elsewhere.invalid/");
-  });
-});
+    test("hands a redirect back instead of following it", async () => {
+      const { status, headers } = await run("/away");
+      expect(status).toBe(302);
+      expect(headers.get("location")).toBe("http://elsewhere.invalid/");
+    });
+  },
+);
