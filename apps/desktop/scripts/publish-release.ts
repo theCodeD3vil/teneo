@@ -26,6 +26,9 @@ import { appSignatureProblems } from "./app-signature.ts";
 import { ghArgs } from "./gh-command.ts";
 import {
   ANDROID_MANIFEST,
+  androidChannelFile,
+  androidReleaseProblems,
+  UPDATE_CHANNEL_TAG,
   ANDROID_TAG_PREFIX,
   type AndroidManifest,
   androidApkName,
@@ -204,6 +207,40 @@ interface MacPlan {
   draftManifest: Manifest;
   manifest: Manifest;
   alreadySigned: boolean;
+  /** The APK's manifest in this release, when the PR shipped Android too */
+  android: { manifest: AndroidManifest; alreadySigned: boolean } | null;
+}
+
+/** The Mac draft's android-manifest.json: CI's, naming the APK beside it,
+ *  of this Android version. Phones from 0.1.3 update from it. */
+async function planMainAndroid(
+  release: DraftRelease,
+): Promise<MacPlan["android"]> {
+  const doc = downloadAsset(release, ANDROID_MANIFEST);
+  if (!doc) return null;
+  const alreadySigned =
+    typeof doc === "object" && doc !== null && "signed" in doc;
+  const manifest = alreadySigned
+    ? await verifyAndroidManifest(doc, publicKeys)
+    : parseAndroidManifest(doc);
+  if (!manifest)
+    fail(`${macTag}'s ${ANDROID_MANIFEST} isn't CI's plain manifest`);
+  const problems = androidReleaseProblems(
+    release,
+    manifest,
+    repository,
+    androidVersion,
+  );
+  for (const asset of release.assets) {
+    const fromCi = asset.uploader?.login === CI_LOGIN;
+    if (asset.name === ANDROID_MANIFEST && !fromCi && !alreadySigned)
+      problems.push(`${ANDROID_MANIFEST} wasn't uploaded by CI`);
+  }
+  if (problems.length > 0)
+    fail(
+      `${macTag}'s Android app can't be published:\n  - ${problems.join("\n  - ")}`,
+    );
+  return { manifest, alreadySigned };
 }
 async function planMac(release: DraftRelease): Promise<MacPlan> {
   const draftManifest = downloadAsset(
@@ -216,9 +253,12 @@ async function planMac(release: DraftRelease): Promise<MacPlan> {
   const manifest = alreadySigned
     ? await verifyManifest(draftManifest, publicKeys)
     : draftManifest;
-  const asCi = alreadySigned
+  const android = await planMainAndroid(release);
+  let asCi = alreadySigned
     ? withSignedFileFromCi(release, "manifest.json")
     : release;
+  if (android?.alreadySigned)
+    asCi = withSignedFileFromCi(asCi, ANDROID_MANIFEST);
   const problems = checkDraft(asCi, manifest, repository, macVersion);
   const notes = notesProblems(manifest.notes ?? "");
   if (notes.length > 0)
@@ -227,7 +267,7 @@ async function planMac(release: DraftRelease): Promise<MacPlan> {
     );
   if (problems.length > 0)
     fail(`${macTag} can't be published:\n  - ${problems.join("\n  - ")}`);
-  return { release, draftManifest, manifest, alreadySigned };
+  return { release, draftManifest, manifest, alreadySigned, android };
 }
 
 // --- the Android draft, and whether CI made all of it
@@ -432,7 +472,37 @@ try {
   // read once: one Touch ID for everything this run signs
   const needsKey =
     (mac !== null && !mac.alreadySigned) ||
+    (mac?.android != null && !mac.android.alreadySigned) ||
     (android !== null && !android.alreadySigned);
+  const signingKey = () =>
+    crypto.subtle.importKey(
+      "pkcs8",
+      Buffer.from(key, "base64"),
+      "Ed25519",
+      false,
+      ["sign"],
+    );
+  /** Sign an Android manifest, check the signature, and upload it to `tag` */
+  async function signAndroidInto(
+    manifest: AndroidManifest,
+    tag: string,
+  ): Promise<void> {
+    const signed = await signAndroidManifest(manifest, await signingKey());
+    const payload = await verifyAndroidManifest(signed, publicKeys);
+    if (JSON.stringify(payload) !== JSON.stringify(manifest))
+      fail(`The signed Android manifest for ${tag} isn't the one CI made.`);
+    const file = join(mkdtempSync(join(folder, "android-")), ANDROID_MANIFEST);
+    writeFileSync(file, `${JSON.stringify(signed, null, 2)}\n`);
+    run("gh", [
+      "release",
+      "upload",
+      tag,
+      file,
+      "--clobber",
+      "--repo",
+      repository,
+    ]);
+  }
   const key = needsKey
     ? (console.log(
         "Reading the update key from 1Password. Approve with Touch ID.",
@@ -475,30 +545,11 @@ try {
     }
   }
 
-  if (android && !android.alreadySigned) {
-    const privateKey = await crypto.subtle.importKey(
-      "pkcs8",
-      Buffer.from(key, "base64"),
-      "Ed25519",
-      false,
-      ["sign"],
-    );
-    const signed = await signAndroidManifest(android.manifest, privateKey);
-    const payload = await verifyAndroidManifest(signed, publicKeys);
-    if (JSON.stringify(payload) !== JSON.stringify(android.manifest))
-      fail("The signed Android manifest isn't the one CI made.");
-    const file = join(folder, ANDROID_MANIFEST);
-    writeFileSync(file, `${JSON.stringify(signed, null, 2)}\n`);
-    run("gh", [
-      "release",
-      "upload",
-      androidTag,
-      file,
-      "--clobber",
-      "--repo",
-      repository,
-    ]);
-  }
+  // the APK's manifest in Teneo's release, before that release is published
+  if (mac?.android && !mac.android.alreadySigned)
+    await signAndroidInto(mac.android.manifest, macTag);
+  if (android && !android.alreadySigned)
+    await signAndroidInto(android.manifest, androidTag);
 
   if (mac) {
     run("gh", [
@@ -512,11 +563,11 @@ try {
     ]);
     if (macBeta) {
       // Teneo Beta updates from this release, which holds only the newest beta's manifest
-      if (!releases.some((other) => other.tag_name === "beta-channel")) {
+      if (!releases.some((other) => other.tag_name === UPDATE_CHANNEL_TAG)) {
         run("gh", [
           "release",
           "create",
-          "beta-channel",
+          UPDATE_CHANNEL_TAG,
           "--repo",
           repository,
           "--target",
@@ -532,7 +583,7 @@ try {
       run("gh", [
         "release",
         "upload",
-        "beta-channel",
+        UPDATE_CHANNEL_TAG,
         macManifestFile,
         "--clobber",
         "--repo",
@@ -551,6 +602,52 @@ try {
       "--draft=false",
       "--latest=false",
       ...(androidVersion.includes("-") ? ["--prerelease"] : []),
+    ]);
+  }
+
+  // Last: the channel, which phones from 0.1.3 read, now that both releases
+  // are published. Its manifest is the one in Teneo's release when the PR
+  // shipped both apps, and the Android app's own release's when it didn't.
+  if (android) {
+    const from = mac?.android ? macTag : androidTag;
+    const published = JSON.parse(
+      run("gh", ["api", `repos/${repository}/releases/tags/${from}`]),
+    ) as Release;
+    const signed = downloadAsset(published, ANDROID_MANIFEST);
+    const payload = await verifyAndroidManifest(signed, publicKeys);
+    if (payload.version !== androidVersion)
+      fail(
+        `${from}'s ${ANDROID_MANIFEST} offers ${payload.version}, not ${androidVersion}.`,
+      );
+    if (!releases.some((other) => other.tag_name === UPDATE_CHANNEL_TAG))
+      run("gh", [
+        "release",
+        "create",
+        UPDATE_CHANNEL_TAG,
+        "--repo",
+        repository,
+        "--target",
+        android.release.target_commitish,
+        "--title",
+        "Teneo update channel",
+        "--notes",
+        "Teneo's apps read their updates from the signed manifests here. To install Teneo, download it from its own release.",
+        "--prerelease",
+        "--latest=false",
+      ]);
+    const channelFile = join(
+      mkdtempSync(join(folder, "channel-")),
+      androidChannelFile(androidVersion),
+    );
+    writeFileSync(channelFile, `${JSON.stringify(signed, null, 2)}\n`);
+    run("gh", [
+      "release",
+      "upload",
+      UPDATE_CHANNEL_TAG,
+      channelFile,
+      "--clobber",
+      "--repo",
+      repository,
     ]);
   }
 } finally {
@@ -597,8 +694,9 @@ if (mac) {
   );
 }
 if (android) {
+  // what phones from 0.1.3 read (UpdateRules.channelUrl in the Android app)
   const live = await liveManifest(
-    `https://github.com/${repository}/releases/download/${androidTag}/${ANDROID_MANIFEST}`,
+    `https://github.com/${repository}/releases/download/${UPDATE_CHANNEL_TAG}/${androidChannelFile(androidVersion)}`,
     (doc) => verifyAndroidManifest(doc, publicKeys),
     androidVersion,
   );

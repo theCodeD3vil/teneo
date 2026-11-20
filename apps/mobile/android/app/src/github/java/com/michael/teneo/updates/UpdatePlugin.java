@@ -189,15 +189,47 @@ public class UpdatePlugin extends Plugin {
     }
 
     /**
-     * Install the release of `version`: only the APK its signed manifest
-     * names, at the size and hash it names. What the page found on GitHub
-     * says which release; the signature says what is in it.
+     * The newest release of this app, if it is newer than this one: what the
+     * signed manifest in Teneo's update channel says, once its signature
+     * checks out. Resolves { update: null } when there is none; rejects with
+     * what to show when GitHub can't be reached or the manifest is no good.
+     */
+    @PluginMethod
+    public void check(PluginCall call) {
+        worker.execute(() -> {
+            try {
+                SignedManifest manifest = SignedManifest.latest(getContext().getPackageName(), null);
+                JSObject result = new JSObject();
+                if (manifest == null || manifest.versionCode <= installedVersionCode()) {
+                    result.put("update", JSObject.NULL);
+                } else {
+                    JSObject update = new JSObject();
+                    update.put("version", manifest.version);
+                    update.put("versionCode", manifest.versionCode);
+                    update.put("apkUrl", manifest.apkUrl);
+                    update.put("size", manifest.size);
+                    update.put("sha256", manifest.sha256);
+                    result.put("update", update);
+                }
+                call.resolve(result);
+            } catch (SignedManifest.Invalid invalid) {
+                call.reject(invalid.getMessage());
+            } catch (IOException | RuntimeException error) {
+                Log.w(TAG, "update check failed", error);
+                call.reject("Couldn't reach GitHub to check for updates");
+            }
+        });
+    }
+
+    /**
+     * Install the newest release, `version`, which check() offered: only the
+     * APK its signed manifest names, at the size and hash it names. The
+     * manifest is read again here, and must still offer that version.
      */
     @PluginMethod
     public void install(PluginCall call) {
-        String manifestUrl = call.getString("manifestUrl");
         String version = call.getString("version");
-        if (version == null || !UpdateRules.isManifestUrl(manifestUrl, version)) {
+        if (version == null || ReleaseRules.versionCode(version) <= 0) {
             call.reject("That isn't a Teneo release");
             return;
         }
@@ -209,13 +241,16 @@ public class UpdatePlugin extends Plugin {
         worker.execute(() -> {
             File apk = new File(new File(getContext().getCacheDir(), "updates"), "update.apk");
             try {
-                SignedManifest manifest = SignedManifest.fetch(
-                    manifestUrl,
-                    version,
+                SignedManifest manifest = SignedManifest.latest(
                     getContext().getPackageName(),
-                    installedVersionCode(),
                     connection -> download.connection = connection
                 );
+                if (manifest == null || !manifest.version.equals(version)) {
+                    throw new UpdateFailure("Another update came out meanwhile. Check again");
+                }
+                if (manifest.versionCode <= installedVersionCode()) {
+                    throw new UpdateFailure("This version of Teneo is already installed");
+                }
                 if (download.cancelled) throw new Cancelled();
                 fetch(download, manifest.apkUrl, manifest.size, manifest.sha256, apk);
                 checkArchive(apk, manifest.versionCode);

@@ -11,8 +11,6 @@ const update: Update = {
     "https://github.com/theCodeD3vil/teneo/releases/download/android-v0.2.0/Teneo-0.2.0.apk",
   size: 9_000_000,
   sha256: "ab".repeat(32),
-  manifestUrl:
-    "https://github.com/theCodeD3vil/teneo/releases/download/android-v0.2.0/android-manifest.json",
 };
 const day = 24 * 60 * 60 * 1000;
 
@@ -35,8 +33,9 @@ function fakePlugin(
   const plugin = {
     canInstall: async () => ({ allowed: options.allowed ?? true }),
     openInstallSettings: async () => void calls.push("openInstallSettings"),
-    install: (request: { manifestUrl: string; version: string }) => {
-      calls.push(`install ${request.version} ${request.manifestUrl}`);
+    check: async () => ({ update: null }),
+    install: (request: { version: string }) => {
+      calls.push(`install ${request.version}`);
       if (options.installFails) return Promise.reject(options.installFails);
       return new Promise<void>((resolve, reject) => {
         release = resolve;
@@ -131,9 +130,7 @@ describe("Updater", () => {
     expect(instance.state.kind).toBe("installing");
 
     await instance.install(); // "Update" tapped again in About
-    expect(fake.calls).toEqual([
-      `install ${update.version} ${update.manifestUrl}`,
-    ]);
+    expect(fake.calls).toEqual([`install ${update.version}`]);
     // once Android says the install was called off, it can be started again
     fake.status({ status: "cancelled" });
     void instance.install();
@@ -202,9 +199,7 @@ describe("Updater", () => {
     await instance.check();
     const installing = instance.install();
     await flush();
-    expect(fake.calls).toEqual([
-      `install ${update.version} ${update.manifestUrl}`,
-    ]);
+    expect(fake.calls).toEqual([`install ${update.version}`]);
     fake.progress(4_500_000);
     expect(instance.state).toEqual({
       kind: "downloading",
@@ -252,9 +247,7 @@ describe("Updater", () => {
     void instance.resumed();
     await flush();
     expect(instance.state.kind).toBe("downloading");
-    expect(fake.calls.at(-1)).toBe(
-      `install ${update.version} ${update.manifestUrl}`,
-    );
+    expect(fake.calls.at(-1)).toBe(`install ${update.version}`);
   });
 
   test("an installer left without a word doesn't leave the update stuck", async () => {

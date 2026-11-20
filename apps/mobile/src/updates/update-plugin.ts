@@ -16,13 +16,28 @@ export interface UpdatePlugin {
   /** Open Teneo's "Install unknown apps" page in Android's settings */
   openInstallSettings(): Promise<void>;
   /**
-   * Download the release's manifest and check it is signed with Teneo's
-   * update key, then download the APK it names, check its size, hash,
-   * package and version, and hand it to Android's installer. Resolves once
-   * the installer has it; what happens next comes as `installStatus`.
-   * Rejects with what to show.
+   * The newest release of this app, if newer than this one, from the signed
+   * manifest in Teneo's update channel once its signature checks out
+   * (SignedManifest.java). `update` is null when there is none. Rejects with
+   * what to show.
    */
-  install(options: { manifestUrl: string; version: string }): Promise<void>;
+  check(): Promise<{
+    update: {
+      version: string;
+      versionCode: number;
+      apkUrl: string;
+      size: number;
+      sha256: string;
+    } | null;
+  }>;
+  /**
+   * Install `version`, which check() offered: read the signed manifest again
+   * (it must still offer that version), download the APK it names, check its
+   * size, hash, package and version, and hand it to Android's installer.
+   * Resolves once the installer has it; what happens next comes as
+   * `installStatus`. Rejects with what to show.
+   */
+  install(options: { version: string }): Promise<void>;
   /** Stop a download; `install` rejects with the code "cancelled" */
   cancel(): Promise<void>;
   /**

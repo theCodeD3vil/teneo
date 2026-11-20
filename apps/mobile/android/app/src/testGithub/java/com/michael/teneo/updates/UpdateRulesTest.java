@@ -18,7 +18,14 @@ public class UpdateRulesTest {
         assertFalse(UpdateRules.isReleaseUrl(null));
         assertFalse(UpdateRules.isReleaseUrl(APK.replace("https:", "http:")));
         assertFalse(UpdateRules.isReleaseUrl("https://github.com/someone/teneo/releases/download/android-v0.2.0/Teneo.apk"));
-        assertFalse(UpdateRules.isReleaseUrl("https://github.com/theCodeD3vil/teneo/releases/download/v0.2.0/Teneo.apk"));
+        // the APK in Teneo's own release, beside the Mac app: where phones update from now
+        assertTrue(UpdateRules.isReleaseUrl("https://github.com/theCodeD3vil/teneo/releases/download/v0.4.4-beta.1/Teneo-0.1.3-beta.1.apk"));
+        assertTrue(UpdateRules.isReleaseUrl("https://github.com/theCodeD3vil/teneo/releases/download/v0.5.0/Teneo-0.2.0.apk"));
+        // no other release, and nothing below a release
+        assertFalse(UpdateRules.isReleaseUrl("https://github.com/theCodeD3vil/teneo/releases/download/beta-channel/Teneo.apk"));
+        assertFalse(UpdateRules.isReleaseUrl("https://github.com/theCodeD3vil/teneo/releases/download/v0.2/Teneo.apk"));
+        assertFalse(UpdateRules.isReleaseUrl("https://github.com/theCodeD3vil/teneo/releases/download/v0.2.0/x/Teneo.apk"));
+        assertFalse(UpdateRules.isReleaseUrl("https://github.com/theCodeD3vil/teneo/releases/download/Teneo.apk"));
         assertFalse(UpdateRules.isReleaseUrl(APK.replace(".apk", ".zip")));
         assertFalse(UpdateRules.isReleaseUrl(APK + "?x=1.apk"));
         assertFalse(UpdateRules.isReleaseUrl(APK.replace("0.2.0/", "0.2.0/../../x/")));

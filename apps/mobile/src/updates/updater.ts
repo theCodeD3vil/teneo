@@ -49,10 +49,14 @@ export class Updater {
 
   constructor(options: UpdaterOptions) {
     this.options = options;
-    this.find = options.find ?? ((current) => findUpdate(current));
+    const plugin = options.plugin;
+    // in a browser there is no signed manifest to read: no update is offered
+    this.find =
+      options.find ??
+      ((current) =>
+        plugin ? findUpdate(current, plugin) : Promise.resolve(null));
     this.storage = options.storage ?? localStorage;
     this.now = options.now ?? Date.now;
-    const plugin = options.plugin;
     if (plugin) {
       void plugin.addListener("progress", ({ received }) => {
         if (this.current.kind === "downloading") {
@@ -162,10 +166,7 @@ export class Updater {
         return;
       }
       this.set({ kind: "downloading", update, received: 0 });
-      await plugin.install({
-        manifestUrl: update.manifestUrl,
-        version: update.version,
-      });
+      await plugin.install({ version: update.version });
       // a status may already have come
       if (this.current.kind === "downloading") {
         this.set({ kind: "installing", update });

@@ -8,7 +8,7 @@
 import { spawnSync } from "node:child_process";
 
 import { ghArgs } from "./gh-command.ts";
-import { SIGNING_SECRETS } from "./release-manifest.ts";
+import { OPTIONAL_SECRETS, SIGNING_SECRETS } from "./release-manifest.ts";
 
 const dryRun = process.argv.includes("--dry-run");
 const GITHUB_ACTIONS_APP = 15368; // status checks must come from GitHub Actions itself
@@ -234,8 +234,12 @@ step(
         `the release environment has no ${missing.join(", ")} yet: run \`bun run release:secrets\`, then this again`,
       );
     }
+    // an optional one goes only once the environment has its own copy
     const leftovers = repositoryWide.filter(
-      (name) => SIGNING_SECRETS.includes(name) || name.startsWith("DOPPLER_"),
+      (name) =>
+        SIGNING_SECRETS.includes(name) ||
+        name.startsWith("DOPPLER_") ||
+        (OPTIONAL_SECRETS.includes(name) && inEnvironment.includes(name)),
     );
     for (const name of leftovers) gh("DELETE", at(`actions/secrets/${name}`));
   },

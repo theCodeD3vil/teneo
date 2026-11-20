@@ -39,7 +39,19 @@ lives off GitHub.
    way: it builds the APK, records its provenance, and makes an
    `android-v<version>` **draft** with the APK and an unsigned
    `android-manifest.json` naming its version, version code, size and hash.
-   When the PR bumped both apps, the APK goes into the Mac draft too.
+   When the PR bumped both apps, the APK goes into the Mac draft too, with
+   a plain `android-manifest.json` naming it there: **one release holds
+   everything the PR shipped**, and it is the one phones from Android 0.1.3
+   update from.
+
+   Phones read their update from Teneo's **update channel**, the
+   `beta-channel` release, which also holds Teneo Beta's Mac `manifest.json`:
+   `android-manifest.json` for Teneo and `android-beta-manifest.json` for
+   Teneo Beta, each signed and naming the APK in the release it ships in
+   (`UpdateRules.channelUrl` in the Android app). `release:publish` puts the
+   signed manifest there last, once the releases it names are published. The
+   `android-v<version>` release is still made, as phones before 0.1.3 look
+   only there; once those have updated, it can stop.
 
 3. On the maintainer's Mac:
 
