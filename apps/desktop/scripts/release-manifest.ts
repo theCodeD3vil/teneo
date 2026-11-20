@@ -9,6 +9,11 @@
 // The signed envelope is TinyJS's (~/.tinyjs/runtime/update-signing.js):
 // { ...plain fields, signed: { format, algorithm, payload, signature } },
 // where the Ed25519 signature covers "tinyjs-update-v1\n" + payload.
+//
+// Android releases work the same way with their own manifest,
+// android-manifest.json, signed with the same key under another prefix
+// ("teneo-android-update-v1\n"), so neither kind of signature can stand in for
+// the other. The phone checks it (UpdateRules.java) before it downloads.
 
 export const CI_LOGIN = "github-actions[bot]";
 
@@ -22,12 +27,19 @@ export const SIGNING_SECRETS = [
   "MACOS_CERTIFICATE_PASSWORD",
   "ANDROID_KEYSTORE_P12",
   "ANDROID_KEYSTORE_PASSWORD",
+  // the old Android key's proof that the new one replaces it (base64)
+  "ANDROID_SIGNING_LINEAGE",
 ];
 export const updateKeyReference = (vault: string) =>
   `op://${vault}/${UPDATE_KEY_TITLE}/password`;
 
 /** Mac releases published from here on must be signed (the watchdog's line). */
 export const SIGNED_FROM = "2026-11-18T00:00:00Z";
+/** Android releases published from here on must carry a signed android-manifest.json. */
+export const ANDROID_SIGNED_FROM = "2026-11-20T00:00:00Z";
+export const ANDROID_MANIFEST = "android-manifest.json";
+export const ANDROID_TAG_PREFIX = "android-v";
+const ANDROID_FORMAT = "teneo-android-update-v1";
 
 const SIGNATURE_PREFIX = "tinyjs-update-v1\n";
 const ARCHES = ["arm64", "x86_64"] as const;
@@ -94,18 +106,20 @@ function strictBase64(
   return bytes;
 }
 
-/** The signed payload, once its signature checks out against one of the keys. */
-export async function verifyManifest(
+/** The signed payload text of an envelope in `format`, once its signature
+ *  checks out against one of the keys. */
+async function verifiedPayload(
   doc: unknown,
   publicKeys: string[],
-): Promise<Manifest> {
+  format: string,
+): Promise<string> {
   if (publicKeys.length === 0)
     throw new Error("tinyjs.json has no update.publicKey");
   const envelope = (doc as { signed?: Record<string, unknown> } | null)?.signed;
   if (
     !envelope ||
     typeof envelope !== "object" ||
-    envelope.format !== "tinyjs-update-v1" ||
+    envelope.format !== format ||
     envelope.algorithm !== "Ed25519" ||
     typeof envelope.payload !== "string" ||
     Object.keys(envelope).sort().join(",") !==
@@ -117,19 +131,40 @@ export async function verifyManifest(
   const keys = publicKeys.map((key) =>
     strictBase64(key, 32, "update public key"),
   );
-  const message = new TextEncoder().encode(SIGNATURE_PREFIX + envelope.payload);
+  const message = new TextEncoder().encode(`${format}\n${envelope.payload}`);
   for (const raw of keys) {
     const key = await crypto.subtle.importKey("raw", raw, "Ed25519", false, [
       "verify",
     ]);
-    if (await crypto.subtle.verify("Ed25519", key, signature, message)) {
-      const payload = JSON.parse(envelope.payload) as Manifest;
-      if (typeof payload?.version !== "string")
-        throw new Error("the signed manifest has no version");
-      return payload;
-    }
+    if (await crypto.subtle.verify("Ed25519", key, signature, message))
+      return envelope.payload;
   }
   throw new Error("the manifest's signature doesn't match Teneo's update key");
+}
+
+/** The signed payload, once its signature checks out against one of the keys. */
+export async function verifyManifest(
+  doc: unknown,
+  publicKeys: string[],
+): Promise<Manifest> {
+  const payload = JSON.parse(
+    await verifiedPayload(doc, publicKeys, "tinyjs-update-v1"),
+  ) as Manifest;
+  if (typeof payload?.version !== "string")
+    throw new Error("the signed manifest has no version");
+  return payload;
+}
+
+async function signedEnvelope(
+  format: string,
+  payload: string,
+  privateKey: Parameters<typeof crypto.subtle.sign>[1],
+) {
+  const message = new TextEncoder().encode(`${format}\n${payload}`);
+  const signature = Buffer.from(
+    await crypto.subtle.sign("Ed25519", privateKey, message),
+  ).toString("base64");
+  return { format, algorithm: "Ed25519", payload, signature };
 }
 
 /** Sign as TinyJS does. Tests use it; releases are signed by `tinyjs publish --sign-manifest`. */
@@ -139,18 +174,9 @@ export async function signManifest(
 ): Promise<Manifest> {
   const { signed: _old, ...plain } = manifest;
   const payload = JSON.stringify(plain);
-  const message = new TextEncoder().encode(SIGNATURE_PREFIX + payload);
-  const signature = Buffer.from(
-    await crypto.subtle.sign("Ed25519", privateKey, message),
-  ).toString("base64");
   return {
     ...plain,
-    signed: {
-      format: "tinyjs-update-v1",
-      algorithm: "Ed25519",
-      payload,
-      signature,
-    },
+    signed: await signedEnvelope(SIGNATURE_PREFIX.trim(), payload, privateKey),
   };
 }
 
@@ -260,12 +286,205 @@ export function checkDraft(
   ];
 }
 
+// --- Android
+
+/** What an Android release's signed manifest vouches for. The phone installs
+ *  only this APK, of this app, at this version. */
+export interface AndroidManifest {
+  version: string;
+  /** android/app/build.gradle's version code for the version */
+  versionCode: number;
+  /** com.michael.teneo, or com.michael.teneo.beta for a beta */
+  package: string;
+  apk: { url: string; size: number; sha256: string };
+}
+
+const ANDROID_VERSION =
+  /^(\d{1,4})\.(\d{1,2})\.(\d{1,2})(?:-beta\.([1-9]\d?))?$/;
+
+/** The version code android/app/build.gradle gives a version, or null for
+ *  a version release-android.yml wouldn't release. */
+export function androidVersionCode(version: string): number | null {
+  const match = ANDROID_VERSION.exec(version);
+  if (!match || match[4] === "99") return null;
+  return (
+    Number(match[1]) * 1_000_000 +
+    Number(match[2]) * 10_000 +
+    Number(match[3]) * 100 +
+    (match[4] === undefined ? 99 : Number(match[4]))
+  );
+}
+
+/** Teneo Beta is an app of its own (android/app/build.gradle). */
+export const androidPackage = (version: string) =>
+  version.includes("-beta.") ? "com.michael.teneo.beta" : "com.michael.teneo";
+
+export const androidApkName = (version: string) => `Teneo-${version}.apk`;
+
+export function androidApkUrl(repository: string, version: string): string {
+  return `https://github.com/${repository}/releases/download/${ANDROID_TAG_PREFIX}${version}/${androidApkName(version)}`;
+}
+
+/** CI's plain manifest for the APK it built, which the maintainer signs. */
+export function buildAndroidManifest(options: {
+  version: string;
+  repository: string;
+  size: number;
+  sha256: string;
+}): AndroidManifest {
+  const versionCode = androidVersionCode(options.version);
+  if (versionCode === null)
+    throw new Error(`${options.version} isn't an Android release version`);
+  if (!/^[0-9a-f]{64}$/.test(options.sha256))
+    throw new Error("the APK's sha256 must be 64 lowercase hex digits");
+  if (!Number.isSafeInteger(options.size) || options.size <= 0)
+    throw new Error("the APK's size must be a positive whole number");
+  return {
+    version: options.version,
+    versionCode,
+    package: androidPackage(options.version),
+    apk: {
+      url: androidApkUrl(options.repository, options.version),
+      size: options.size,
+      sha256: options.sha256,
+    },
+  };
+}
+
+/** A clean copy, or null when any field is missing or mistyped. */
+export function parseAndroidManifest(input: unknown): AndroidManifest | null {
+  if (typeof input !== "object" || input === null) return null;
+  const doc = input as Record<string, unknown>;
+  if (Object.keys(doc).sort().join(",") !== "apk,package,version,versionCode")
+    return null;
+  const apk = doc.apk as Record<string, unknown> | null;
+  if (
+    typeof doc.version !== "string" ||
+    typeof doc.versionCode !== "number" ||
+    typeof doc.package !== "string" ||
+    typeof apk !== "object" ||
+    apk === null ||
+    Object.keys(apk).sort().join(",") !== "sha256,size,url" ||
+    typeof apk.url !== "string" ||
+    typeof apk.size !== "number" ||
+    !Number.isSafeInteger(apk.size) ||
+    typeof apk.sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(apk.sha256)
+  )
+    return null;
+  return {
+    version: doc.version,
+    versionCode: doc.versionCode,
+    package: doc.package,
+    apk: { url: apk.url, size: apk.size, sha256: apk.sha256 },
+  };
+}
+
+/** The signed manifest: the envelope alone, with no plain fields beside it
+ *  for anything to read by mistake. */
+export async function signAndroidManifest(
+  manifest: AndroidManifest,
+  privateKey: Parameters<typeof crypto.subtle.sign>[1],
+): Promise<{ signed: unknown }> {
+  return {
+    signed: await signedEnvelope(
+      ANDROID_FORMAT,
+      JSON.stringify(manifest),
+      privateKey,
+    ),
+  };
+}
+
+export async function verifyAndroidManifest(
+  doc: unknown,
+  publicKeys: string[],
+): Promise<AndroidManifest> {
+  const payload = parseAndroidManifest(
+    JSON.parse(await verifiedPayload(doc, publicKeys, ANDROID_FORMAT)),
+  );
+  if (!payload) throw new Error("the signed Android manifest is malformed");
+  return payload;
+}
+
+/** Every way an Android release and its manifest fail to describe each
+ *  other: the manifest names this version's APK, and that is the file here. */
+export function androidReleaseProblems(
+  release: Release,
+  manifest: AndroidManifest,
+  repository: string,
+  version: string,
+): string[] {
+  const problems: string[] = [];
+  if (manifest.version !== version)
+    problems.push(
+      `the Android manifest says ${manifest.version}, not ${version}`,
+    );
+  if (manifest.versionCode !== androidVersionCode(version))
+    problems.push(`the Android manifest's version code isn't ${version}'s`);
+  if (manifest.package !== androidPackage(version))
+    problems.push(
+      `the Android manifest is for ${manifest.package}, not ${androidPackage(version)}`,
+    );
+  const name = androidApkName(version);
+  const apk = release.assets.find((asset) => asset.name === name);
+  if (manifest.apk.url !== androidApkUrl(repository, version) || !apk) {
+    problems.push(`the Android manifest's APK isn't ${name} of this release`);
+  } else {
+    if (digestOf(apk) !== manifest.apk.sha256)
+      problems.push(
+        `${name} isn't the file the Android manifest's hash describes`,
+      );
+    if (apk.size !== manifest.apk.size)
+      problems.push(`${name} isn't the size the Android manifest says`);
+  }
+  for (const asset of release.assets) {
+    if (asset.name !== name && asset.name !== ANDROID_MANIFEST)
+      problems.push(`${asset.name} doesn't belong in an Android release`);
+  }
+  if (release.author?.login !== CI_LOGIN)
+    problems.push(
+      `the release was made by ${release.author?.login ?? "nobody"}, not CI`,
+    );
+  return problems;
+}
+
+/** Problems with an Android draft before it is signed. None means CI made all of it. */
+export function checkAndroidDraft(
+  release: Release,
+  manifest: unknown,
+  repository: string,
+  version: string,
+): string[] {
+  const problems: string[] = [];
+  if (!release.draft)
+    problems.push(`${ANDROID_TAG_PREFIX}${version} is already published`);
+  for (const asset of release.assets) {
+    if (asset.uploader?.login !== CI_LOGIN)
+      problems.push(
+        `${asset.name} was uploaded by ${asset.uploader?.login ?? "nobody"}, not CI`,
+      );
+  }
+  const plain = parseAndroidManifest(manifest);
+  if (!plain)
+    return [
+      ...problems,
+      `the draft's ${ANDROID_MANIFEST} isn't CI's plain manifest`,
+    ];
+  return [
+    ...problems,
+    ...androidReleaseProblems(release, plain, repository, version),
+  ];
+}
+
 /** Why a published release must be pulled back to a draft, if it must. */
 export async function checkPublishedRelease(options: {
   release: Release;
+  /** manifest.json, or android-manifest.json for an Android release */
   manifest: unknown;
   publicKeys: string[];
   repository: string;
+  /** every release, for the one the beta channel points at */
+  releases?: Release[];
 }): Promise<string[]> {
   const { release, manifest, publicKeys, repository } = options;
   const after = (time: string | null) => time !== null && time > SIGNED_FROM;
@@ -290,9 +509,29 @@ export async function checkPublishedRelease(options: {
     if (!asset || !after(asset.updated_at)) return [];
     const payload = await verified();
     if (typeof payload === "string") return [payload];
-    return payload.version.includes("-")
-      ? []
-      : [`the beta channel offers ${payload.version}, which isn't a beta`];
+    if (!payload.version.includes("-"))
+      return [`the beta channel offers ${payload.version}, which isn't a beta`];
+    // the beta it offers must be a release CI made, with the files it names
+    const beta = options.releases?.find(
+      (candidate) => candidate.tag_name === `v${payload.version}`,
+    );
+    if (!beta || beta.draft)
+      return [
+        `the beta channel offers ${payload.version}, which isn't released`,
+      ];
+    const problems = downloadProblems(
+      beta,
+      payload,
+      repository,
+      payload.version,
+    );
+    if (beta.author?.login !== CI_LOGIN)
+      problems.push(
+        `v${payload.version} was made by ${beta.author?.login ?? "nobody"}, not CI`,
+      );
+    for (const file of beta.assets.filter(notFromCi))
+      problems.push(`v${payload.version}'s ${file.name} wasn't uploaded by CI`);
+    return problems;
   }
 
   // Releases from before signing are left as they were, but a file added
@@ -309,8 +548,34 @@ export async function checkPublishedRelease(options: {
       );
   }
 
-  // Android releases have no manifest yet: CI must have made every file.
-  if (release.tag_name.startsWith("android-v")) {
+  if (release.tag_name.startsWith(ANDROID_TAG_PREFIX)) {
+    const version = release.tag_name.slice(ANDROID_TAG_PREFIX.length);
+    if (
+      release.published_at !== null &&
+      release.published_at > ANDROID_SIGNED_FROM
+    ) {
+      let payload: AndroidManifest;
+      try {
+        if (manifest === null)
+          throw new Error(`the release has no ${ANDROID_MANIFEST}`);
+        payload = await verifyAndroidManifest(manifest, publicKeys);
+      } catch (error) {
+        return [(error as Error).message];
+      }
+      const problems = androidReleaseProblems(
+        release,
+        payload,
+        repository,
+        version,
+      );
+      for (const asset of release.assets.filter(
+        (file) =>
+          file.name !== ANDROID_MANIFEST && file.uploader?.login !== CI_LOGIN,
+      ))
+        problems.push(`${asset.name} wasn't uploaded by CI`);
+      return problems;
+    }
+    // From before Android releases were signed: CI must have made every file
     const problems = release.assets
       .filter(notFromCi)
       .map((asset) => `${asset.name} wasn't uploaded by CI`);

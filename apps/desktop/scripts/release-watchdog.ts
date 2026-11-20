@@ -1,11 +1,13 @@
-// The release watchdog (.github/workflows/release-watchdog.yml): checks the
-// newest releases against the rules in release-manifest.ts and pulls any
+// The release watchdog (.github/workflows/release-watchdog.yml): checks every
+// published release against the rules in release-manifest.ts and pulls any
 // that breaks them back to a draft at once, then opens an issue, which
 // emails the owner. Run from the repository root with GITHUB_TOKEN set.
 /* oxlint-disable no-console -- a command-line script reports on the console */
 import { readFileSync } from "node:fs";
 
 import {
+  ANDROID_MANIFEST,
+  ANDROID_TAG_PREFIX,
   checkPublishedRelease,
   publicKeysOf,
   type Release,
@@ -42,21 +44,30 @@ async function api(
 const publicKeys = publicKeysOf(
   JSON.parse(readFileSync("apps/desktop/tinyjs.json", "utf8")),
 );
-const releases = ((await api("releases?per_page=30")) as Release[]).filter(
-  (release) => !release.draft,
-);
+// Every page: a release that fell off the first would go unchecked, and
+// anyone able to make releases could push one off with a few dummies
+const all: Release[] = [];
+for (let page = 1; page <= 50; page++) {
+  const batch = (await api(`releases?per_page=100&page=${page}`)) as Release[];
+  all.push(...batch);
+  if (batch.length < 100) break;
+}
+const releases = all.filter((release) => !release.draft);
 
 let pulled = 0;
 for (const release of releases) {
+  const manifestName = release.tag_name.startsWith(ANDROID_TAG_PREFIX)
+    ? ANDROID_MANIFEST
+    : "manifest.json";
   let manifest: unknown = null;
-  if (release.assets.some((asset) => asset.name === "manifest.json")) {
+  if (release.assets.some((asset) => asset.name === manifestName)) {
     const response = await fetch(
-      `https://github.com/${repository}/releases/download/${release.tag_name}/manifest.json`,
+      `https://github.com/${repository}/releases/download/${release.tag_name}/${manifestName}`,
     );
     // a failed download is a reason to try again, never to pull a release
     if (!response.ok)
       throw new Error(
-        `${release.tag_name}'s manifest.json answered ${response.status}`,
+        `${release.tag_name}'s ${manifestName} answered ${response.status}`,
       );
     manifest = await response.json().catch(() => "unreadable");
   }
@@ -65,6 +76,7 @@ for (const release of releases) {
     manifest,
     publicKeys,
     repository,
+    releases: all,
   });
   if (problems.length === 0) continue;
 

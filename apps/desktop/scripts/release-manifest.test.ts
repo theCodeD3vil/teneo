@@ -1,20 +1,28 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 
 import {
+  ANDROID_MANIFEST,
+  androidVersionCode,
+  buildAndroidManifest,
   buildManifest,
   CI_LOGIN,
+  checkAndroidDraft,
   checkDraft,
   checkPublishedRelease,
   type Manifest,
   publicKeysOf,
   type Release,
   type ReleaseAsset,
+  signAndroidManifest,
   signManifest,
+  verifyAndroidManifest,
   verifyManifest,
 } from "./release-manifest.ts";
 
 const repository = "theCodeD3vil/teneo";
 const before = "2026-11-15T23:47:00Z";
+/** after Mac signing began, before Android signing did */
+const between = "2026-11-19T10:00:00Z";
 const later = "2026-11-20T10:00:00Z";
 const armHash = "a".repeat(64);
 const intelHash = "b".repeat(64);
@@ -330,10 +338,11 @@ describe("checkPublishedRelease", () => {
     ]);
   });
 
-  test("requires Android releases to hold only CI's files", async () => {
+  test("requires Android releases from before signing to hold only CI's files", async () => {
     const android: Release = {
       ...macRelease("0.1.3"),
       tag_name: "android-v0.1.3",
+      published_at: between,
       assets: [asset("Teneo-0.1.3.apk")],
     };
     expect(await check(android, null)).toEqual([]);
@@ -361,12 +370,37 @@ describe("checkPublishedRelease", () => {
     expect(await check(channel(before), manifestFor("0.4.2-beta.1"))).toEqual(
       [],
     );
-    expect(
-      await check(
-        channel(later),
-        await signManifest(manifestFor("0.4.3-beta.1"), key.privateKey),
-      ),
-    ).toEqual([]);
+    // the beta it offers has to be a release CI made, with those files
+    const beta = macRelease("0.4.3-beta.1");
+    const signedBeta = await signManifest(
+      manifestFor("0.4.3-beta.1"),
+      key.privateKey,
+    );
+    const checkWith = (releases: Release[]) =>
+      checkPublishedRelease({
+        release: channel(later),
+        manifest: signedBeta,
+        publicKeys: [publicKey],
+        repository,
+        releases,
+      });
+    expect(await checkWith([beta])).toEqual([]);
+    expect(await checkWith([])).toEqual([
+      "the beta channel offers 0.4.3-beta.1, which isn't released",
+    ]);
+    expect(await checkWith([{ ...beta, draft: true }])).toEqual([
+      "the beta channel offers 0.4.3-beta.1, which isn't released",
+    ]);
+    const swapped = macRelease("0.4.3-beta.1");
+    swapped.assets[0] = {
+      ...swapped.assets[0],
+      digest: `sha256:${"d".repeat(64)}`,
+      uploader: { login: "theCodeD3vil" },
+    };
+    expect(await checkWith([swapped])).toEqual([
+      "teneo-0.4.3-beta.1-macos-arm64.zip isn't the file the manifest's hash describes",
+      "v0.4.3-beta.1's teneo-0.4.3-beta.1-macos-arm64.zip wasn't uploaded by CI",
+    ]);
     expect(await check(channel(later), manifestFor("0.4.3-beta.1"))).toEqual([
       "the manifest isn't signed",
     ]);
@@ -376,5 +410,133 @@ describe("checkPublishedRelease", () => {
         await signManifest(manifestFor("0.4.3"), key.privateKey),
       ),
     ).toEqual(["the beta channel offers 0.4.3, which isn't a beta"]);
+  });
+});
+
+describe("Android manifests", () => {
+  const apkHash = "e".repeat(64);
+  const plain = (version: string) =>
+    buildAndroidManifest({
+      version,
+      repository,
+      size: 9_000_000,
+      sha256: apkHash,
+    });
+  const androidRelease = (
+    version: string,
+    overrides: Partial<Release> = {},
+  ): Release => ({
+    id: 9,
+    tag_name: `android-v${version}`,
+    draft: false,
+    prerelease: version.includes("-"),
+    published_at: later,
+    author: { login: CI_LOGIN },
+    assets: [
+      asset(`Teneo-${version}.apk`, {
+        digest: `sha256:${apkHash}`,
+        size: 9_000_000,
+      }),
+      asset(ANDROID_MANIFEST, { uploader: { login: "theCodeD3vil" } }),
+    ],
+    ...overrides,
+  });
+  const check = (release: Release, manifest: unknown) =>
+    checkPublishedRelease({
+      release,
+      manifest,
+      publicKeys: [publicKey],
+      repository,
+    });
+
+  test("gives versions the code android/app/build.gradle does", () => {
+    expect(androidVersionCode("0.1.3")).toBe(10399);
+    expect(androidVersionCode("1.2.3-beta.4")).toBe(1020304);
+    expect(androidVersionCode("1.2.3-beta.99")).toBeNull();
+    expect(androidVersionCode("1.2.300")).toBeNull();
+  });
+
+  test("names the APK, its app and its version code", () => {
+    expect(plain("0.1.4-beta.2")).toEqual({
+      version: "0.1.4-beta.2",
+      versionCode: 10402,
+      package: "com.michael.teneo.beta",
+      apk: {
+        url: `https://github.com/${repository}/releases/download/android-v0.1.4-beta.2/Teneo-0.1.4-beta.2.apk`,
+        size: 9_000_000,
+        sha256: apkHash,
+      },
+    });
+  });
+
+  test("verifies only manifests signed as Android ones", async () => {
+    const signed = await signAndroidManifest(plain("0.1.4"), key.privateKey);
+    expect(await verifyAndroidManifest(signed, [publicKey])).toEqual(
+      plain("0.1.4"),
+    );
+    // a Mac signature over the same text is no Android signature, and back
+    const asMac = {
+      signed: { ...(signed.signed as object), format: "tinyjs-update-v1" },
+    };
+    await expect(verifyManifest(asMac, [publicKey])).rejects.toThrow(
+      "doesn't match",
+    );
+    const macSigned = await signManifest(manifestFor("0.4.3"), key.privateKey);
+    await expect(verifyAndroidManifest(macSigned, [publicKey])).rejects.toThrow(
+      "isn't signed",
+    );
+    const other = await signAndroidManifest(
+      plain("0.1.4"),
+      otherKey.privateKey,
+    );
+    await expect(verifyAndroidManifest(other, [publicKey])).rejects.toThrow(
+      "doesn't match",
+    );
+  });
+
+  test("passes a signed release of CI's APK", async () => {
+    const signed = await signAndroidManifest(plain("0.1.4"), key.privateKey);
+    expect(await check(androidRelease("0.1.4"), signed)).toEqual([]);
+  });
+
+  test("pulls an Android release that is unsigned, or whose APK isn't the signed one", async () => {
+    expect(await check(androidRelease("0.1.4"), null)).toEqual([
+      "the release has no android-manifest.json",
+    ]);
+    expect(await check(androidRelease("0.1.4"), plain("0.1.4"))).toEqual([
+      "the manifest isn't signed",
+    ]);
+    const signed = await signAndroidManifest(plain("0.1.4"), key.privateKey);
+    const swapped = androidRelease("0.1.4");
+    swapped.assets[0] = {
+      ...swapped.assets[0],
+      digest: `sha256:${"f".repeat(64)}`,
+      uploader: { login: "theCodeD3vil" },
+    };
+    swapped.assets.push(asset("extra.apk"));
+    expect(await check(swapped, signed)).toEqual([
+      "Teneo-0.1.4.apk isn't the file the Android manifest's hash describes",
+      "extra.apk doesn't belong in an Android release",
+      "Teneo-0.1.4.apk wasn't uploaded by CI",
+    ]);
+    // a manifest signed for another version can't vouch for this one
+    expect(await check(androidRelease("0.1.5"), signed)).toContain(
+      "the Android manifest says 0.1.4, not 0.1.5",
+    );
+  });
+
+  test("passes a draft CI made, and flags one it didn't", () => {
+    const draft = androidRelease("0.1.4", { draft: true });
+    draft.assets[1] = asset(ANDROID_MANIFEST);
+    expect(
+      checkAndroidDraft(draft, plain("0.1.4"), repository, "0.1.4"),
+    ).toEqual([]);
+    expect(
+      checkAndroidDraft(draft, { version: "0.1.4" }, repository, "0.1.4"),
+    ).toEqual(["the draft's android-manifest.json isn't CI's plain manifest"]);
+    draft.assets[0] = { ...draft.assets[0], uploader: { login: "someone" } };
+    expect(
+      checkAndroidDraft(draft, plain("0.1.4"), repository, "0.1.4"),
+    ).toEqual(["Teneo-0.1.4.apk was uploaded by someone, not CI"]);
   });
 });

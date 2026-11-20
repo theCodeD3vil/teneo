@@ -7,6 +7,7 @@
 /* oxlint-disable no-console -- a command-line script reports on the console */
 import { spawnSync } from "node:child_process";
 
+import { ghArgs } from "./gh-command.ts";
 import { SIGNING_SECRETS } from "./release-manifest.ts";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -27,7 +28,7 @@ function gh(method: string, path: string, body?: unknown): unknown {
     path,
     ...(body === undefined ? [] : ["--input", "-"]),
   ];
-  const result = spawnSync("gh", args, {
+  const result = spawnSync(...ghArgs(args), {
     input: body === undefined ? undefined : JSON.stringify(body),
     encoding: "utf8",
   });
@@ -48,11 +49,15 @@ function step(what: string, apply: () => void): void {
 }
 
 const repository = spawnSync(
-  "gh",
-  ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-  {
-    encoding: "utf8",
-  },
+  ...ghArgs([
+    "repo",
+    "view",
+    "--json",
+    "nameWithOwner",
+    "-q",
+    ".nameWithOwner",
+  ]),
+  { encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] },
 ).stdout.trim();
 if (!repository)
   throw new Error("gh isn't signed in, or this isn't the repository folder");
