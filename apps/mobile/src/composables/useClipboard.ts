@@ -20,6 +20,8 @@ export const clipboardPageSize = 50;
 
 /** After a page fails to load, how long before it is asked for again */
 const loadMoreRetryAfterMs = 2000;
+/** How long typing must pause before the search runs */
+const searchDelayMs = 150;
 
 export type ClipboardListFilter = Pick<ClipboardListRequest, "kind" | "search">;
 
@@ -89,18 +91,25 @@ export function useClipboardList(
   }
 
   // While a search narrows, the last results stay up instead of a flash of
-  // "Loading"; a tab switch shows its own list, not the previous tab's
+  // "Loading"; a tab switch shows its own list, not the previous tab's. Each
+  // search reads the whole history, so typing waits for a pause first
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
   watch(
     () => toValue(filter),
     (next, previous) => {
+      clearTimeout(searchTimer);
       if (!previous || next.kind !== previous.kind) {
         loading.value = true;
         items.value = [];
+      } else if (next.search && next.search !== previous.search) {
+        searchTimer = setTimeout(() => void load(), searchDelayMs);
+        return;
       }
       void load();
     },
     { immediate: true, deep: true },
   );
+  onScopeDispose(() => clearTimeout(searchTimer));
 
   const unsubscribe = client.onHistoryChanged(() => {
     void load(Math.max(clipboardPageSize, items.value.length));

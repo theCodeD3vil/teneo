@@ -153,13 +153,27 @@ public final class SyncRows {
     /** Everything one sync transaction writes: rows, and the fields to change for each device (a null value sets NULL) */
     public static final class Batch {
 
-        /** the store's highest change number when the core first read it; null if it read nothing */
-        public final Long expectedHead;
+        /** every row the core read, by id, with the change number it had then (null: no such row) */
+        public final Map<String, Long> reads;
+        /** the newest unpinned row it was told of, leaving out `newestSkipped`; null when it didn't ask */
+        public final List<String> newestSkipped;
+        public final String newestId;
+        public final Long newestSyncSeq;
         public final List<Row> puts;
         public final Map<String, Map<String, Object>> peers;
 
-        public Batch(Long expectedHead, List<Row> puts, Map<String, Map<String, Object>> peers) {
-            this.expectedHead = expectedHead;
+        public Batch(
+            Map<String, Long> reads,
+            List<String> newestSkipped,
+            String newestId,
+            Long newestSyncSeq,
+            List<Row> puts,
+            Map<String, Map<String, Object>> peers
+        ) {
+            this.reads = reads;
+            this.newestSkipped = newestSkipped;
+            this.newestId = newestId;
+            this.newestSyncSeq = newestSyncSeq;
             this.puts = puts;
             this.peers = peers;
         }

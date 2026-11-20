@@ -51,6 +51,20 @@ android {
             }
         }
     }
+    // Two builds of each app, by where it is installed from. "github" is the
+    // APK on GitHub releases, which updates itself from there. "play" is
+    // Google Play's, which Play updates: it has no updater and can't install
+    // apps (src/github holds both). Only a full release goes to Play.
+    flavorDimensions = ['store']
+    productFlavors {
+        github {
+            dimension 'store'
+            isDefault = true
+        }
+        play {
+            dimension 'store'
+        }
+    }
     buildTypes {
         debug {
             applicationIdSuffix '.debug'
@@ -69,6 +83,16 @@ android {
     }
 }
 
+// A beta is Teneo Beta, an app of its own. The first bundle uploaded to Play
+// names the app there for good, so a beta must never be one.
+tasks.configureEach { task ->
+    if (isBeta && task.name.startsWith('bundlePlay')) {
+        task.doFirst {
+            throw new GradleException("$appVersion is a beta: only a full release goes to Google Play. Set \"version\" in apps/mobile/package.json to a full release first.")
+        }
+    }
+}
+
 repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
@@ -83,6 +107,8 @@ dependencies {
     implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    // Android's org.json is a stub in unit tests: the real one, for tests only
+    testImplementation "org.json:json:20240303"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

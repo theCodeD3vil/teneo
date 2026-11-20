@@ -160,19 +160,40 @@ public final class HistoryStore {
         "THEN (SELECT value FROM SYNC_META WHERE key = 'maker') " +
         "ELSE (SELECT maker FROM SYNC_PEERS WHERE deviceId = originDevice) END AS originMaker";
 
+    /**
+     * Android reads a query's rows through a window of about 2 MB, and a row
+     * that doesn't fit throws SQLiteBlobTooBigException: one long paste would
+     * crash the list. So a text longer than this, in bytes, is never selected
+     * whole; it is read in pieces of PIECE_CHARS when it is needed (fullText).
+     */
+    static final int MAX_WINDOW_TEXT_BYTES = 1_000_000;
+    /** Characters of one piece: at most 4 bytes each, well inside the window */
+    private static final int PIECE_CHARS = 200_000;
+    private static final String BIG = "(length(CAST(value AS BLOB)) > " + MAX_WINDOW_TEXT_BYTES + ")";
+    /** The text unless it is too big to select whole (then NULL, and isBig) */
+    private static final String SAFE_VALUE = "CASE WHEN " + BIG + " THEN NULL ELSE value END";
+
     // A text holding a secret is read whole, so the search can tell the
     // secret from the rest; any other only as far as the list shows it
     private static final String LIST_COLUMNS =
         "id, kind, path, imageSize, color, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
         ORIGIN_MAKER +
         ", " +
-        "CASE WHEN secrets IS NOT NULL THEN value ELSE substr(value, 1, " +
+        "CASE WHEN secrets IS NOT NULL AND NOT " + BIG + " THEN value ELSE substr(value, 1, " +
         HistoryText.PREVIEW_LENGTH +
-        ") END AS value, length(value) AS valueLength";
+        ") END AS value, length(value) AS valueLength, " + BIG + " AS isBig";
+    // With no search, only the start of each text, secrets or not: the list
+    // shows no more, and HistoryText.truncate leaves out a secret it would cut
+    private static final String PREVIEW_COLUMNS =
+        "id, kind, path, imageSize, color, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
+        ORIGIN_MAKER +
+        ", substr(value, 1, " +
+        HistoryText.PREVIEW_LENGTH +
+        ") AS value, length(value) AS valueLength, " + BIG + " AS isBig";
     private static final String ITEM_COLUMNS =
         "id, kind, path, imageSize, color, dateCopied, sourceAppName, sourceAppBundleId, pinnedAt, secrets, linkUrl, linkHost, detectorVersion, " +
         ORIGIN_MAKER +
-        ", value, length(value) AS valueLength";
+        ", " + SAFE_VALUE + " AS value, length(value) AS valueLength, " + BIG + " AS isBig";
 
     private static final Map<String, HistoryStore> stores = new HashMap<>();
 
@@ -273,7 +294,7 @@ public final class HistoryStore {
         // sqlite's LIKE ignores case for ASCII letters only. Any other search
         // ("école" for "ÉCOLE") is matched row by row instead, on whole texts.
         boolean likeFinds = HistoryText.isAscii(query);
-        String columns = likeFinds ? LIST_COLUMNS : ITEM_COLUMNS;
+        String columns = query.isEmpty() ? PREVIEW_COLUMNS : likeFinds ? LIST_COLUMNS : ITEM_COLUMNS;
         List<Item> items = new ArrayList<>();
         HistoryQueries.ListCursor after = cursor;
         boolean exhausted = false;
@@ -300,6 +321,8 @@ public final class HistoryStore {
                     List<SecretSpan> secrets = parseSecrets(string(row, "secrets"));
                     String text = string(row, "value");
                     if (!query.isEmpty() && (!likeFinds || !secrets.isEmpty())) {
+                        // the search looks at the whole text, however long
+                        if (longColumn(row, "isBig") == 1) text = fullText(string(row, "id"));
                         boolean matches = HistoryText.matchesSearch(
                             text,
                             secrets,
@@ -335,13 +358,14 @@ public final class HistoryStore {
             ? longQuery("SELECT COUNT(*) FROM CLIPBOARD_ITEMS WHERE " + where.sql + " AND secrets IS NULL", where.values)
             : 0;
         String sql =
-            "SELECT value, secrets, sourceAppName, linkHost FROM CLIPBOARD_ITEMS WHERE " +
+            "SELECT " + SAFE_VALUE + ", secrets, sourceAppName, linkHost, id, " + BIG + " FROM CLIPBOARD_ITEMS WHERE " +
             where.sql +
             (likeFinds ? " AND secrets IS NOT NULL" : "");
         try (Cursor row = db.rawQuery(sql, args(where.values))) {
             while (row.moveToNext()) {
                 List<SecretSpan> secrets = parseSecrets(row.getString(1));
-                if (HistoryText.matchesSearch(row.getString(0), secrets, row.getString(2), row.getString(3), query, hideSecrets)) {
+                String text = row.getLong(5) == 1 ? fullText(row.getString(4)) : row.getString(0);
+                if (HistoryText.matchesSearch(text, secrets, row.getString(2), row.getString(3), query, hideSecrets)) {
                     count++;
                 }
             }
@@ -489,14 +513,49 @@ public final class HistoryStore {
     private String repeatedCopy(String text) {
         try (
             Cursor latest = db.rawQuery(
-                "SELECT id, value FROM CLIPBOARD_ITEMS WHERE deletedAt IS NULL AND pinnedAt IS NULL " +
+                "SELECT id, " + SAFE_VALUE + ", " + BIG + ", length(value) FROM CLIPBOARD_ITEMS WHERE deletedAt IS NULL AND pinnedAt IS NULL " +
                 "ORDER BY " +
                 HistoryQueries.UNPINNED_ORDER +
                 " LIMIT 1",
                 null
             )
         ) {
-            return latest.moveToFirst() && text.equals(latest.getString(1)) ? latest.getString(0) : null;
+            if (!latest.moveToFirst() || latest.isNull(3)) return null;
+            // a text of another length can't be the same one: no need to read it
+            if (latest.getLong(3) != text.codePointCount(0, text.length())) return null;
+            String held = latest.getLong(2) == 1 ? fullText(latest.getString(0)) : latest.getString(1);
+            return text.equals(held) ? latest.getString(0) : null;
+        }
+    }
+
+    /** The whole text of an item, read in pieces that each fit the window, or null when it has none */
+    private String fullText(String id) {
+        StringBuilder text = new StringBuilder();
+        for (long start = 1; ; start += PIECE_CHARS) {
+            try (
+                Cursor piece = db.rawQuery(
+                    "SELECT substr(value, ?, ?) FROM CLIPBOARD_ITEMS WHERE id = ?",
+                    new String[] { String.valueOf(start), String.valueOf(PIECE_CHARS), id }
+                )
+            ) {
+                if (!piece.moveToFirst() || piece.isNull(0)) return start == 1 ? null : text.toString();
+                String part = piece.getString(0);
+                text.append(part);
+                // substr counts characters, as codePointCount does
+                if (part.codePointCount(0, part.length()) < PIECE_CHARS) return text.toString();
+            }
+        }
+    }
+
+    /** The first `length` characters of an item's text */
+    private String headOfText(String id, int length) {
+        try (
+            Cursor head = db.rawQuery(
+                "SELECT substr(value, 1, ?) FROM CLIPBOARD_ITEMS WHERE id = ?",
+                new String[] { String.valueOf(length), id }
+            )
+        ) {
+            return head.moveToFirst() ? head.getString(0) : null;
         }
     }
 
@@ -530,7 +589,13 @@ public final class HistoryStore {
             );
             int deleted = 0;
             if (HistoryQueries.limitsHistory(copiedBefore, keepNewest)) {
-                Object[] values = HistoryQueries.deletionValues(now, copiedBefore, keepNewest);
+                HistoryQueries.ListCursor lastKept = null;
+                if (keepNewest > 0) {
+                    try (Cursor row = db.rawQuery(HistoryQueries.LAST_KEPT_QUERY, args(java.util.Arrays.asList(HistoryQueries.lastKeptValues(now, keepNewest))))) {
+                        if (row.moveToFirst()) lastKept = new HistoryQueries.ListCursor(null, row.getLong(0), row.getString(1));
+                    }
+                }
+                Object[] values = HistoryQueries.deletionValues(now, copiedBefore, keepNewest, lastKept);
                 try (
                     Cursor row = db.rawQuery(
                         "SELECT path FROM CLIPBOARD_ITEMS WHERE path IS NOT NULL AND " + HistoryQueries.DELETION_CONDITION,
@@ -701,14 +766,17 @@ public final class HistoryStore {
         List<Undetected> texts = new ArrayList<>();
         try (
             Cursor row = db.rawQuery(
-                "SELECT id, value FROM CLIPBOARD_ITEMS " +
+                "SELECT id, " + SAFE_VALUE + ", " + BIG + " FROM CLIPBOARD_ITEMS " +
                 "WHERE kind = 'text' AND value IS NOT NULL AND deletedAt IS NULL " +
                 "AND (detectorVersion IS NULL OR detectorVersion < ?) " +
                 "ORDER BY dateCopied DESC, id DESC LIMIT ?",
                 new String[] { String.valueOf(version), String.valueOf(Math.max(1, limit)) }
             )
         ) {
-            while (row.moveToNext()) texts.add(new Undetected(row.getString(0), row.getString(1)));
+            while (row.moveToNext()) {
+                String id = row.getString(0);
+                texts.add(new Undetected(id, row.getLong(2) == 1 ? fullText(id) : row.getString(1)));
+            }
         }
         return texts;
     }
@@ -731,12 +799,12 @@ public final class HistoryStore {
                     String oldColor = null;
                     try (
                         Cursor row = db.rawQuery(
-                            "SELECT value, secrets, linkUrl, color FROM CLIPBOARD_ITEMS WHERE id = ?",
+                            "SELECT " + SAFE_VALUE + ", secrets, linkUrl, color, " + BIG + ", value IS NULL FROM CLIPBOARD_ITEMS WHERE id = ?",
                             new String[] { found.id }
                         )
                     ) {
-                        if (row.moveToFirst() && !row.isNull(0)) {
-                            text = row.getString(0);
+                        if (row.moveToFirst() && row.getLong(5) == 0) {
+                            text = row.getLong(4) == 1 ? fullText(found.id) : row.getString(0);
                             oldSecrets = row.isNull(1) ? null : row.getString(1);
                             oldLinkUrl = row.isNull(2) ? null : row.getString(2);
                             oldColor = row.isNull(3) ? null : row.getString(3);
@@ -814,6 +882,39 @@ public final class HistoryStore {
         }
     }
 
+    /** The rows of these ids that exist, deleted or not: a sync batch's, in one read */
+    public synchronized List<SyncRows.Row> syncRows(List<String> ids) {
+        List<SyncRows.Row> rows = new ArrayList<>();
+        for (int from = 0; from < ids.size(); from += 500) {
+            List<String> part = ids.subList(from, Math.min(ids.size(), from + 500));
+            try (Cursor row = db.rawQuery(SyncQueries.rows(part.size()), part.toArray(new String[0]))) {
+                while (row.moveToNext()) rows.add(toSyncRow(row));
+            }
+        }
+        return rows;
+    }
+
+    /** Whether the rows a sync transaction read are as it read them */
+    private boolean isAsRead(SyncRows.Batch batch) {
+        for (Map.Entry<String, Long> read : batch.reads.entrySet()) {
+            if (!Objects.equals(syncSeqOf(read.getKey()), read.getValue())) return false;
+        }
+        if (batch.newestSkipped == null) return true;
+        try (Cursor row = db.rawQuery(SyncQueries.newestUnpinned(batch.newestSkipped.size()), batch.newestSkipped.toArray(new String[0]))) {
+            if (!row.moveToFirst()) return batch.newestId == null;
+            SyncRows.Row now = toSyncRow(row);
+            return now.id.equals(batch.newestId) && Objects.equals(now.syncSeq, batch.newestSyncSeq);
+        }
+    }
+
+    /** A row's change number as a read gave it (0 for none, as toSyncRow), or null when there is no such row */
+    private Long syncSeqOf(String id) {
+        try (Cursor row = db.rawQuery(SyncQueries.SYNC_SEQ, new String[] { id })) {
+            if (!row.moveToFirst()) return null;
+            return row.isNull(0) ? 0L : row.getLong(0);
+        }
+    }
+
     /** The newest unpinned item that is not deleted, leaving out the rows in `skipped`; and the highest change number then */
     public synchronized SyncRows.Single syncNewestUnpinned(List<String> skipped) {
         try (Cursor row = db.rawQuery(SyncQueries.newestUnpinned(skipped.size()), skipped.toArray(new String[0]))) {
@@ -846,17 +947,17 @@ public final class HistoryStore {
     /**
      * Save what the core wrote in one of its transactions, all of it or none.
      * Every row gets a change number of its own, so it travels on to the
-     * other devices. False, with nothing saved, when something else wrote to
-     * the history since the core read it (`expectedHead` is no longer the
-     * highest change number): what it decided from is out of date, so it reads
-     * again and decides again.
+     * other devices. False, with nothing saved, when a row the core read has
+     * changed since (`reads`, `newest`): what it decided from is out of date,
+     * so it reads again and decides again. A copy or a delete of some other
+     * item doesn't count: the user can go on using Teneo while a batch lands.
      */
     public boolean syncApply(SyncRows.Batch batch) {
         boolean applied;
         synchronized (this) {
             removedImages.clear();
             applied = inTransaction(() -> {
-                if (batch.expectedHead != null && head() != batch.expectedHead) return false;
+                if (!isAsRead(batch)) return false;
                 for (SyncRows.Row row : batch.puts) writeSyncRow(row);
                 for (Map.Entry<String, Map<String, Object>> peer : batch.peers.entrySet()) writePeer(peer.getKey(), peer.getValue());
                 return true;
@@ -1242,6 +1343,10 @@ public final class HistoryStore {
 
     private Item toItem(Cursor row, List<SecretSpan> secrets, boolean preview) {
         String text = string(row, "value");
+        // too big to have been selected: the list's preview, or all of it
+        if (text == null && longColumn(row, "isBig") == 1) {
+            text = preview ? headOfText(string(row, "id"), HistoryText.PREVIEW_LENGTH) : fullText(string(row, "id"));
+        }
         boolean isTruncated = false;
         if (preview && text != null) {
             HistoryText.Preview cut = HistoryText.truncate(text, secrets, (int) longColumn(row, "valueLength"), HistoryText.PREVIEW_LENGTH);

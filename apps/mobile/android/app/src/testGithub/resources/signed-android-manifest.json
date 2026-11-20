@@ -1,0 +1,11 @@
+{
+  "publicKey": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "manifest": {
+    "signed": {
+      "format": "teneo-android-update-v1",
+      "algorithm": "Ed25519",
+      "payload": "{\"version\":\"0.1.4\",\"versionCode\":10499,\"package\":\"com.michael.teneo\",\"apk\":{\"url\":\"https://github.com/theCodeD3vil/teneo/releases/download/android-v0.1.4/Teneo-0.1.4.apk\",\"size\":12345678,\"sha256\":\"abababababababababababababababababababababababababababababababab\"}}",
+      "signature": "onM+VLMh12kDE3JU/tZEiBtTAMpLYhMiYJS2oosinv+eY80RCuaaeC0GRKzUwzPlq/znCnFwoPSawF1+MM6kDA=="
+    }
+  }
+}

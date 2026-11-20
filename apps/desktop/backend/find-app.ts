@@ -53,15 +53,32 @@ function getInstalledApps(): Promise<Map<string, string>> {
 }
 
 async function scanAllFolders(): Promise<Map<string, string>> {
+  const paths: string[] = [];
+  for (const folder of APP_FOLDERS) await findAppsIn(folder, paths, 1);
+  // a plutil per app, a few at a time rather than one after another
+  const bundleIds: string[] = Array.from({ length: paths.length }, () => "");
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(8, paths.length) }, async () => {
+      while (next < paths.length) {
+        const index = next++;
+        bundleIds[index] = await readBundleId(paths[index]!);
+      }
+    }),
+  );
   const apps = new Map<string, string>();
-  for (const folder of APP_FOLDERS) await scanFolderForApps(folder, apps, 1);
+  paths.forEach((path, index) => {
+    const bundleId = bundleIds[index];
+    // first match wins, so /Applications beats copies found later
+    if (bundleId && !apps.has(bundleId)) apps.set(bundleId, path);
+  });
   return apps;
 }
 
-/** Add every .app in folder (and up to `subfolderDepth` levels below) to apps. */
-async function scanFolderForApps(
+/** Every .app in folder (and up to `subfolderDepth` levels below), in order. */
+async function findAppsIn(
   folder: string,
-  apps: Map<string, string>,
+  paths: string[],
   subfolderDepth: number,
 ): Promise<void> {
   let entries: AsyncIterable<{ name: string; isDirectory: boolean }>;
@@ -72,12 +89,9 @@ async function scanFolderForApps(
   }
   for await (const entry of entries) {
     const path = `${folder}/${entry.name}`;
-    if (entry.name.endsWith(".app")) {
-      const bundleId = await readBundleId(path);
-      // first match wins, so /Applications beats copies found later
-      if (bundleId && !apps.has(bundleId)) apps.set(bundleId, path);
-    } else if (entry.isDirectory && subfolderDepth > 0) {
-      await scanFolderForApps(path, apps, subfolderDepth - 1);
+    if (entry.name.endsWith(".app")) paths.push(path);
+    else if (entry.isDirectory && subfolderDepth > 0) {
+      await findAppsIn(path, paths, subfolderDepth - 1);
     }
   }
 }

@@ -42,9 +42,32 @@ final class UpdateRules {
         return -1;
     }
 
-    /** A SHA-256 as GitHub writes it, or null when the page has none */
+    /** A SHA-256 as 64 lowercase hex digits. Every update has one: an APK
+     *  whose hash nobody vouched for is not downloaded */
     static boolean isDigest(String sha256) {
-        return sha256 == null || sha256.matches("[0-9a-f]{64}");
+        return sha256 != null && sha256.matches("[0-9a-f]{64}");
+    }
+
+    /** The signed manifest of the Android release of `version` on GitHub */
+    static boolean isManifestUrl(String url, String version) {
+        return ReleaseRules.versionCode(version) > 0 && (RELEASE_DOWNLOADS + version + "/" + SignedManifest.FILE).equals(url);
+    }
+
+    /**
+     * What is wrong with a signed manifest, or null when it is an update for
+     * this app: the version the release is tagged with, an APK of that
+     * release with a size and hash, newer than the one installed.
+     */
+    static String manifestProblem(SignedManifest manifest, String expectedVersion, String packageName, long installedVersionCode) {
+        if (!manifest.version.equals(expectedVersion)) return "The signed update is for another version";
+        if (manifest.versionCode != ReleaseRules.versionCode(manifest.version)) return "The signed update is malformed";
+        if (!manifest.packageName.equals(packageName)) return "The signed update is for a different app";
+        if (manifest.versionCode <= installedVersionCode) return "This version of Teneo is already installed";
+        if (!isReleaseUrl(manifest.apkUrl) || !manifest.apkUrl.startsWith(RELEASE_DOWNLOADS + manifest.version + "/")) {
+            return "The signed update names a file Teneo won't download";
+        }
+        if (manifest.size <= 0 || manifest.size > MAX_SIZE || !isDigest(manifest.sha256)) return "The signed update is malformed";
+        return null;
     }
 
     static String hex(byte[] bytes) {

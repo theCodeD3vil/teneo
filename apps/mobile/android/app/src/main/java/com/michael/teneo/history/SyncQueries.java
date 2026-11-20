@@ -36,6 +36,17 @@ public final class SyncQueries {
 
     public static final String ROW = "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE id = ?";
 
+    /** A row's change number, to tell whether it changed since it was read */
+    public static final String SYNC_SEQ = "SELECT syncSeq FROM CLIPBOARD_ITEMS WHERE id = ?";
+
+    /** The rows of `count` ids at once, well within sqlite's 999 parameters */
+    public static String rows(int count) {
+        if (count < 1 || count > MAX_SKIPPED) throw new IllegalArgumentException("Too many rows at once");
+        List<String> marks = new ArrayList<>();
+        for (int i = 0; i < count; i++) marks.add("?");
+        return "SELECT " + ROW_COLUMNS + " FROM CLIPBOARD_ITEMS WHERE id IN (" + String.join(", ", marks) + ")";
+    }
+
     /** The largest pin stamp stored: stamps are fixed-width, so the text order is the time order */
     public static final String LATEST_STAMP = "SELECT max(pinnedStamp) FROM CLIPBOARD_ITEMS";
 

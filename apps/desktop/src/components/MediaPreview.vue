@@ -81,17 +81,16 @@ const { isCopied, copy } = usePreviewCopy(() =>
 );
 
 // Opening hands the user to another app, so the panel gets out of the way
+// The backend opens the item's own files, whatever paths the page has
 async function openFiles(): Promise<void> {
-  await Promise.all(
-    availablePaths.value.map((path) => tiny.app.shell.open(path)),
-  );
+  if (!availablePaths.value.length) return;
+  await tiny.api.call("openItemFiles", { id: props.item.id });
   await hidePanel();
 }
 
 async function showInFinder(): Promise<void> {
-  const [path] = availablePaths.value;
-  if (!path) return;
-  await tiny.app.shell.reveal(path);
+  if (!availablePaths.value.length) return;
+  await tiny.api.call("revealItemFile", { id: props.item.id });
   await hidePanel();
 }
 </script>

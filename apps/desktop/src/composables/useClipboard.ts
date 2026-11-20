@@ -20,6 +20,7 @@ import {
   type ClipboardListPage,
   type ClipboardListRequest,
 } from "@/types/clipboard";
+import { isPanelHidden } from "@/utils/panel-reset";
 
 export const clipboardItemsQueryKey = ["clipboard-items"] as const;
 export const clipboardItemQueryKey = ["clipboard-item"] as const;
@@ -130,14 +131,28 @@ export function useClipboardItem(
 // One subscription for all of the page's queries, for as long as any is mounted
 let subscriberCount = 0;
 let unsubscribeFromHistory: (() => void) | undefined;
+// The history changed while the panel was hidden
+let missedChanges = false;
+/** How long showing the panel waits for a list that changed while hidden */
+const catchUpWaitMs = 200;
 
 function useHistoryChanges(queryClient: QueryClient): void {
   onMounted(() => {
     subscriberCount += 1;
     unsubscribeFromHistory ??= tiny.api.on(clipboardHistoryChangedEvent, () => {
-      // lists on screen refetch their loaded pages; the others when next shown
-      void queryClient.invalidateQueries({ queryKey: clipboardItemsQueryKey });
-      void queryClient.invalidateQueries({ queryKey: clipboardItemQueryKey });
+      // Lists on screen refetch their loaded pages; the others when next
+      // shown. The panel is hidden most of the day while every copy on the
+      // Mac lands here: then nothing is read until it shows (catchUpOnHistory)
+      const refetchType = isPanelHidden() ? "none" : "active";
+      if (refetchType === "none") missedChanges = true;
+      void queryClient.invalidateQueries({
+        queryKey: clipboardItemsQueryKey,
+        refetchType,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: clipboardItemQueryKey,
+        refetchType,
+      });
     });
   });
   onUnmounted(() => {
@@ -147,6 +162,31 @@ function useHistoryChanges(queryClient: QueryClient): void {
       unsubscribeFromHistory = undefined;
     }
   });
+}
+
+/** As the panel shows: read what changed while it was hidden, waiting a
+ *  moment for it so the panel rarely opens on the old list. */
+export async function catchUpOnHistory(
+  queryClient: QueryClient,
+): Promise<void> {
+  if (!missedChanges) return;
+  missedChanges = false;
+  const refetched = Promise.all([
+    queryClient.refetchQueries({
+      queryKey: clipboardItemsQueryKey,
+      type: "active",
+      stale: true,
+    }),
+    queryClient.refetchQueries({
+      queryKey: clipboardItemQueryKey,
+      type: "active",
+      stale: true,
+    }),
+  ]);
+  await Promise.race([
+    refetched,
+    new Promise((resolve) => setTimeout(resolve, catchUpWaitMs)),
+  ]);
 }
 
 function uniqueById(items: ClipboardHistoryItem[]): ClipboardHistoryItem[] {

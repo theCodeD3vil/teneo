@@ -75,14 +75,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- looks for a newer release once a day and says so in a
-             notification (updates/UpdateCheckJob.java): only Android's job
-             scheduler may run it -->
-        <service
-            android:name=".updates.UpdateCheckJob"
-            android:exported="false"
-            android:permission="android.permission.BIND_JOB_SERVICE" />
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -104,10 +96,8 @@
          is the one for network connections -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <!-- the sync notification, asked for when sync is turned on in the
-         background, and the one that says an update is available -->
+         background, and, in the build from GitHub, the one that says an
+         update is available -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- installs an update downloaded in Settings › About; the user allows
-         it in "Install unknown apps" and confirms each install -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

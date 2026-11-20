@@ -1,24 +1,39 @@
 <script setup lang="ts">
-import { marked } from "marked";
-import { computed } from "vue";
+import { computed, h, type VNode } from "vue";
+
+import { type NoteNode, renderReleaseNotes } from "./release-notes";
 
 const props = defineProps<{ markdown: string }>();
 
-// The notes come from the same release manifest as the update itself, so
-// their HTML is as trusted as the download
-const html = computed(() => marked.parse(props.markdown, { async: false }));
+// Built from a few known tags, never v-html: the notes come from a PR
+// description, and this window can reach the app's backend
+const nodes = computed(() => renderReleaseNotes(props.markdown));
 
-// A link would replace this page, so open it in the browser instead
+function toVNode(node: NoteNode): VNode | string {
+  if (typeof node === "string") return node;
+  const attributes =
+    node.tag === "a"
+      ? { href: node.href }
+      : node.start === undefined
+        ? {}
+        : { start: node.start };
+  return h(node.tag, attributes, node.children.map(toVNode));
+}
+
+const Notes = () => nodes.value.map(toVNode);
+
+// A link would replace this page, so the backend opens it in the browser,
+// and only if it is an https page
 function openLinkInBrowser(event: MouseEvent): void {
   const link = (event.target as HTMLElement).closest("a");
   if (!link) return;
   event.preventDefault();
-  void tiny.app.shell.open(link.href);
+  void tiny.api.call("openLink", { url: link.href });
 }
 </script>
 
 <template>
-  <div class="release-notes" @click="openLinkInBrowser" v-html="html" />
+  <div class="release-notes" @click="openLinkInBrowser"><Notes /></div>
 </template>
 
 <style scoped>
@@ -171,10 +186,5 @@ function openLinkInBrowser(event: MouseEvent): void {
   margin: 1.4em 0;
   border: 0;
   border-top: 1px solid var(--notes-rule);
-}
-
-.release-notes :deep(img) {
-  max-width: 100%;
-  border-radius: 8px;
 }
 </style>

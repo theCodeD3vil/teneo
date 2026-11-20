@@ -90,7 +90,7 @@ function toggleTransform(next: "tidy" | "json"): void {
 
 // the Mac opens these in the mail app, or in FaceTime for a number
 function openContact(): void {
-  if (contact.value) void tiny.app.shell.open(contact.value.url);
+  if (contact.value) void tiny.api.call("openLink", { url: contact.value.url });
 }
 
 // The text as a QR code, shown in place of the text, to hand it to a phone.

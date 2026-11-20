@@ -9,6 +9,7 @@ import SetupScreen from "./components/setup/SetupScreen.vue";
 import UpdatePrompt from "./components/UpdatePrompt.vue";
 import { useNavigation } from "./composables/useNavigation";
 import { useSheetDepth } from "./composables/useSheetDepth";
+import { hasUpdater } from "./composables/useUpdates";
 
 const { currentState, direction } = useNavigation();
 
@@ -91,6 +92,6 @@ const screenKey = computed(() =>
         </Transition>
       </div>
     </div>
-    <UpdatePrompt />
+    <UpdatePrompt v-if="hasUpdater()" />
   </div>
 </template>

@@ -13,7 +13,6 @@ import com.michael.teneo.history.HistoryPlugin;
 import com.michael.teneo.links.LinkFetchPlugin;
 import com.michael.teneo.sync.SyncController;
 import com.michael.teneo.sync.SyncPlugin;
-import com.michael.teneo.updates.UpdatePlugin;
 
 public class MainActivity extends BridgeActivity {
 
@@ -29,8 +28,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SharePlugin.class);
         registerPlugin(HistoryPlugin.class);
         registerPlugin(SyncPlugin.class);
-        registerPlugin(UpdatePlugin.class);
         registerPlugin(LinkFetchPlugin.class);
+        StorePlugins.register(this);
         super.onCreate(savedInstanceState);
 
         // The app's page and the sync service's share one web view process.

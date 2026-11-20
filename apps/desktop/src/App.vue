@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useQueryClient } from "@tanstack/vue-query";
 import { openPanelHotkeyId } from "@teneo/shared/types/settings";
 import { showPanelEvent } from "@teneo/shared/types/windows";
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
@@ -7,7 +8,7 @@ import HomeFooter from "./components/HomeFooter.vue";
 import ItemPreview from "./components/ItemPreview.vue";
 import SearchInput from "./components/SearchInput.vue";
 import TabManager from "./components/TabManager.vue";
-import { useClipboardItem } from "./composables/useClipboard";
+import { catchUpOnHistory, useClipboardItem } from "./composables/useClipboard";
 import { useHotkeys } from "./composables/useHotkeys";
 import { usePanelIdleCleanup } from "./composables/usePanelIdleCleanup";
 import { PANEL_WIDTH } from "./constants/system";
@@ -34,6 +35,7 @@ watch(isGone, (gone) => {
   if (gone) closePreview();
 });
 usePanelIdleCleanup();
+const queryClient = useQueryClient();
 
 function openPreview(item: ClipboardHistoryItem): void {
   searchInput.value?.blur(); // a hidden search field would still take keys
@@ -101,6 +103,8 @@ async function showWindow() {
   // Open on the list, not the search field, so letter hotkeys (P, D) work;
   // ⌘ / focuses search. Blur too: focus left in search last time comes back on show.
   searchInput.value?.blur();
+  // copies made while it was hidden weren't read then
+  await catchUpOnHistory(queryClient);
   await nextTick();
   void document.body.offsetHeight; // lay the list out now, while the window is hidden
   // The main window is a panel (tinyjs.json): show() gives it the keyboard
@@ -141,6 +145,10 @@ let unsubscribeFromHotkeys: (() => void) | undefined;
 let unsubscribeFromShowPanel: (() => void) | undefined;
 
 onMounted(() => {
+  // the panel starts hidden (an accessory app): copies wait until it shows
+  void tiny.win.getState().then((state) => {
+    if (!state?.visible) notifyPanelVisibility(false);
+  });
   window.addEventListener("blur", hideWindowOnBlur);
   tiny.tray.onClick(async () => {
     await toggleWindow();

@@ -11,6 +11,7 @@ import {
   deleteClipboardItems,
   listClipboardItemSizes,
   purgeOldTombstones,
+  scrubDeletedHistory,
 } from "./database";
 import { logError } from "./files";
 import { clearLinkPreviews } from "./link-previews";
@@ -86,6 +87,8 @@ async function countItemsWithinStorage(
 export async function clearClipboardHistory(app: TinyApp): Promise<void> {
   // with sync on, the other devices clear what was cleared here
   await deleteClipboardItems(app, 0, 0, { leaveTombstones: true });
+  // nothing cleared stays behind in the write-ahead log
+  await scrubDeletedHistory(app);
   // pinned links fetch theirs again
   await clearLinkPreviews(app);
 }

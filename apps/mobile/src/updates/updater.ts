@@ -44,6 +44,8 @@ export class Updater {
   private readonly openedListeners = new Set<() => void>();
   /** Opened from the notification before anything listened */
   private wasOpened = false;
+  /** Android said it is installing the update: the app is about to be replaced */
+  private wasInstalled = false;
 
   constructor(options: UpdaterOptions) {
     this.options = options;
@@ -161,10 +163,8 @@ export class Updater {
       }
       this.set({ kind: "downloading", update, received: 0 });
       await plugin.install({
-        url: update.apkUrl,
-        size: update.size,
-        sha256: update.sha256,
-        versionCode: update.versionCode,
+        manifestUrl: update.manifestUrl,
+        version: update.version,
       });
       // a status may already have come
       if (this.current.kind === "downloading") {
@@ -174,6 +174,25 @@ export class Updater {
       if (codeOf(error) === "cancelled")
         this.set({ kind: "available", update });
       else this.set({ kind: "failed", update, message: messageOf(error) });
+    }
+  }
+
+  /**
+   * The app is back in front. From Android's settings: install, if Teneo may
+   * now. From Android's installer: if it said nothing, it was left (Home,
+   * Recents), which some phones don't report, so the update can be started
+   * again; a new install replaces the old one (UpdatePlugin.commit).
+   */
+  async resumed(): Promise<void> {
+    const state = this.current;
+    if (state.kind === "needs_permission") {
+      if ((await this.options.plugin?.canInstall())?.allowed) {
+        // as tapped: available, then on to the download
+        this.set({ kind: "available", update: state.update });
+        await this.install();
+      }
+    } else if (state.kind === "installing" && !this.wasInstalled) {
+      this.set({ kind: "available", update: state.update });
     }
   }
 
@@ -206,6 +225,7 @@ export class Updater {
     const update = this.update();
     if (!update) return;
     if (status.status === "pending_user" || status.status === "installed") {
+      if (status.status === "installed") this.wasInstalled = true;
       this.set({ kind: "installing", update });
     } else if (status.status === "cancelled") {
       this.set({ kind: "available", update });

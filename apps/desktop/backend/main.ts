@@ -3,7 +3,7 @@
 import { pickSettings } from "@teneo/shared/types/settings";
 
 import { getAppIconUrl } from "./app-icons";
-import { removeBackdoorAtLaunch } from "./backdoor-cleanup";
+import { backdoorFoundAt, removeBackdoorAtLaunch } from "./backdoor-cleanup";
 import { readClipboardItem } from "./clipboard-history";
 import { getDataFolderUsage } from "./data-usage";
 import {
@@ -40,6 +40,7 @@ import {
   getLinkPreviewImage,
   removeStaleLinkPreviews,
 } from "./link-previews";
+import { openItemFiles, openLink, revealItemFile } from "./open-targets";
 import { getSettings, loadSettings, updateSettings } from "./settings";
 import {
   finishSetup,
@@ -81,6 +82,9 @@ export const api: Record<string, TinyApiHandler> = {
     listExcludedApps(addedBundleIds, app),
   filePreview: ({ path, size }, app) => getFilePreview(path, size, app),
   requestFolderAccess: () => requestFolderAccess(),
+  openLink: ({ url }, app) => openLink(url, app),
+  openItemFiles: ({ id }, app) => openItemFiles(id, app),
+  revealItemFile: ({ id }, app) => revealItemFile(id, app),
   linkPreview: ({ url }, app) => getLinkPreview(url, app),
   linkPreviewImage: ({ url }, app) => getLinkPreviewImage(url, app),
   hidePanel: (_parameters, app) => hidePanel(app),
@@ -89,6 +93,7 @@ export const api: Record<string, TinyApiHandler> = {
   openSetup: (_parameters, app) => openSetupWindow(app),
   openUpdate: (update, app) => openUpdateWindow(update, app),
   availableUpdate: () => getAvailableUpdate(),
+  securityNotice: (_parameters, app) => backdoorFoundAt(app),
   closeUpdate: (_parameters, app) => closeUpdateWindow(app),
   installUpdate: (_parameters, app) => installUpdate(app),
   pauseOpenPanelShortcut: ({ paused }, app) =>

@@ -39,7 +39,7 @@ public class UpdateRulesTest {
 
     @Test
     public void acceptsGitHubDigestsOrNone() {
-        assertTrue(UpdateRules.isDigest(null));
+        assertFalse(UpdateRules.isDigest(null));
         assertTrue(UpdateRules.isDigest("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
         assertFalse(UpdateRules.isDigest("0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"));
         assertFalse(UpdateRules.isDigest("abc"));

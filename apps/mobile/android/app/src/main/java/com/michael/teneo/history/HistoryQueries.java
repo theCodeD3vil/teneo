@@ -31,18 +31,29 @@ public final class HistoryQueries {
     private static final String YOUNG_TOMBSTONE = "(" + TOMBSTONE_ROW + " AND deletedAt >= ?)";
 
     /**
-     * Unpinned items copied before the second value, or beyond the newest N
-     * unpinned ones (the fourth, -1 for no limit). Pinned items are never
-     * deleted or counted, and neither are young tombstones. Fill the four with
-     * deletionValues.
+     * Unpinned items copied before the second value, or after the third and
+     * fifth in the list: the oldest item "Maximum items" keeps. Pinned items
+     * are never deleted or counted, and neither are young tombstones. Fill the
+     * five with deletionValues.
      */
     public static final String DELETION_CONDITION =
         "pinnedAt IS NULL AND NOT " +
         YOUNG_TOMBSTONE +
-        " AND (dateCopied < ? OR id NOT IN (" +
-        "SELECT id FROM CLIPBOARD_ITEMS WHERE pinnedAt IS NULL AND NOT " +
+        " AND (dateCopied < ? OR dateCopied < ? OR (dateCopied = ? AND id < ?))";
+
+    /**
+     * The oldest item "Maximum items" keeps: one step down an index, where a
+     * NOT IN over the newest N ids would gather them into a table on every
+     * copy. Fill with lastKeptValues.
+     */
+    public static final String LAST_KEPT_QUERY =
+        "SELECT dateCopied, id FROM CLIPBOARD_ITEMS WHERE pinnedAt IS NULL AND NOT " +
         YOUNG_TOMBSTONE +
-        " ORDER BY dateCopied DESC, id DESC LIMIT ?))";
+        " ORDER BY dateCopied DESC, id DESC LIMIT 1 OFFSET ?";
+
+    public static Object[] lastKeptValues(long now, long keepNewest) {
+        return new Object[] { now - TOMBSTONE_LIFETIME_MS, keepNewest - 1 };
+    }
 
     private HistoryQueries() {}
 
@@ -135,13 +146,24 @@ public final class HistoryQueries {
     }
 
     /** Whether these limits can delete anything. With none set, checking
-     *  would still read the whole history for its NOT IN. */
+     *  would still read the whole history. */
     public static boolean limitsHistory(long copiedBefore, long keepNewest) {
         return copiedBefore > 0 || keepNewest >= 0;
     }
 
-    public static Object[] deletionValues(long now, long copiedBefore, long keepNewest) {
+    /**
+     * `lastKept`: what LAST_KEPT_QUERY found, null when it found nothing (fewer
+     * items than the limit). Only read when there is a limit above zero.
+     */
+    public static Object[] deletionValues(long now, long copiedBefore, long keepNewest, ListCursor lastKept) {
         long cutoff = now - TOMBSTONE_LIFETIME_MS;
-        return new Object[] { cutoff, copiedBefore, cutoff, keepNewest };
+        long date = -1;
+        String id = "";
+        if (keepNewest == 0) date = Long.MAX_VALUE;
+        else if (keepNewest > 0 && lastKept != null) {
+            date = lastKept.dateCopied;
+            id = lastKept.id;
+        }
+        return new Object[] { cutoff, copiedBefore, date, date, id };
     }
 }

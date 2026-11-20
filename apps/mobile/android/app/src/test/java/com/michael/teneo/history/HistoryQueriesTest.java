@@ -73,7 +73,20 @@ public class HistoryQueriesTest {
     public void theDeletionValuesSpareYoungTombstonesTwice() {
         long now = 100 * HistoryQueries.DAY_MS;
         long cutoff = now - HistoryQueries.TOMBSTONE_LIFETIME_MS;
-        assertArrayEquals(new Object[] { cutoff, 5L, cutoff, 10L }, HistoryQueries.deletionValues(now, 5, 10));
-        assertEquals(4, HistoryQueries.DELETION_CONDITION.chars().filter((c) -> c == '?').count());
+        HistoryQueries.ListCursor lastKept = new HistoryQueries.ListCursor(null, 42L, "m");
+        assertArrayEquals(new Object[] { cutoff, 5L, 42L, 42L, "m" }, HistoryQueries.deletionValues(now, 5, 10, lastKept));
+        assertEquals(5, HistoryQueries.DELETION_CONDITION.chars().filter((c) -> c == '?').count());
+        assertArrayEquals(new Object[] { cutoff, 9L }, HistoryQueries.lastKeptValues(now, 10));
+        assertEquals(2, HistoryQueries.LAST_KEPT_QUERY.chars().filter((c) -> c == '?').count());
+    }
+
+    @Test
+    public void maximumItemsCutsAfterTheLastItemItKeeps() {
+        long now = 100 * HistoryQueries.DAY_MS;
+        // fewer items than the limit, or no limit: nothing is after the last one kept
+        assertEquals(-1L, HistoryQueries.deletionValues(now, 0, 10, null)[2]);
+        assertEquals(-1L, HistoryQueries.deletionValues(now, 0, -1, null)[2]);
+        // a limit of none keeps nothing
+        assertEquals(Long.MAX_VALUE, HistoryQueries.deletionValues(now, 0, 0, null)[2]);
     }
 }

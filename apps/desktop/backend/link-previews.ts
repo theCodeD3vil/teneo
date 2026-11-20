@@ -5,18 +5,18 @@
 // Opening a link can do something: sign-in, password-reset and unsubscribe
 // links work once. So the copied page is opened only for the image fallback
 // and only when the link doesn't look like one of those; icons come from the
-// site's home page. Links to this Mac or its local network are never fetched.
+// site's home page. A link that looks like one of those, or carries a key,
+// gets no preview at all: it may be a tracker made for this one copy, and
+// asking its site even for an icon would tell it the link was seen. Links to
+// this Mac or its local network are never fetched.
 import { findLink } from "@teneo/shared/detection/links";
 import { findIcons, findPageImageUrl } from "@teneo/shared/links/page-tags";
 import type { LinkPreviewImage } from "@teneo/shared/types/clipboard";
 
 import { logError, pngDataUrl } from "./files";
-import {
-  canOpenPage,
-  isLocalAddress,
-  resolvesToLocalAddress,
-} from "./link-safety";
+import { canOpenPage, isLocalAddress, publicAddressOf } from "./link-safety";
 import { appPaths } from "./paths";
+import { type PinnedResponse, pinnedGet } from "./pinned-fetch";
 import { getSettings } from "./settings";
 import { generateUUID } from "./utils/uuid-generator";
 
@@ -47,12 +47,12 @@ export async function getLinkPreview(
   const link = findLink(url);
   if (!link) return null;
   const page = new URL(link.url);
-  if (isLocalAddress(page)) return null;
+  if (isLocalAddress(page) || !canOpenPage(page)) return null;
 
   const siteIcon = await cached(`site-${await hash(page.origin)}`, app, () =>
     findSiteIcon(page.origin, app),
   );
-  if (siteIcon || !canOpenPage(page)) return siteIcon;
+  if (siteIcon) return siteIcon;
   return cached(`page-${await hash(page.href)}`, app, () =>
     findPageImage(page.href, app),
   );
@@ -69,10 +69,10 @@ export async function getLinkPreviewImage(
   const link = findLink(url);
   if (!link) return null;
   const page = new URL(link.url);
-  if (isLocalAddress(page)) return null;
+  if (isLocalAddress(page) || !canOpenPage(page)) return null;
 
   const isHomePage = page.href === new URL(page.origin).href;
-  if (!isHomePage && canOpenPage(page)) {
+  if (!isHomePage) {
     const image = await cached(`page-large-${await hash(page.href)}`, app, () =>
       findPageImage(page.href, app, LARGE_PREVIEW_SIZE),
     );
@@ -217,30 +217,35 @@ async function findPageImage(
 }
 
 /** GET a URL, following redirects one at a time so none of them leads to an
- *  address `isBlocked` rules out. Null for a blocked address, too many
- *  redirects or an error status; rejects when the site can't be reached. */
+ *  address `isBlocked` rules out, each to the address checked for it
+ *  (pinnedGet). Null for a blocked address, too many redirects or an error
+ *  status; rejects when the site can't be reached. */
 async function fetchFollowingRedirects(
   url: string,
   accept: string,
-  signal: AbortSignal,
+  maxBytes: number,
   isBlocked: (url: URL) => boolean,
-): Promise<Response | null> {
+): Promise<{ response: PinnedResponse; url: URL } | null> {
+  const deadline = Date.now() + FETCH_TIMEOUT;
   let target = new URL(url);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-    if (isBlocked(target) || (await resolvesToLocalAddress(target))) {
-      return null;
-    }
-    const response = await fetch(target.href, {
-      redirect: "manual",
-      signal,
-      headers: { accept, "user-agent": USER_AGENT },
+    if (isBlocked(target)) return null;
+    const address = await publicAddressOf(target);
+    if (!address) return null;
+    const timeoutMs = deadline - Date.now();
+    if (timeoutMs <= 0) throw new Error(`${target.origin} took too long`);
+    const response = await pinnedGet(target, address, {
+      accept,
+      userAgent: USER_AGENT,
+      maxBytes,
+      timeoutMs,
     });
     const location =
       response.status >= 300 && response.status < 400
-        ? response.headers.get("location")
+        ? (response.headers.get("location") ?? null)
         : null;
-    if (!location && response.ok) return response;
-    void response.body?.cancel().catch(() => {});
+    if (!location && response.status >= 200 && response.status < 300)
+      return { response, url: target };
     if (!location) return null;
     if (!URL.canParse(location, target)) return null;
     target = new URL(location, target);
@@ -251,52 +256,23 @@ async function fetchFollowingRedirects(
   return null;
 }
 
-/** The first `maxBytes` of a response body, or null when it's longer and
- *  `allowCut` is false. */
-async function readAtMost(
-  response: Response,
-  maxBytes: number,
-  allowCut: boolean,
-): Promise<Uint8Array | null> {
-  const reader = response.body?.getReader();
-  if (!reader) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  while (length < maxBytes) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    length += value.length;
-  }
-  if (length >= maxBytes) {
-    void reader.cancel().catch(() => {});
-    if (!allowCut) return null;
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return bytes.subarray(0, Math.min(length, maxBytes));
-}
-
 async function fetchHtml(
   url: string,
   isBlocked: (url: URL) => boolean,
 ): Promise<{ html: string; url: string } | null> {
-  const signal = AbortSignal.timeout(FETCH_TIMEOUT);
-  const response = await fetchFollowingRedirects(
+  const fetched = await fetchFollowingRedirects(
     url,
     "text/html,application/xhtml+xml",
-    signal,
+    MAX_HTML_BYTES,
     isBlocked,
   );
-  if (!response?.headers.get("content-type")?.includes("html")) return null;
-  const bytes = await readAtMost(response, MAX_HTML_BYTES, true);
+  if (!fetched?.response.headers.get("content-type")?.includes("html"))
+    return null;
   // the page's own address after redirects, for its relative links
-  const pageUrl = response.url || url;
-  return bytes && { html: new TextDecoder().decode(bytes), url: pageUrl };
+  return {
+    html: new TextDecoder().decode(fetched.response.body),
+    url: fetched.url.href,
+  };
 }
 
 // Quick Look picks a format by file extension
@@ -319,21 +295,21 @@ async function downloadThumbnail(
   app: TinyApp,
   size = PREVIEW_SIZE,
 ): Promise<Uint8Array | null> {
-  const signal = AbortSignal.timeout(FETCH_TIMEOUT);
-  const response = await fetchFollowingRedirects(
+  const fetched = await fetchFollowingRedirects(
     url,
     "image/*",
-    signal,
+    MAX_IMAGE_BYTES,
     isLocalAddress,
   );
-  const contentType = response?.headers
+  const contentType = fetched?.response.headers
     .get("content-type")
     ?.split(";")[0]
-    .trim()
+    ?.trim()
     .toLowerCase();
   const extension = contentType && imageExtensions[contentType];
-  if (!response || !extension) return null;
-  const image = await readAtMost(response, MAX_IMAGE_BYTES, false);
+  if (!fetched || !extension) return null;
+  // an image cut short is no image
+  const image = fetched.response.cut ? null : fetched.response.body;
   if (!image?.length) return null;
 
   const folder = await cacheFolder(app);

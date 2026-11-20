@@ -103,7 +103,7 @@ public final class UpdateCheckJob extends JobService {
     private void check() throws IOException, JSONException {
         if (!Settings.bool(HistoryStore.get(this).settings(), CHECK_FOR_UPDATES, DEFAULT_CHECK_FOR_UPDATES)) return;
         String installed = installedVersion(this);
-        String version = findUpdate(installed);
+        String version = findUpdate(installed, getPackageName(), installedVersionCode(this));
         if (version == null) return;
         SharedPreferences preferences = getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
         if (version.equals(preferences.getString(NOTIFIED_VERSION, null))) return;
@@ -123,8 +123,12 @@ public final class UpdateCheckJob extends JobService {
         Log.i(TAG, "said that " + version + " is available");
     }
 
-    /** The newest release that would update `installed`, or null */
-    private static String findUpdate(String installed) throws IOException, JSONException {
+    /**
+     * The newest release that would update `installed`, or null. Only a
+     * release whose manifest is signed with Teneo's update key counts: one
+     * made without that key is never announced.
+     */
+    private static String findUpdate(String installed, String packageName, long installedCode) throws IOException, JSONException {
         List<String> refs = new ArrayList<>();
         String next = ReleaseRules.API + "/git/matching-refs/tags/" + ReleaseRules.TAG_PREFIX;
         for (int page = 0; next != null && page < ReleaseRules.MAX_TAG_PAGES; page++) {
@@ -144,12 +148,21 @@ public final class UpdateCheckJob extends JobService {
             JSONObject release = new JSONObject(response.body);
             if (release.optBoolean("draft")) continue;
             JSONArray assets = release.optJSONArray("assets");
+            boolean hasApk = false;
+            String manifestUrl = null;
             for (int i = 0; assets != null && i < assets.length(); i++) {
                 JSONObject asset = assets.optJSONObject(i);
                 if (asset == null) continue;
-                if (ReleaseRules.isApk(version, asset.optString("name"), asset.optString("browser_download_url"), asset.optLong("size"))) {
-                    return version;
-                }
+                String url = asset.optString("browser_download_url");
+                if (ReleaseRules.isApk(version, asset.optString("name"), url, asset.optLong("size"))) hasApk = true;
+                if (SignedManifest.FILE.equals(asset.optString("name")) && UpdateRules.isManifestUrl(url, version)) manifestUrl = url;
+            }
+            if (!hasApk || manifestUrl == null) continue;
+            try {
+                SignedManifest.fetch(manifestUrl, version, packageName, installedCode, null);
+                return version;
+            } catch (SignedManifest.Invalid refused) {
+                Log.w(TAG, version + " isn't an update Teneo can install: " + refused.getMessage());
             }
         }
         return null;
@@ -189,6 +202,14 @@ public final class UpdateCheckJob extends JobService {
             return new Response(status, new String(body.toByteArray(), StandardCharsets.UTF_8), connection.getHeaderField("Link"));
         } finally {
             connection.disconnect();
+        }
+    }
+
+    private static long installedVersionCode(Context context) {
+        try {
+            return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).getLongVersionCode();
+        } catch (PackageManager.NameNotFoundException impossible) {
+            return Long.MAX_VALUE;
         }
     }
 

@@ -136,7 +136,8 @@ describe("a link's icon", () => {
     expect(
       await previews(fetcher).icon("https://example.com/reset?token=abc"),
     ).toBeNull();
-    expect(asked).not.toContain("https://example.com/reset?token=abc");
+    // not even its site's icon: asking would tell the site the link was seen
+    expect(asked).toEqual([]);
   });
 
   test("never asks this phone or the local network", async () => {
@@ -283,12 +284,15 @@ describe("a link's picture", () => {
     expect(
       await previews(site(pages).fetcher).image("https://example.com/post"),
     ).toEqual({ image: "drawn:post@300", source: "page" });
-    // a link that may act when opened shows the home page's
+    // a link that may act when opened shows nothing, and its site isn't
+    // asked: it may be a tracker made for this one copy
+    const tracked = site(pages);
     expect(
-      await previews(site(pages).fetcher).image(
+      await previews(tracked.fetcher).image(
         "https://example.com/login?next=/post",
       ),
-    ).toEqual({ image: "drawn:home@300", source: "home" });
+    ).toBeNull();
+    expect(tracked.asked).toEqual([]);
     expect(
       await previews(
         site({ "https://example.com/favicon.ico": image("ico") }).fetcher,

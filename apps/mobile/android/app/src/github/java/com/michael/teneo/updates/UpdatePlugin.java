@@ -188,18 +188,17 @@ public class UpdatePlugin extends Plugin {
         }
     }
 
+    /**
+     * Install the release of `version`: only the APK its signed manifest
+     * names, at the size and hash it names. What the page found on GitHub
+     * says which release; the signature says what is in it.
+     */
     @PluginMethod
     public void install(PluginCall call) {
-        String url = call.getString("url");
-        long size = UpdateRules.wholeNumber(call.getData().opt("size"));
-        long versionCode = UpdateRules.wholeNumber(call.getData().opt("versionCode"));
-        String sha256 = call.getString("sha256");
-        if (!UpdateRules.isReleaseUrl(url)) {
+        String manifestUrl = call.getString("manifestUrl");
+        String version = call.getString("version");
+        if (version == null || !UpdateRules.isManifestUrl(manifestUrl, version)) {
             call.reject("That isn't a Teneo release");
-            return;
-        }
-        if (size <= 0 || size > UpdateRules.MAX_SIZE || versionCode <= 0 || !UpdateRules.isDigest(sha256)) {
-            call.reject("The release lists an update Teneo can't check");
             return;
         }
         Download download = new Download();
@@ -210,8 +209,16 @@ public class UpdatePlugin extends Plugin {
         worker.execute(() -> {
             File apk = new File(new File(getContext().getCacheDir(), "updates"), "update.apk");
             try {
-                fetch(download, url, size, sha256, apk);
-                checkArchive(apk, versionCode);
+                SignedManifest manifest = SignedManifest.fetch(
+                    manifestUrl,
+                    version,
+                    getContext().getPackageName(),
+                    installedVersionCode(),
+                    connection -> download.connection = connection
+                );
+                if (download.cancelled) throw new Cancelled();
+                fetch(download, manifest.apkUrl, manifest.size, manifest.sha256, apk);
+                checkArchive(apk, manifest.versionCode);
                 if (download.cancelled) throw new Cancelled();
                 commit(apk);
                 call.resolve();
@@ -219,6 +226,8 @@ public class UpdatePlugin extends Plugin {
                 call.reject("Cancelled", "cancelled");
             } catch (UpdateFailure failure) {
                 call.reject(failure.getMessage());
+            } catch (SignedManifest.Invalid invalid) {
+                call.reject(invalid.getMessage());
             } catch (IOException | RuntimeException error) {
                 if (download.cancelled) {
                     call.reject("Cancelled", "cancelled");
@@ -290,7 +299,7 @@ public class UpdatePlugin extends Plugin {
             }
             if (download.cancelled) throw new Cancelled();
             if (received != size) throw new UpdateFailure("The download stopped early. Try again");
-            if (sha256 != null && !sha256.equals(UpdateRules.hex(digest.digest()))) {
+            if (!sha256.equals(UpdateRules.hex(digest.digest()))) {
                 throw new UpdateFailure("The download doesn't match the release. Try again");
             }
         } finally {
@@ -305,22 +314,23 @@ public class UpdatePlugin extends Plugin {
         notifyListeners("progress", event);
     }
 
-    private void checkArchive(File apk, long versionCode) throws UpdateFailure {
-        PackageManager packages = getContext().getPackageManager();
-        String self = getContext().getPackageName();
-        PackageInfo archive = packages.getPackageArchiveInfo(apk.getPath(), 0);
-        long installed;
+    private long installedVersionCode() {
         try {
-            installed = packages.getPackageInfo(self, 0).getLongVersionCode();
+            return getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0).getLongVersionCode();
         } catch (PackageManager.NameNotFoundException error) {
             throw new IllegalStateException(error);
         }
+    }
+
+    private void checkArchive(File apk, long versionCode) throws UpdateFailure {
+        PackageManager packages = getContext().getPackageManager();
+        PackageInfo archive = packages.getPackageArchiveInfo(apk.getPath(), 0);
         String problem = UpdateRules.archiveProblem(
             archive == null ? null : archive.packageName,
             archive == null ? -1 : archive.getLongVersionCode(),
-            self,
+            getContext().getPackageName(),
             versionCode,
-            installed
+            installedVersionCode()
         );
         if (problem != null) throw new UpdateFailure(problem);
     }
@@ -334,6 +344,15 @@ public class UpdatePlugin extends Plugin {
         );
         params.setAppPackageName(context.getPackageName());
         params.setSize(apk.length());
+        // An earlier install the user walked away from (Home, Recents) may
+        // still wait for them: this one takes its place, so only one asks
+        for (PackageInstaller.SessionInfo earlier : installer.getMySessions()) {
+            try {
+                installer.abandonSession(earlier.getSessionId());
+            } catch (SecurityException | IllegalArgumentException gone) {
+                // finished or abandoned meanwhile
+            }
+        }
         int id = installer.createSession(params);
         boolean committed = false;
         try (PackageInstaller.Session session = installer.openSession(id)) {

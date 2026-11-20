@@ -8,14 +8,19 @@ export {
   isLocalIp,
 } from "@teneo/shared/links/safety";
 
-/** Whether a site's name leads to this Mac or the local network, e.g. a
- *  router's or NAS's own domain. Fetching it would make macOS ask to let
- *  Teneo find devices on the local network. Rejects when the name can't be
+/** The address to fetch `url` from, or null when its name leads to this Mac
+ *  or the local network, e.g. a router's or NAS's own domain: fetching that
+ *  would make macOS ask to let Teneo find devices on the local network. The
+ *  fetch must then go to this address and no other (pinnedGet): looking the
+ *  name up again could answer differently. Rejects when the name can't be
  *  looked up, so the preview is tried again later. */
-export async function resolvesToLocalAddress(url: URL): Promise<boolean> {
-  if (url.hostname.startsWith("[") || /^[\d.]+$/.test(url.hostname)) {
-    return false; // an address, already checked by isLocalAddress
+export async function publicAddressOf(url: URL): Promise<string | null> {
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (host.includes(":") || /^[\d.]+$/.test(host)) {
+    return isLocalIp(host) ? null : host;
   }
-  const addresses = await tjs.lookup(url.hostname, { all: true });
-  return [addresses].flat().some((address) => isLocalIp(address.ip));
+  const answers = [await tjs.lookup(host, { all: true })].flat();
+  if (answers.length === 0 || answers.some((answer) => isLocalIp(answer.ip)))
+    return null;
+  return answers[0]!.ip;
 }
