@@ -57,6 +57,11 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
     private static final long STABLE_MS = 60_000;
     private static final long FIRST_RESTART_DELAY_MS = 1_000;
     private static final long MAX_RESTART_DELAY_MS = 60_000;
+    /** Past MAX_QUICK_DEATHS: tried again after this long, doubling each time
+     *  up to LONG_RETRY_MAX_MS. Stopping for good would leave sync off until
+     *  the user opened Teneo, and a service stopped can't start itself again */
+    private static final long LONG_RETRY_MS = 15 * 60_000;
+    private static final long LONG_RETRY_MAX_MS = 4 * 60 * 60_000;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private SyncController controller;
@@ -199,7 +204,7 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         String encoded = Base64.encodeToString(key, Base64.NO_WRAP);
         Arrays.fill(key, (byte) 0);
         Log.i(TAG, "starting sync");
-        runtime = new SyncRuntime(this, this, encoded, controller.syncSecrets(), debugDialOut);
+        runtime = new SyncRuntime(this, this, encoded, controller.syncSecrets(), debugDialOut, controller.pairingAddresses());
         runtime.start();
         controller.running(true);
         return true;
@@ -221,6 +226,8 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         if (runtime == null) return;
         String copy = command.getStringExtra("copy");
         if (copy != null) runtime.evaluate("teneoSyncPage.debug.copy(" + org.json.JSONObject.quote(copy) + ")");
+        String dialAddress = command.getStringExtra("dialAddress");
+        if (dialAddress != null) runtime.evaluate("teneoSyncPage.debug.dial(" + org.json.JSONObject.quote(dialAddress) + ")");
         if (command.getBooleanExtra("crashPage", false)) runtime.debugCrash();
     }
 
@@ -234,8 +241,29 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         if (runtime != null) runtime.abandon();
         runtime = null;
         controller.running(false);
+        // the page says so when the Mac refused the code it was joining with
+        if (controller.pairingAddresses() != null && reason.startsWith("the pairing code was refused")) {
+            controller.pairingRefused();
+            stopSelf();
+            return;
+        }
         controller.problem("Sync couldn't start. Turn sync off, then join again.");
         stopSelf();
+    }
+
+    @Override
+    public void paired(byte[] vaultKey) {
+        if (destroyed) return;
+        boolean kept = controller.receivedVaultKey(vaultKey);
+        Arrays.fill(vaultKey, (byte) 0);
+        if (!kept) {
+            failed("the vault key from the Mac couldn't be kept");
+            return;
+        }
+        // the runtime on the one-time key ends; one on the vault's starts
+        if (runtime != null) runtime.abandon();
+        runtime = null;
+        if (!begin()) stopSelf();
     }
 
     @Override
@@ -259,9 +287,11 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         controller.running(false);
         quickDeaths = dead.ageMs() >= STABLE_MS ? 1 : quickDeaths + 1;
         if (quickDeaths > MAX_QUICK_DEATHS) {
-            Log.e(TAG, "the sync page keeps dying: giving up");
-            controller.problem("Sync stopped because it kept crashing. Open Teneo to try again.");
-            stopSelf();
+            int rounds = Math.min(4, quickDeaths - MAX_QUICK_DEATHS - 1);
+            long wait = Math.min(LONG_RETRY_MAX_MS, LONG_RETRY_MS << rounds);
+            Log.e(TAG, "the sync page keeps dying: trying again in " + wait / 60_000 + " minutes");
+            controller.problem("Sync keeps crashing. Teneo tries again in " + wait / 60_000 + " minutes, or when you open it.");
+            main.postDelayed(this::restart, wait);
             return;
         }
         long delay = Math.min(MAX_RESTART_DELAY_MS, FIRST_RESTART_DELAY_MS << (quickDeaths - 1));

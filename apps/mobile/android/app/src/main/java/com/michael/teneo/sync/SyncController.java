@@ -46,7 +46,14 @@ public final class SyncController {
     static final boolean DEFAULT_SYNC_SECRETS = false;
 
     private static final String PREFERENCES = "teneo-sync";
+    /** While the key kept is a pairing code's one-time key: the Mac's addresses
+     *  from the code, as a JSON array, for the page to dial (pairing in the
+     *  sync core's engine.ts). Gone once the Mac has sent the vault key. */
+    private static final String PAIRING_ADDRESSES = "pairingAddresses";
     private static final String DEVICES = "devices";
+    /** Items with secrets may sync now, and the running page still has to
+     *  restamp the ones held back (restampHeldBackSecrets) */
+    private static final String SECRETS_TO_SEND = "secretsToSend";
 
     private static SyncController instance;
 
@@ -130,13 +137,19 @@ public final class SyncController {
         return keys.has();
     }
 
-    /** Keep the key and start sync. The error to show, or null when it worked. */
-    public String pair(byte[] vaultKey) {
+    /**
+     * Keep the key and start sync. With `pairingAddresses` (a JSON array) the
+     * key is a pairing code's one-time key, and the vault's comes from the Mac
+     * at those addresses. The error to show, or null when it worked.
+     */
+    public String pair(byte[] vaultKey, String pairingAddresses) {
         synchronized (this) {
             if (keys.has()) return "This phone already syncs. Turn sync off before joining again.";
             if (!keys.save(vaultKey)) {
                 return "Teneo couldn't keep the sync key safely on this phone.";
             }
+            if (pairingAddresses == null) preferences.edit().remove(PAIRING_ADDRESSES).apply();
+            else preferences.edit().putString(PAIRING_ADDRESSES, pairingAddresses).apply();
             devices.clear();
             saveDevices();
             problem = null;
@@ -147,9 +160,37 @@ public final class SyncController {
         return null;
     }
 
+    /** The Mac addresses to get the vault key from, while joining with a pairing code; else null */
+    synchronized String pairingAddresses() {
+        return preferences.getString(PAIRING_ADDRESSES, null);
+    }
+
+    /**
+     * The Mac sent the vault key for the pairing code: keep it in place of
+     * the one-time key. False when it can't be kept, and the code's stays.
+     */
+    synchronized boolean receivedVaultKey(byte[] vaultKey) {
+        if (preferences.getString(PAIRING_ADDRESSES, null) == null || !keys.save(vaultKey)) return false;
+        preferences.edit().remove(PAIRING_ADDRESSES).apply();
+        Log.i(TAG, "joined: the vault key arrived from the Mac");
+        return true;
+    }
+
     /** Stop sync, and forget the key and the devices. The history stays. */
+    /**
+     * The Mac refused the pairing code this phone is joining with: used
+     * already, or run out. Its one-time key is no use, so it goes, and the
+     * Sync screen says to show a new code: kept, the phone would say it had
+     * joined while nothing could ever sync.
+     */
+    void pairingRefused() {
+        unpair();
+        problem("That code was already used, or ran out. Show a new one on your Mac and scan it.");
+    }
+
     public void unpair() {
         synchronized (this) {
+            preferences.edit().remove(PAIRING_ADDRESSES).apply();
             keys.forget();
             devices.clear();
             saveDevices();
@@ -170,19 +211,27 @@ public final class SyncController {
             current = service;
         }
         if (current != null) {
-            main.post(() -> {
-                // The page is told first. Only then are the held-back items
-                // marked to be sent: marked before it knew they may go, it
-                // would pass over them again, and nothing would send them.
-                current.settingsChanged();
-                if (secretsNowAllowed) new Thread(this::sendHeldBackSecrets, "teneo-sync-secrets").start();
-            });
+            // The page restamps the held-back items once it knows they may go
+            // (restampHeldBackSecrets): marked before that, a send it had under
+            // way could read them as still held back, pass over them, and
+            // nothing would send them again. Kept, so a page started later does it
+            if (secretsNowAllowed) preferences.edit().putBoolean(SECRETS_TO_SEND, true).commit();
+            main.post(current::settingsChanged);
         } else if (secretsNowAllowed) {
             // sync isn't running: when it next starts, it starts allowed
             sendHeldBackSecrets();
         }
         apply();
         notifyStatus();
+    }
+
+    /** The running page knows secrets may sync: send the held-back items, once */
+    void restampHeldBackSecrets() {
+        synchronized (this) {
+            if (!preferences.getBoolean(SECRETS_TO_SEND, false)) return;
+            preferences.edit().remove(SECRETS_TO_SEND).commit();
+        }
+        sendHeldBackSecrets();
     }
 
     /**

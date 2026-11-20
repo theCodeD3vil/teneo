@@ -143,12 +143,56 @@ export interface VaultKeys {
 }
 
 export async function deriveVaultKeys(vaultKey: Bytes): Promise<VaultKeys> {
+  // "tag" in version 1 was announced as it is, so anyone who heard it knows
+  // it: discovery now uses a key of its own, which is never sent
   const [authKey, dataKey, tag] = await Promise.all([
     hkdf(vaultKey, "authKey", 32),
     hkdf(vaultKey, "dataKey", 32),
-    hkdf(vaultKey, "tag", 8),
+    hkdf(vaultKey, "discovery v2", 32),
   ]);
   return { authKey, dataKey, tag: toHex(tag) };
+}
+
+/** One connection's own key pair, thrown away when it ends: what is agreed
+ *  with it can't be worked out later from the vault key alone. */
+export interface EphemeralKey {
+  privateKey: CryptoKey;
+  /** The public key, raw (65 bytes), base64. */
+  publicKey: string;
+}
+
+const ecdh = { name: "ECDH", namedCurve: "P-256" } as const;
+
+export async function ephemeralKey(): Promise<EphemeralKey> {
+  const pair = (await crypto.subtle.generateKey(ecdh, false, [
+    "deriveBits",
+  ])) as CryptoKeyPair;
+  const raw = new Uint8Array(
+    await crypto.subtle.exportKey("raw", pair.publicKey),
+  );
+  return { privateKey: pair.privateKey, publicKey: toBase64(raw) };
+}
+
+/** The secret both ends of a connection agree, or null when the other
+ *  end's key isn't a point on the curve. */
+export async function sharedSecret(
+  privateKey: CryptoKey,
+  peerPublicKey: string,
+): Promise<Bytes | null> {
+  const raw = fromBase64(peerPublicKey);
+  if (!raw || raw.length !== 65) return null;
+  try {
+    const peer = await crypto.subtle.importKey("raw", raw, ecdh, false, []);
+    return new Uint8Array(
+      await crypto.subtle.deriveBits(
+        { name: "ECDH", public: peer },
+        privateKey,
+        256,
+      ),
+    );
+  } catch {
+    return null;
+  }
 }
 
 export function importAesKey(raw: Bytes): Promise<CryptoKey> {
@@ -272,25 +316,35 @@ export async function parseRecoveryCode(code: string): Promise<Bytes | null> {
 
 const addressPattern = /^[A-Za-z0-9.\-[\]:]+:\d{1,5}$/;
 
-/** The text of the QR code: `teneo://pair?v=1&k=<key>&a=<host:port,...>`. */
-export function buildPairingLink(vaultKey: Bytes, addresses: string[]): string {
+/** What a pairing code's link holds. Version 1 (Teneo 0.4 and earlier) held
+ *  the vault key itself; version 2 holds a one-time key the Mac takes for a
+ *  few minutes, and only once (engine.ts › pair), so a photo of the code is
+ *  of no use later. */
+export type PairingLink =
+  | { kind: "vault"; vaultKey: Bytes; addresses: string[] }
+  | { kind: "pairing"; pairingKey: Bytes; addresses: string[] };
+
+/** The text of the QR code: `teneo://pair?v=2&p=<one-time key>&a=<host:port,...>`. */
+export function buildPairingLink(
+  pairingKey: Bytes,
+  addresses: string[],
+): string {
   if (addresses.some((address) => !addressPattern.test(address))) {
     throw new Error("A pairing address must look like host:port");
   }
-  return `teneo://pair?v=1&k=${toBase32(vaultKey)}&a=${addresses.join(",")}`;
+  return `teneo://pair?v=2&p=${toBase32(pairingKey)}&a=${addresses.join(",")}`;
 }
 
-export function parsePairingLink(
-  link: string,
-): { vaultKey: Bytes; addresses: string[] } | null {
+export function parsePairingLink(link: string): PairingLink | null {
   const prefix = "teneo://pair?";
   if (!link.startsWith(prefix)) return null;
   const params = new URLSearchParams(link.slice(prefix.length));
-  if (params.get("v") !== "1") return null;
-  const vaultKey = fromBase32(params.get("k") ?? "");
-  if (!vaultKey || vaultKey.length !== vaultKeyLength) return null;
+  const version = params.get("v");
+  const key = fromBase32(params.get(version === "2" ? "p" : "k") ?? "");
+  if (!key || key.length !== vaultKeyLength) return null;
   const addresses = (params.get("a") ?? "").split(",").filter(Boolean);
-  return addresses.every((address) => addressPattern.test(address))
-    ? { vaultKey, addresses }
-    : null;
+  if (!addresses.every((address) => addressPattern.test(address))) return null;
+  if (version === "2") return { kind: "pairing", pairingKey: key, addresses };
+  if (version === "1") return { kind: "vault", vaultKey: key, addresses };
+  return null;
 }

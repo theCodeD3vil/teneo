@@ -1,4 +1,4 @@
-import type { Channel } from "@teneo/sync";
+import { type Channel, parseBye } from "@teneo/sync";
 
 /** What a native connection can do, whichever side opened it. */
 export interface ConnectionEnd {
@@ -14,6 +14,9 @@ export interface ConnectionEnd {
  *  The same logic as the Mac's SocketChannel (apps/desktop/backend/sync/
  *  ws-channel.ts); that one lives in the Mac app, which this app can't import
  *  from. */
+/** Messages that may wait for the engine to start listening */
+const maxWaiting = 8;
+
 export class NativeChannel implements Channel {
   readonly initiator: boolean;
   readonly remoteAddress: string | undefined;
@@ -61,6 +64,18 @@ export class NativeChannel implements Channel {
 
   deliver(message: string): void {
     if (this.isEnded) return;
+    // the other side says why it is closing (byeMessage), and then closes
+    const bye = parseBye(message);
+    if (bye !== null) {
+      this.ended(bye);
+      return;
+    }
+    // Before the engine listens, a peer has sent its hello and nothing else:
+    // a pile of messages is one flooding the connection, which ends
+    if (!this.messageHandler && this.waiting.length >= maxWaiting) {
+      this.close("Too many messages before the handshake");
+      return;
+    }
     this.waiting.push(message);
     this.drain();
   }

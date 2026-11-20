@@ -304,7 +304,12 @@ async function handle(line: string): Promise<void> {
       break;
     case "code":
       // the throwaway vault of this peer: showing its code is the point
-      console.log(`code ${(await needManager().pairingInfo()).recoveryCode}`);
+      {
+        // the join code, and the QR code's link (a one-time key)
+        const info = await needManager().pairingInfo();
+        console.log(`code ${info.recoveryCode}`);
+        console.log(`link ${info.link}`);
+      }
       break;
     case "status": {
       const status = await needManager().status();

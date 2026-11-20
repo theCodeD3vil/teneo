@@ -53,6 +53,9 @@ final class SyncRuntime {
 
         /** The port this phone listens on, or -1 when none was free */
         void listening(int port);
+
+        /** Joining with a pairing code: the Mac sent the vault's key */
+        void paired(byte[] vaultKey);
     }
 
     private static final String TAG = "TeneoSync";
@@ -91,7 +94,11 @@ final class SyncRuntime {
     /** The phone's history, for the page; a change to it is news for the core */
     private final SyncStoreBridge history;
 
-    SyncRuntime(Context context, Host host, String vaultKey, boolean syncSecrets, boolean dialOut) {
+    /** The Mac addresses to get the vault key from (JSON), or null */
+    private final String pairingAddresses;
+
+    SyncRuntime(Context context, Host host, String vaultKey, boolean syncSecrets, boolean dialOut, String pairingAddresses) {
+        this.pairingAddresses = pairingAddresses;
         this.context = context.getApplicationContext();
         this.host = host;
         this.vaultKey = vaultKey;
@@ -234,7 +241,9 @@ final class SyncRuntime {
 
     private void startNetwork(String tag, String deviceId) {
         if (closed || network != null) return;
-        SyncNetwork started = new SyncNetwork(SyncLimits.PORTS, SyncLimits.defaults(), LocalAddress::isLocalNetwork, events);
+        boolean debuggable = (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        java.util.function.Predicate<String> isPeer = address -> LocalAddress.isPeerAddress(address, debuggable);
+        SyncNetwork started = new SyncNetwork(SyncLimits.PORTS, SyncLimits.defaults(), isPeer, events);
         int port = started.start();
         if (port < 0) Log.w(TAG, "none of the sync ports is free: this phone can only dial out");
         else Log.i(TAG, "listening on port " + port);
@@ -244,7 +253,7 @@ final class SyncRuntime {
         discovery = new NsdDiscovery(
             context,
             main,
-            LocalAddress::isLocalNetwork,
+            isPeer,
             (device, addresses, devicePort) -> {
                 Log.i(TAG, "found " + device.substring(0, 8) + " at " + addresses + " port " + devicePort + (dialOut ? "" : " (not dialing)"));
                 if (dialOut) evaluate("teneoSyncPage.discovered(" + JSONObject.quote(device) + "," + new JSONArray(addresses) + "," + devicePort + ")");
@@ -291,7 +300,8 @@ final class SyncRuntime {
                 vaultKey = null;
             }
             if (key == null) return;
-            evaluate("teneoSyncPage.start(" + JSONObject.quote(key) + "," + syncSecrets + ")");
+            String pairing = pairingAddresses == null ? "null" : pairingAddresses;
+            evaluate("teneoSyncPage.start(" + JSONObject.quote(key) + "," + syncSecrets + "," + pairing + ")");
         }
 
         /** The connected devices changed: a JSON array of {deviceId, name, platform} */
@@ -324,6 +334,27 @@ final class SyncRuntime {
         public void failed(String reason) {
             main.post(() -> {
                 if (!closed) host.failed(reason);
+            });
+        }
+
+        /** The page knows items with secrets may sync now (SyncController) */
+        @JavascriptInterface
+        public void restampHeldBackSecrets() {
+            SyncController.get(context).restampHeldBackSecrets();
+        }
+
+        /** Joining with a pairing code: the Mac's vault key, base64 */
+        @JavascriptInterface
+        public void paired(String vaultKey) {
+            byte[] key;
+            try {
+                key = android.util.Base64.decode(vaultKey, android.util.Base64.NO_WRAP);
+            } catch (IllegalArgumentException malformed) {
+                return;
+            }
+            if (key.length != 32 || pairingAddresses == null) return;
+            main.post(() -> {
+                if (!closed) host.paired(key);
             });
         }
 
@@ -432,6 +463,11 @@ final class SyncRuntime {
         @JavascriptInterface
         public String historyRow(String id) {
             return history.row(id);
+        }
+
+        @JavascriptInterface
+        public String historyRows(String ids) {
+            return history.rows(ids);
         }
 
         @JavascriptInterface

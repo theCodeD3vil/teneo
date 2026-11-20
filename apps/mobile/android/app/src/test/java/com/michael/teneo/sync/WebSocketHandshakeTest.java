@@ -27,6 +27,26 @@ public class WebSocketHandshakeTest {
     }
 
     @Test
+    public void aWebPagesUpgradeIsTurnedAway() throws IOException {
+        String upgrade = "GET / HTTP/1.1\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Key: " + KEY + "\nSec-WebSocket-Version: 13\n";
+        for (String extra : new String[] {
+            "Host: 192.168.1.2:47823\nOrigin: https://tracker.example",
+            "Host: 192.168.1.2:47823\nOrigin: null",
+            "Host: 192.168.1.2:47823\nOrigin: http://192.168.1.2:8080",
+            "Host: 192.168.1.2:47823\nOrigin: http://192.168.1.2\nSec-Fetch-Mode: websocket",
+            "Host: 192.168.1.2:47823\nSec-Fetch-Site: cross-site",
+        }) {
+            assertEquals(extra, WebSocketHandshake.Verdict.FROM_WEB_PAGE, WebSocketHandshake.judge(head(upgrade + extra)));
+        }
+        // the Mac's WebSocket names the address it connects to, as measured
+        assertEquals(
+            WebSocketHandshake.Verdict.UPGRADE,
+            WebSocketHandshake.judge(head(upgrade + "Host: 192.168.1.2:47823\nOrigin: http://192.168.1.2"))
+        );
+        assertEquals(WebSocketHandshake.Verdict.UPGRADE, WebSocketHandshake.judge(head(upgrade + "Host: fe80::1:2\nOrigin: http://fe80::1:2")));
+    }
+
+    @Test
     public void aProperUpgradeIsAccepted() throws IOException {
         WebSocketHandshake.Head request = head(
             "GET / HTTP/1.1\nHost: 192.168.1.2:47823\nUpgrade: websocket\nConnection: keep-alive, Upgrade\n" +

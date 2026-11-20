@@ -113,7 +113,7 @@ export class TestNetwork {
   readonly devices = new Map<string, TestDevice>();
   /** Failures that were not an ordinary disconnect. */
   readonly errors: unknown[] = [];
-  private tick = 1_000_000_000_000;
+  private tick: number;
   private wipes = 0;
   /** Every connection made, to see when nothing is in flight. */
   private readonly pairs = new Set<MemoryPair>();
@@ -121,6 +121,13 @@ export class TestNetwork {
 
   /** A new time on every reading. */
   readonly now = (): number => ++this.tick;
+
+  /** `start`: the time the network's clock starts at. A test that mixes in a
+   *  device on the real clock starts it there too: a peer's pin stamped days
+   *  ahead of a device's clock is refused (isFutureStamp). */
+  constructor(start = 1_000_000_000_000) {
+    this.tick = start;
+  }
 
   /** A device named by a letter: its id is that letter 32 times. */
   add(letter: string, options?: DeviceOptions): TestDevice {

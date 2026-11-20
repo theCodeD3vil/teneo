@@ -40,11 +40,13 @@ function reportPeers(engine: SyncEngine): void {
 }
 
 const page: SyncPage = {
-  async start(encodedKey, syncSecrets) {
+  async start(encodedKey, syncSecrets, pairingAddresses) {
     if (run || starting) return;
     starting = true;
     stopWanted = false;
     allowSecrets = syncSecrets;
+    // allowed while the page wasn't running: the held-back items go out first
+    if (syncSecrets) native.restampHeldBackSecrets();
     try {
       if (!isSecureContext || typeof crypto?.subtle !== "object") {
         native.failed(
@@ -104,12 +106,30 @@ const page: SyncPage = {
           if (debuggable) log(`peers ${describePeers(engine)}`);
         },
         onError: (error) => log(`engine error: ${String(error)}`),
+        // joining with a pairing code: the key is its one-time key, and the
+        // Mac sends the vault's, which native code keeps and restarts on
+        ...(pairingAddresses && {
+          onVaultKey: (key: Uint8Array) => {
+            log("joined: the Mac sent the vault key");
+            native.paired(toBase64(key));
+          },
+        }),
       });
       const transport = new PhoneTransport({
         engine,
         deviceId,
         native,
         onError: (error) => log(`transport error: ${String(error)}`),
+        // a used or run-out code is refused by the Mac: nothing to retry
+        ...(pairingAddresses && {
+          onRefused: (error) => {
+            log(`the Mac refused the pairing code: ${error.message}`);
+            page.stop();
+            native.failed(
+              "the pairing code was refused: it was used, or ran out",
+            );
+          },
+        }),
       });
       // set before starting: native code begins sending events once told ready
       run = { engine, transport, stopStatus: undefined };
@@ -117,6 +137,23 @@ const page: SyncPage = {
       // a stop during that has already taken everything down
       const started = run;
       if (!started) return;
+      // The Mac of the code: at its addresses, as it doesn't announce the
+      // code's key. One made-up id for it, as its own comes with the vault's.
+      if (pairingAddresses) {
+        if (pairingAddresses.length === 0) {
+          page.stop();
+          native.failed("the pairing code has no address to reach the Mac at");
+          return;
+        }
+        const [, port] = pairingAddresses[0]!.split(/:(?=\d+$)/);
+        transport.found({
+          deviceId: "f".repeat(32),
+          addresses: pairingAddresses.map((address) =>
+            address.replace(/:\d+$/, ""),
+          ),
+          port: Number(port),
+        });
+      }
       log(`sync running as ${deviceId.slice(0, 8)}`);
       if (debuggable) {
         started.stopStatus = window.setInterval(() => log(status(run)), 30_000);
@@ -134,8 +171,12 @@ const page: SyncPage = {
   setSyncSecrets(allowed) {
     const wasAllowed = allowSecrets;
     allowSecrets = allowed;
-    // the ones held back go out from the next send
-    if (allowed && !wasAllowed) run?.engine.localChanged();
+    if (allowed && !wasAllowed) {
+      // Restamped only now that the setting is set here: a send already under
+      // way that read them before would have passed over them for good
+      native.restampHeldBackSecrets();
+      run?.engine.localChanged();
+    }
   },
 
   stop() {
@@ -157,6 +198,12 @@ const page: SyncPage = {
   localChanged: () => run?.engine.localChanged(),
 
   debug: {
+    /** Dial `ip:port` once (DebugSyncReceiver --es dial-address) */
+    dial(address) {
+      if (!debuggable || !run) return;
+      log(`debug: dialing ${address}`);
+      run.transport.debugDial(address);
+    },
     /** A copy made on this phone, saved as the capture saves one: the
      *  history tells the core, which sends it on. */
     copy(text) {

@@ -13,6 +13,13 @@ export interface NativeSync extends NativeHistory {
   pageLoaded(): void;
   /** The page can't run (the key is no good): nothing would help */
   failed(reason: string): void;
+  /** Joining with a pairing code: the vault key the Mac sent, base64 */
+  paired(vaultKey: string): void;
+  /** Items with secrets may sync now, and this page knows it: the ones held
+   *  back get new change numbers, so they are sent. Called by the page, so no
+   *  send of its own can read them before it knows (SyncController). Does
+   *  nothing when none is waiting to be sent. */
+  restampHeldBackSecrets(): void;
   /** The devices connected now, as a JSON array of `ConnectedDevice` */
   peersChanged(devices: string): void;
   /** The core has its keys: listen, announce this device and look for the
@@ -65,7 +72,13 @@ export interface ConnectedDevice {
 export interface SyncPage {
   /** Run sync with this vault key (base64), which native code keeps. Items
    *  holding secrets travel only while `syncSecrets` is true. */
-  start(vaultKey: string, syncSecrets: boolean): Promise<void>;
+  start(
+    vaultKey: string,
+    syncSecrets: boolean,
+    /** Joining with a pairing code: vaultKey is its one-time key, and the
+     *  Mac at these host:port addresses sends the vault's */
+    pairingAddresses?: string[] | null,
+  ): Promise<void>;
   /** The user changed whether items holding secrets travel */
   setSyncSecrets(allowed: boolean): void;
   /** End sync: close every connection */
@@ -82,5 +95,5 @@ export interface SyncPage {
    *  by the share sheet): send it on */
   localChanged(): void;
   /** Only in a debug build */
-  debug: { copy(text: string): void };
+  debug: { copy(text: string): void; dial(address: string): void };
 }

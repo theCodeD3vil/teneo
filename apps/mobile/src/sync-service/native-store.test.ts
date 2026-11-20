@@ -436,19 +436,48 @@ describe("a transaction", () => {
     expect(history.rows.has("r1")).toBe(true);
   });
 
-  test("gives up when the history never stops changing, saving nothing", async () => {
+  test("gives up when what it read never stops changing, saving nothing", async () => {
     const { history, store } = setup();
-    history.copy("mine");
-    history.beforeCommit = () => history.copy(`more ${history.head}`);
-    const before = history.rows.size;
+    const id = history.copy("mine");
+    let pinned = false;
+    history.beforeCommit = () => history.pin(id, (pinned = !pinned));
     await expect(
       store.transaction(async (tx) => {
-        await tx.get("mine");
+        await tx.get(id);
         await tx.put(record("r1", "never"));
       }),
     ).rejects.toThrow("kept changing");
     expect(history.rows.has("r1")).toBe(false);
-    expect(history.rows.size).toBe(before + history.commitCalls);
+  });
+
+  test("a copy or delete of some other item meanwhile doesn't hold it up", async () => {
+    const { history, store } = setup();
+    const id = history.copy("mine");
+    const other = history.copy("other");
+    let round = 0;
+    // the user goes on copying and deleting while a batch arrives
+    history.beforeCommit = () => {
+      round += 1;
+      history.copy(`typed ${round}`);
+      history.remove(other);
+    };
+    await store.transaction(async (tx) => {
+      await tx.get(id);
+      await tx.put(record("r1", "from a peer"));
+    });
+    expect(history.commitCalls).toBe(1);
+    expect(history.rows.has("r1")).toBe(true);
+  });
+
+  test("a batch's rows are read in one call", async () => {
+    const { history, store } = setup();
+    const ids = [history.copy("a"), history.copy("b"), "absent"];
+    const found = await store.transaction(async (tx) => {
+      await tx.prefetch?.(ids);
+      return Promise.all(ids.map((id) => tx.get(id)));
+    });
+    expect(history.rowsCalls).toBe(1);
+    expect(found.map((item) => item?.text ?? null)).toEqual(["a", "b", null]);
   });
 
   test("one that only moves a cursor does not depend on what the app does", async () => {

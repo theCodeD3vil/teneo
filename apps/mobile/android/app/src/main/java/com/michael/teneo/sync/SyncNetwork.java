@@ -232,6 +232,10 @@ final class SyncNetwork {
             }
 
             WebSocketHandshake.Verdict verdict = WebSocketHandshake.judge(head);
+            if (verdict == WebSocketHandshake.Verdict.FROM_WEB_PAGE) {
+                refuse(socket, 403, "Forbidden", "Forbidden", "");
+                return;
+            }
             if (verdict == WebSocketHandshake.Verdict.NOT_AN_UPGRADE) {
                 refuse(socket, 426, "Upgrade Required", "Teneo sync", "Upgrade: websocket\r\n");
                 return;

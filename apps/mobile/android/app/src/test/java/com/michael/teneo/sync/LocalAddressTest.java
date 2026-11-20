@@ -43,4 +43,15 @@ public class LocalAddressTest {
         check(false, "", "localhost", "example.com", "10.0.0", "10.0.0.256", "10.0.0.1.5", "::", "undefined", "10.0.0.1 ");
         assertEquals(false, LocalAddress.isLocalNetwork(null));
     }
+
+    @Test
+    public void thisPhoneItselfIsAPeerOnlyInADebugBuild() {
+        for (String address : new String[] { "127.0.0.1", "127.8.9.10", "::1", "::ffff:127.0.0.1" }) {
+            assertEquals(address, false, LocalAddress.isPeerAddress(address, false));
+            assertEquals(address, true, LocalAddress.isPeerAddress(address, true));
+        }
+        assertEquals(true, LocalAddress.isPeerAddress("192.168.1.5", false));
+        assertEquals(true, LocalAddress.isPeerAddress("fe80::1", false));
+        assertEquals(false, LocalAddress.isPeerAddress("8.8.8.8", true));
+    }
 }

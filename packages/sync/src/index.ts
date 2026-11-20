@@ -1,5 +1,6 @@
 export * from "./channel";
 export * from "./crypto";
+export * from "./discovery-record";
 export * from "./engine";
 export * from "./hlc";
 export * from "./protocol";

@@ -22,13 +22,15 @@ export interface NativeHistory {
   historyChangesAfter(after: number, limit: number): string;
   /** One row, deleted or not, and the highest change number then */
   historyRow(id: string): string;
+  /** The rows of these ids (a JSON array) that exist, deleted or not */
+  historyRows(ids: string): string;
   /** The newest unpinned live row except those ids (a JSON array), and the
    *  highest change number then */
   historyNewestUnpinned(skipped: string): string;
   historyPeer(deviceId: string): string;
   historyLatestStamp(): string;
   /** Save a `WireBatch` (as JSON) all at once. false: nothing was saved,
-   *  because the history changed since `expectedHead` was read. */
+   *  because what it read changed since (`reads`, `newest`). */
   historyCommit(batch: string): string;
   /** Apply the history limits */
   historyTrim(): string;
@@ -86,11 +88,21 @@ export interface WireRow {
   imageType?: string | null;
 }
 
+/** A row a transaction read, and the change number it had: null when there
+ *  was no such row */
+export interface WireRead {
+  id: string;
+  syncSeq: number | null;
+}
+
 /** What one sync transaction wrote, to save at once */
 export interface WireBatch {
-  /** The highest change number when the transaction first read; null when
-   *  what it writes doesn't depend on a read */
-  expectedHead: number | null;
+  /** Every row it read. The batch is saved only if each is as it was: an
+   *  app write to some other row (a copy, a delete) doesn't stand in its way */
+  reads: WireRead[];
+  /** The newest unpinned row it was told of, leaving out `skipped`: saved
+   *  only if that is still the one. null when it didn't ask. */
+  newest: { skipped: string[]; row: WireRead | null } | null;
   puts: WireRow[];
   peers: Record<string, PeerPatch>;
 }
@@ -139,6 +151,9 @@ export class HistoryBridge {
     return unwrap(this.native.historyRow(id));
   }
 
+  rows(ids: string[]): WireRow[] {
+    return unwrap(this.native.historyRows(JSON.stringify(ids)));
+  }
   newestUnpinned(skipped: string[]): { row: WireRow | null; head: number } {
     return unwrap(this.native.historyNewestUnpinned(JSON.stringify(skipped)));
   }

@@ -31,6 +31,9 @@ export type PeerPatch = Partial<Omit<PeerRecord, "deviceId">>;
 
 /** Reads and writes inside one transaction: all of it happens, or none. */
 export interface SyncTransaction {
+  /** The rows of these ids will be asked for: a store that reads across a
+   *  bridge (the phone's) reads them all at once. Optional. */
+  prefetch?(ids: string[]): Promise<void>;
   get(id: string): Promise<ItemRecord | null>;
   /** Insert or replace the row, and stamp it with the next syncSeq. The app
    *  runs its own secret and link detection on the text here. */

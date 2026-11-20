@@ -11,7 +11,9 @@
 import { isDeviceId } from "./hlc";
 import { maxImageBytes } from "./record";
 
-export const protocolVersion = 1;
+/** 2: each connection agrees a key of its own (ECDH), and a device says who
+ *  it is only once the connection is encrypted (session.ts). */
+export const protocolVersion = 2;
 
 export const batchLimits = { items: 200, bytes: 256 * 1024 };
 export const heartbeat = { everyMs: 15_000, silentMs: 45_000 };
@@ -32,13 +34,20 @@ export interface Cursor {
 export interface Hello {
   t: "hello";
   v: number;
+  /** Version 1 sent the device's id here. Version 2 sends a random one, so a
+   *  device on version 1 still reads the hello and says to update; the real
+   *  id comes in the sealed proof. */
   deviceId: string;
   /** 16 random bytes, hex. */
   nonce: string;
+  /** Version 2: this connection's ECDH P-256 public key, raw, base64. */
+  eph?: string;
 }
 
+/** What the sealed proof holds, once opened. */
 export interface Proof {
   t: "proof";
+  deviceId: string;
   /** HMAC-SHA256, hex. */
   mac: string;
 }
@@ -134,7 +143,16 @@ export interface PongFrame {
   t: "pong";
 }
 
+/** Pairing: the vault key, from the Mac to a phone that proved the pairing
+ *  code's one-time key. Never sent on any other connection (engine.ts). */
+export interface VaultFrame {
+  t: "vault";
+  /** 32 bytes, base64 */
+  key: string;
+}
+
 export type Frame =
+  | VaultFrame
   | StateFrame
   | ChangesFrame
   | IconsWantFrame
@@ -165,21 +183,36 @@ const isHash = (value: unknown): value is string =>
 const isShortText = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length >= 1 && value.length <= max;
 
-export function parseHandshake(text: string): Hello | Proof | null {
+/** A hello, of any version: the version is checked before the rest is used,
+ *  so a device on another one hears "update". */
+export function parseHello(text: string): Hello | null {
   const m = parseJson(text);
-  if (!m) return null;
-  if (m.t === "hello") {
-    const nonce = m.nonce;
-    if (!isCount(m.v) || !isDeviceId(m.deviceId)) return null;
-    if (typeof nonce !== "string" || !/^[0-9a-f]{32}$/.test(nonce)) return null;
-    return { t: "hello", v: m.v, deviceId: m.deviceId, nonce };
-  }
-  if (m.t === "proof") {
-    return typeof m.mac === "string" && /^[0-9a-f]{64}$/.test(m.mac)
-      ? { t: "proof", mac: m.mac }
-      : null;
-  }
-  return null;
+  if (!m || m.t !== "hello") return null;
+  const nonce = m.nonce;
+  if (!isCount(m.v) || !isDeviceId(m.deviceId)) return null;
+  if (typeof nonce !== "string" || !/^[0-9a-f]{32}$/.test(nonce)) return null;
+  // a P-256 point, uncompressed: 65 bytes
+  const eph =
+    typeof m.eph === "string" &&
+    /^[A-Za-z0-9+/]{86}[A-Za-z0-9+/=]=$/.test(m.eph)
+      ? m.eph
+      : undefined;
+  return {
+    t: "hello",
+    v: m.v,
+    deviceId: m.deviceId,
+    nonce,
+    ...(eph && { eph }),
+  };
+}
+
+/** The proof inside its seal. */
+export function parseProof(text: string): Proof | null {
+  const m = parseJson(text);
+  if (!m || m.t !== "proof" || !isDeviceId(m.deviceId)) return null;
+  return typeof m.mac === "string" && /^[0-9a-f]{64}$/.test(m.mac)
+    ? { t: "proof", deviceId: m.deviceId, mac: m.mac }
+    : null;
 }
 
 export function parseFrame(text: string): Frame | null {
@@ -251,6 +284,10 @@ export function parseFrame(text: string): Frame | null {
     case "blob-want":
     case "blob-none":
       return isHash(m.hash) ? { t: m.t, hash: m.hash } : null;
+    case "vault":
+      return typeof m.key === "string" && /^[A-Za-z0-9+/]{43}=$/.test(m.key)
+        ? { t: "vault", key: m.key }
+        : null;
     case "blob": {
       if (!isHash(m.hash) || !isCount(m.offset) || !isCount(m.total)) {
         return null;

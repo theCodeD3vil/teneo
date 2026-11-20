@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { Hlc, isStamp } from "./hlc";
+import { Hlc, isFutureStamp, isStamp, maxClockSkewMs } from "./hlc";
 
 const a = "a".repeat(32);
 const b = "b".repeat(32);
@@ -50,4 +50,29 @@ test("only well-formed stamps and ids are accepted", () => {
   expect(isStamp(5)).toBe(false);
   expect(() => new Hlc("short")).toThrow();
   new Hlc(a).observe("garbage"); // ignored, no throw
+});
+
+test("a stamp from days ahead can't poison the clock", () => {
+  const now = 1_763_000_000_000;
+  const clock = new Hlc(a, () => now);
+  // what a rogue peer sends: the largest stamp there is
+  clock.observe(`ffffffffffff-ffff-${b}`);
+  clock.observe(
+    `${(now + maxClockSkewMs + 1).toString(16).padStart(12, "0")}-0000-${b}`,
+  );
+  const stamp = clock.next();
+  expect(isStamp(stamp)).toBe(true);
+  expect(parseInt(stamp.slice(0, 12), 16)).toBe(now);
+  // a peer a few hours ahead is still followed
+  const hoursAhead = `${(now + 3_600_000).toString(16).padStart(12, "0")}-0005-${b}`;
+  clock.observe(hoursAhead);
+  expect(clock.next() > hoursAhead).toBe(true);
+  expect(isFutureStamp(`ffffffffffff-ffff-${b}`, now)).toBe(true);
+  expect(isFutureStamp(hoursAhead, now)).toBe(false);
+});
+
+test("stamps never grow a thirteenth digit, even at the top", () => {
+  const clock = new Hlc(a, () => 0xffff_ffff_ffff);
+  for (let i = 0; i < 70_000; i++) expect(isStamp(clock.next())).toBe(true);
+  expect(clock.next()).toBe(`ffffffffffff-ffff-${a}`);
 });

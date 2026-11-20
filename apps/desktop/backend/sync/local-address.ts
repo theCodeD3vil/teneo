@@ -2,6 +2,14 @@
 // else. Not link-safety's isLocalIp: that one is for blocking link previews, so
 // it calls anything it cannot read "local", which is the wrong way round here.
 
+/** This Mac itself: 127.0.0.0/8 or ::1, also written as IPv6. Any app on
+ *  this Mac, and any page in its browsers, can connect from there. */
+export function isLoopbackAddress(address: string): boolean {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
+  const ip = mapped ? mapped[1]! : address;
+  return ip === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip);
+}
+
 /** A private, link-local or loopback address, IPv4 or IPv6. Anything that is
  *  not an address at all is not. */
 export function isLocalNetworkAddress(address: string): boolean {

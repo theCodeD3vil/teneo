@@ -195,6 +195,15 @@ export class NativeClient implements TeneoClient {
         detectorVersion: detectionVersion,
         limit,
       });
+      // The last round sees every text still to do: one left out before that
+      // isn't among them has been deleted, or looked at elsewhere (the sync
+      // service), and needn't be asked past any more
+      if (items.length < limit) {
+        const waiting = new Set(items.map((item) => item.id));
+        for (const id of this.unsavable) {
+          if (!waiting.has(id)) this.unsavable.delete(id);
+        }
+      }
       const found: Detection[] = [];
       for (const { id, text } of items) {
         if (this.unsavable.has(id)) continue;
