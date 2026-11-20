@@ -21,6 +21,15 @@ declare interface TinyMenuItem {
   checked?: boolean;
   /** false = grayed out */
   enabled?: boolean;
+  /**
+   * Optional icon beside the label: a png path (absolute or project-relative),
+   * 'sf:<name>' for an SF Symbol (macOS only) or 'emoji:<glyph>' for a colour
+   * emoji drawn at menu size (no asset needed). Shown in menu bars and
+   * right-click menus on all three platforms, in tray menus on macOS and
+   * Windows. Where it can't be drawn (sf: off macOS, an unreadable file,
+   * Linux tray menus) the item shows its label alone.
+   */
+  icon?: string;
   submenu?: TinyMenuItem[];
   separator?: boolean;
   /** a stock entry in place of your own item: 'standard' is the whole stock
@@ -311,7 +320,7 @@ declare interface TinyAppInfo {
   version: string;
   /** the tinyjs version the app was built with ('dev' from a checkout) */
   tinyjs: string;
-  /** e.g. 'txiki.js 26.6.0' */
+  /** e.g. 'txiki.js 26.11.0' */
   runtime: string;
 }
 
@@ -319,6 +328,14 @@ declare interface TinyTraySpec {
   /** text beside the icon; Windows doesn't show it (it's the tooltip there
    *  when no tooltip is given) */
   title?: string;
+  /** macOS: the title's colour, '#rrggbb' / '#rrggbbaa' (or '#rgb'), or
+   *  { light, dark } for a light and a dark menu bar. Default: the system's.
+   *  A png or SF Symbol icon keeps its own look. Ignored on Windows and Linux. */
+  titleColor?: string | { light: string; dark: string };
+  /** macOS: 'monospacedDigit' gives every digit the same width, so a
+   *  ticking timer or counter doesn't shift sideways; 'monospaced' makes
+   *  the whole title monospace. Ignored on Windows and Linux. */
+  titleFont?: "monospacedDigit" | "monospaced";
   /** png path — absolute: a relative one is resolved against the working
    *  directory, which is the project in tinyjs dev but not in a built app
    *  (use (await paths()).resources + '/tray.png'). Template image by default.
@@ -438,8 +455,11 @@ declare interface TinyOpenWindowOptions {
    *  Windows/Linux gets no taskbar entry. Open-time only — it can't be set
    *  later. macOS difference: the window also MOVES with its parent. */
   parent?: true | string;
-  /** false: create the window hidden; the page (tiny.win.show()) or the
-   *  backend decides when it appears. Nothing shows it for you. Default true. */
+  /** false: create, place and load the window but keep it hidden until
+   *  tiny.win.show() (from its page) or app.window(id).show(). Fill it in
+   *  first, then reveal it. A remembered placement still applies; a
+   *  remembered maximize/fullscreen lands on that first show. Nothing shows
+   *  it for you. Default true. */
   show?: boolean;
 }
 
@@ -567,7 +587,12 @@ declare interface TinyRequirement {
 
 declare interface TinySystemInfo {
   os: "macos" | "windows" | "linux";
-  arch: string;
+  /** the machine's CPU: still 'arm64' for an x86_64 build under emulation */
+  arch: "arm64" | "x86_64";
+  /** the CPU this app's process runs as — what a native library must match
+   *  to load. Differs from `arch` only under emulation (Rosetta on macOS,
+   *  x64 on Windows on ARM). */
+  processArch: "arm64" | "x86_64";
   /** Linux display server ('x11' | 'wayland'); null elsewhere */
   session: string | null;
   /** Linux desktop name; null elsewhere */
@@ -891,10 +916,25 @@ declare interface Tiny {
    *  loads nothing — check tiny.system.capabilities().proxyURL !== false. */
   proxyURL(url: string): string;
 
+  /** A URL to use as an iframe's src for a video player that needs a Referer.
+   *  A direct YouTube iframe in an app page fails (Error 153 on macOS and Linux, a
+   *  browser error page on Windows), because file:// pages send no Referer. This serves
+   *  a small page on 127.0.0.1 that frames the target, so the player gets one:
+   *    iframe.src = await tiny.embedURL('https://www.youtube.com/embed/ID');
+   *  Rejects unless the URL is https on www.youtube.com, www.youtube-nocookie.com,
+   *  player.vimeo.com or a host in tinyjs.json's "embedHosts". The URL only
+   *  works for this run of the app, so ask each launch rather than saving it. */
+  embedURL(url: string): Promise<string>;
+
   /** A correct file:// URL for a disk path on every platform — use for
    *  <audio>/<img>/<video> src of backend-provided paths. Hand-rolled
    *  'file://' + path breaks on Windows (the drive letter becomes the URL
-   *  host). */
+   *  host). macOS: a path outside the page's folder needs "readAccess" in
+   *  tinyjs.json, and a path on a DIFFERENT DISK than the page (/Volumes/…,
+   *  a network share, or the startup disk for an app run off a dmg) comes
+   *  back as tiny-media://file/<path>, which the launcher serves itself —
+   *  WebKit won't load file:// across volumes. Same readAccess root, the
+   *  app's own pages only. */
   fileURL(path: string): string;
 
   /** print to the backend's console (the tinyjs dev terminal); any JSON value */
@@ -1619,6 +1659,9 @@ declare interface TinyApp {
     body?: string,
     opts?: TinyNotifyOptions,
   ): Promise<boolean>;
+  /** Same dialogs and cancellation results as tiny.dialog, also with
+   *  mainWindow: false. Runs in the launcher, without a WebView. */
+  dialog: Tiny["dialog"];
   /** hides the APP (NSApp hide): focus returns to the previous app;
    *  hide({ app: false }) puts away the main window alone */
   hide(opts?: TinyHideOptions): void;
@@ -1784,6 +1827,8 @@ declare interface TinyApp {
    *  (reading app.paths.data as an object still works but is deprecated) */
   paths: (() => Promise<TinyPaths>) & TinyPathsDeprecatedFields;
   shell: TinyShell;
+  /** see tiny.embedURL — resolves the same way, synchronously */
+  embedURL(url: string): string;
   launchAtLogin: TinyLaunchAtLogin;
   /** '' clears the badge */
   badge(text: string): boolean;

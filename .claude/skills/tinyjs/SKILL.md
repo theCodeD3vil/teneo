@@ -18,7 +18,7 @@ a **txiki.js backend** (full system access: files, sockets, processes, FFI)
   `tiny-media://` proxy (cross-origin http(s) reads, macOS + Linux;
   `media.proxy`) and mic/camera (`media.microphone` / `media.camera`).
 
-Current release: 0.66.2. App floors: macOS 15+ — a default build opens only
+Current release: 0.70.3. App floors: macOS 15+ — a default build opens only
 on the build Mac's CPU (`build --arch arm64|x86_64` or `--universal` for the
 other); Windows 10/11 (WebView2), x64 or arm64 per the tinyjs install; Linux glibc 2.35+ (Ubuntu 22.04 / Debian 12
 / Mint 21 and up).
@@ -100,7 +100,7 @@ tinyjs.json          { name, title, size, id, version, icon?,
                        chrome?: { frame, windowControls, windowControlsPos,
                                   transparent, vibrancy, squareCorners,
                                   acceptsFirstMouse, menu },
-                       signIdentity?, notarize?: { profile },
+                       signIdentity?, notarize?: { profile, keychain? },
                        backend?: "backend/main.ts",   // .ts → esbuild bundle;
                                       // default src/backend/main.{js,ts}, then
                                       // src/main.{js,ts} (pre-0.52), backend/main.{js,ts}
