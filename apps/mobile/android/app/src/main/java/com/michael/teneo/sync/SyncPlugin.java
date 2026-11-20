@@ -63,10 +63,15 @@ public class SyncPlugin extends Plugin {
         call.resolve(toJs(controller.status()));
     }
 
-    /** Keep the vault key (`vaultKey`, base64) and start sync */
+    /**
+     * Keep the vault key (`vaultKey`, base64) and start sync. With
+     * `pairingAddresses`, `vaultKey` is a pairing code's one-time key, and the
+     * vault's is fetched from the Mac at those host:port addresses.
+     */
     @PluginMethod
     public void pair(PluginCall call) {
         String encoded = call.getString("vaultKey");
+        com.getcapacitor.JSArray addresses = call.getArray("pairingAddresses", null);
         byte[] key;
         try {
             key = encoded == null ? null : Base64.decode(encoded, Base64.NO_WRAP);
@@ -77,7 +82,7 @@ public class SyncPlugin extends Plugin {
             call.reject("That isn't a sync key");
             return;
         }
-        String error = controller.pair(key);
+        String error = controller.pair(key, addresses == null ? null : addresses.toString());
         Arrays.fill(key, (byte) 0);
         if (error != null) {
             call.reject(error);

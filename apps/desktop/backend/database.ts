@@ -30,9 +30,9 @@ import {
   restrictToSavedEncryptionKey,
 } from "./secret-encryption";
 import { getSettings, isSettingSaved, updateSettings } from "./settings";
-import { all, exclusive, run } from "./sqlite";
+import { all, checkpoint, exclusive, run, transaction } from "./sqlite";
 import { type SyncIdentity, loadSyncIdentity } from "./sync/identity";
-import { tombstoneLifetime } from "./sync/records";
+import { recordKind, tombstoneLifetime } from "./sync/records";
 import {
   backfillSyncColumns,
   createSyncTables,
@@ -73,10 +73,14 @@ async function openDatabase(app: TinyApp): Promise<Database> {
   // WAL: listing a page while a copy is saved doesn't wait for the save, and
   // a save doesn't wait for the disk to sync (NORMAL is still safe against a
   // crash). The timeout covers a second process holding the file briefly.
+  // secure_delete: what a delete or an update replaces is overwritten with
+  // zeros, so a deleted copy, or a key from before it was encrypted, isn't
+  // left in the file's free space.
   database.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
     PRAGMA busy_timeout = 5000;
+    PRAGMA secure_delete = ON;
   `);
   database.exec(`
       CREATE TABLE IF NOT EXISTS "CLIPBOARD_ITEMS" (
@@ -96,6 +100,7 @@ async function openDatabase(app: TinyApp): Promise<Database> {
   `);
   addMissingColumns(database);
   createIndexes(database);
+  keepItemSizes(database);
   createSyncTables(database);
   syncIdentity = await loadSyncIdentity(app, database);
   backfillSyncColumns(database, syncIdentity.deviceId);
@@ -124,6 +129,14 @@ const indexes = {
     (kind, dateCopied DESC, id DESC) WHERE pinnedAt IS NULL`,
   // the changes a peer has not read yet (changesAfter in sync/sync-store.ts)
   clipboard_items_sync_seq_index: `(syncSeq)`,
+  // which row holds, or waits for, an image's bytes (sync/image-store.ts)
+  clipboard_items_image_hash_index: `(imageHash) WHERE kind = 'image'`,
+  // the texts the current detection rules haven't looked at (refreshDetection)
+  clipboard_items_undetected_index: `
+    (detectorVersion) WHERE kind = 'text' AND value IS NOT NULL`,
+  // an app's icon, asked for by name (sync/app-icon-source.ts)
+  clipboard_items_source_app_index: `
+    (sourceAppName) WHERE sourceAppName IS NOT NULL`,
 };
 
 function createIndexes(database: Database): void {
@@ -337,25 +350,54 @@ const tombstoneRow = `(deletedAt IS NOT NULL AND (
 // ...and one still young enough that it must stay: ?  is its cutoff (ms)
 const youngTombstone = `(${tombstoneRow} AND deletedAt >= ?)`;
 
-// Matches unpinned items copied before ?2 (ms) or beyond the newest ?4
-// unpinned ones (-1 = no limit). Pinned items are never deleted or counted,
-// and neither are young tombstones: they are not history, they are news for
-// the other devices. Fill the four with deletionValues.
+// Matches unpinned items copied before ?2 (ms), or after ?3/?5 in the list:
+// the oldest item "Maximum items" keeps. Pinned items are never deleted or
+// counted, and neither are young tombstones: they are not history, they are
+// news for the other devices. Fill the five with deletionValues.
 const deletionCondition = `
-  pinnedAt IS NULL AND NOT ${youngTombstone} AND (dateCopied < ? OR id NOT IN (
-    SELECT id FROM "CLIPBOARD_ITEMS" WHERE pinnedAt IS NULL AND NOT ${youngTombstone}
-    ORDER BY dateCopied DESC LIMIT ?
-  ))
+  pinnedAt IS NULL AND NOT ${youngTombstone} AND (
+    dateCopied < ? OR dateCopied < ? OR (dateCopied = ? AND id < ?)
+  )
 `;
 
-function deletionValues(copiedBefore: number, keepNewest: number): number[] {
+/** The values for deletionCondition. "Maximum items" is found as the oldest
+ *  item it keeps, one step down an index, rather than as a NOT IN over the
+ *  newest N ids, which sqlite would gather into a table on every copy. */
+function deletionValues(
+  database: Database,
+  copiedBefore: number,
+  keepNewest: number,
+): (number | string)[] {
   const cutoff = Date.now() - tombstoneLifetime;
-  return [cutoff, copiedBefore, cutoff, keepNewest];
+  // no limit, or fewer items than it: nothing is after the last one kept
+  let lastKept: { dateCopied: number; id: string } = { dateCopied: -1, id: "" };
+  if (keepNewest === 0) {
+    lastKept = { dateCopied: Number.MAX_SAFE_INTEGER, id: "" };
+  } else if (keepNewest > 0) {
+    const [row] = all<{ dateCopied: number; id: string }>(
+      database,
+      `
+        SELECT dateCopied, id FROM "CLIPBOARD_ITEMS"
+        WHERE pinnedAt IS NULL AND NOT ${youngTombstone}
+        ORDER BY dateCopied DESC, id DESC LIMIT 1 OFFSET ?
+      `,
+      cutoff,
+      keepNewest - 1,
+    );
+    if (row) lastKept = row;
+  }
+  return [
+    cutoff,
+    copiedBefore,
+    lastKept.dateCopied,
+    lastKept.dateCopied,
+    lastKept.id,
+  ];
 }
 
 /** Whether these limits can delete anything. With none set (the default)
  *  deletionCondition matches nothing, but checking it after every copy would
- *  still read the whole history for its NOT IN. */
+ *  still read the whole history. */
 function limitsHistory(copiedBefore: number, keepNewest: number): boolean {
   return copiedBefore > 0 || keepNewest >= 0;
 }
@@ -368,13 +410,14 @@ export async function countClipboardItemsToDelete(
   keepNewest: number,
 ): Promise<number> {
   if (!limitsHistory(copiedBefore, keepNewest)) return 0;
+  const database = await initializeDatabase(app);
   const [result] = all<{ count: number }>(
-    await initializeDatabase(app),
+    database,
     `
       SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL AND (${deletionCondition})
     `,
-    ...deletionValues(copiedBefore, keepNewest),
+    ...deletionValues(database, copiedBefore, keepNewest),
   );
   return result?.count ?? 0;
 }
@@ -401,11 +444,13 @@ export async function deleteClipboardItems(
   if (!limitsHistory(copiedBefore, keepNewest)) return;
   const database = await initializeDatabase(app);
   const { data: dataDirectory } = await appPaths(app);
-  const values = deletionValues(copiedBefore, keepNewest);
 
   // Read and delete with no await in between (sqlite is sync), so an item
   // saved meanwhile can't be deleted without its image path being read
   const { deletedRows, changed } = await exclusive(async () => {
+    // where the list is cut, found once: the tombstones made below drop out
+    // of the newest N, and must not move it
+    const values = deletionValues(database, copiedBefore, keepNewest);
     let tombstoned = 0;
     let erasedImages: Pick<ClipboardItemRow, "kind" | "path">[] = [];
     if (leaveTombstones && getSettings().syncEnabled) {
@@ -489,53 +534,87 @@ export async function restampSecretItems(app: TinyApp): Promise<number> {
   );
 }
 
+/** Empty the write-ahead log of what was just deleted: secure_delete zeroes
+ *  it in the database file itself, and the log keeps it until a checkpoint. */
+export async function scrubDeletedHistory(app: TinyApp): Promise<void> {
+  const database = await initializeDatabase(app);
+  await exclusive(async () => checkpoint(database));
+}
+
 /** Remove the tombstones that have been kept their 30 days: any device that
  *  was away longer than that has to be paired again. */
 export async function purgeOldTombstones(app: TinyApp): Promise<void> {
   const database = await initializeDatabase(app);
-  await exclusive(async () => {
+  const { data: dataDirectory } = await appPaths(app);
+  const leftImages = await exclusive(async () => {
+    // Before 0.4.4 an item deleted with sync off kept its text or its image
+    // file, out of sight and never purged: it becomes the tombstone a delete
+    // makes now, and a kind sync never carries goes altogether
+    const images = all<Pick<ClipboardItemRow, "kind" | "path">>(
+      database,
+      `SELECT kind, path FROM "CLIPBOARD_ITEMS" WHERE deletedAt IS NOT NULL AND kind = 'image' AND path IS NOT NULL`,
+    );
+    run(
+      database,
+      `
+        UPDATE "CLIPBOARD_ITEMS"
+        SET ${eraseText}, path = CASE WHEN kind = 'image' THEN NULL ELSE path END
+        WHERE deletedAt IS NOT NULL AND NOT ${tombstoneRow}
+          AND (${textKinds} OR kind = 'image')
+      `,
+    );
+    run(
+      database,
+      `DELETE FROM "CLIPBOARD_ITEMS" WHERE deletedAt IS NOT NULL AND NOT (${textKinds} OR kind = 'image')`,
+    );
     run(
       database,
       `DELETE FROM "CLIPBOARD_ITEMS" WHERE ${tombstoneRow} AND deletedAt < ?`,
       Date.now() - tombstoneLifetime,
     );
+    return images;
   });
+  for (const row of leftImages) {
+    const imagePath = restoreImagePath(row.path, dataDirectory);
+    if (imagePath) await tjs.remove(imagePath).catch(() => undefined);
+  }
 }
 
-/** Hide an item from the history. Its row stays, so history limits count it
- *  and delete it in time. It's unpinned too. With sync on, a text also loses
- *  its text, and an image its file, and becomes a tombstone, which tells the
- *  other devices to delete it; every other kind keeps its row as before. */
+/** Delete an item from the history. A text loses its text and an image its
+ *  file, sync on or off: what is left is a tombstone, which tells the other
+ *  devices to delete it (now, or once sync is turned on) and goes after 30
+ *  days. A kind that never syncs (files) goes altogether. */
 export async function softDeleteClipboardItem(
   id: string,
   app: TinyApp,
 ): Promise<void> {
   const database = await initializeDatabase(app);
   const { data: dataDirectory } = await appPaths(app);
-  const isSyncing = getSettings().syncEnabled;
   const imagePath = await exclusive(async () => {
     const [row] = all<Pick<ClipboardItemRow, "kind" | "path">>(
       database,
       `SELECT kind, path FROM "CLIPBOARD_ITEMS" WHERE id = ? AND deletedAt IS NULL`,
       id,
     );
-    run(
-      database,
-      `
-        UPDATE "CLIPBOARD_ITEMS"
-        SET deletedAt = ?, pinnedAt = NULL, syncSeq = ?${
-          isSyncing
-            ? `, ${eraseText}, path = CASE WHEN kind = 'image' THEN NULL ELSE path END`
-            : ""
-        }
-        WHERE id = ? AND deletedAt IS NULL
-      `,
-      Date.now(),
-      nextSyncSeq(database),
-      id,
-    );
+    if (!row) return null;
+    if (recordKind(row.kind) === null) {
+      run(database, `DELETE FROM "CLIPBOARD_ITEMS" WHERE id = ?`, id);
+    } else {
+      run(
+        database,
+        `
+          UPDATE "CLIPBOARD_ITEMS"
+          SET deletedAt = ?, pinnedAt = NULL, syncSeq = ?, ${eraseText},
+            path = CASE WHEN kind = 'image' THEN NULL ELSE path END
+          WHERE id = ? AND deletedAt IS NULL
+        `,
+        Date.now(),
+        nextSyncSeq(database),
+        id,
+      );
+    }
     notifyClipboardHistoryChanged(app);
-    return isSyncing && row?.kind === "image"
+    return row.kind === "image"
       ? restoreImagePath(row.path, dataDirectory)
       : null;
   });
@@ -584,47 +663,64 @@ let imageSizes = new Map<string, number>();
 export async function listClipboardItemSizes(
   app: TinyApp,
 ): Promise<Array<{ kind: string; bytes: number; pinned: boolean }>> {
+  // youngTombstone, on the sizes table's columns
   const rows = all<
-    Pick<ClipboardItemRow, "kind" | "path" | "pinnedAt"> & { rowBytes: number }
+    Pick<ClipboardItemRow, "kind" | "path"> & {
+      pinned: number;
+      rowBytes: number;
+    }
   >(
     await initializeDatabase(app),
     `
-      SELECT kind, path, pinnedAt,
-        ifnull(length(CAST(value AS BLOB)), 0) +
-        ifnull(length(CAST(path AS BLOB)), 0) AS rowBytes
-      FROM "CLIPBOARD_ITEMS"
-      WHERE NOT ${youngTombstone}
-      ORDER BY dateCopied DESC
+      SELECT kind, imagePath AS path, pinned, bytes AS rowBytes
+      FROM "CLIPBOARD_ITEM_SIZES"
+      WHERE NOT (deletedAt IS NOT NULL AND deletedAt >= ? AND (
+        (${textKinds} AND NOT hasValue) OR (kind = 'image' AND NOT hasPath)
+      ))
+      ORDER BY dateCopied DESC, id DESC
     `,
     Date.now() - tombstoneLifetime,
   );
   const { data: dataDirectory } = await appPaths(app);
   const measuredImages = new Map<string, number>();
-  const sizes = await Promise.all(
-    rows.map(async (row) => {
-      const imagePath =
-        row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
-      // a missing image file takes no space
-      let imageBytes = 0;
-      if (imagePath) {
-        const bytes =
-          imageSizes.get(imagePath) ??
-          (await tjs.stat(imagePath).then(
-            (stat: { size: number }) => stat.size,
-            () => undefined,
-          ));
-        if (bytes !== undefined) {
-          measuredImages.set(imagePath, bytes);
-          imageBytes = bytes;
-        }
-      }
-      return {
-        kind: row.kind,
-        bytes: row.rowBytes + imageBytes,
-        pinned: row.pinnedAt != null,
-      };
-    }),
+  // only an image not measured before is looked at on disk: a copy adds one
+  const unmeasured = rows.flatMap((row) => {
+    const imagePath =
+      row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
+    return imagePath && !imageSizes.has(imagePath) ? [imagePath] : [];
+  });
+  const measured = new Map(
+    await Promise.all(
+      unmeasured.map(
+        async (imagePath) =>
+          [
+            imagePath,
+            await tjs.stat(imagePath).then(
+              (stat: { size: number }) => stat.size,
+              () => undefined,
+            ),
+          ] as const,
+      ),
+    ),
   );
+  const sizes = rows.map((row) => {
+    const imagePath =
+      row.kind === "image" ? restoreImagePath(row.path, dataDirectory) : null;
+    // a missing image file takes no space
+    let imageBytes = 0;
+    if (imagePath) {
+      const bytes = imageSizes.get(imagePath) ?? measured.get(imagePath);
+      if (bytes !== undefined) {
+        measuredImages.set(imagePath, bytes);
+        imageBytes = bytes;
+      }
+    }
+    return {
+      kind: row.kind,
+      bytes: row.rowBytes + imageBytes,
+      pinned: row.pinned === 1,
+    };
+  });
   imageSizes = measuredImages; // images no longer in history drop out
   return sizes;
 }
@@ -681,11 +777,14 @@ const originMakerColumn = `
 // The list reads only the start of a long text: the card shows two lines, and
 // the whole text comes by id when it's previewed or copied. A text holding a
 // secret is read whole, so the search can tell the secret from the rest.
-const listColumns = `
+/** The columns a list reads. A text comes cut down to its preview, except
+ *  an encrypted one, which is decrypted whole, and, when `searching`, one
+ *  holding a secret: the search tells the secret from the rest of it. */
+const listColumns = (searching: boolean) => `
   id, kind, imageSize, path, dateCopied, sourceAppName, sourceAppBundleId,
   pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
   ${originMakerColumn},
-  CASE WHEN kind != 'text' OR encrypted IS 1 OR secrets IS NOT NULL
+  CASE WHEN kind != 'text' OR encrypted IS 1${searching ? " OR secrets IS NOT NULL" : ""}
     THEN value ELSE substr(value, 1, ?) END AS value,
   length(value) AS valueLength
 `;
@@ -713,7 +812,7 @@ export async function listClipboardItems(
     const rows = all<ClipboardItemRow>(
       database,
       `
-        SELECT ${listColumns} FROM "CLIPBOARD_ITEMS"
+        SELECT ${listColumns(search !== "")} FROM "CLIPBOARD_ITEMS"
         WHERE ${where} ORDER BY ${pageOrder(cursor)} LIMIT ?
       `,
       textPreviewLength,
@@ -877,7 +976,7 @@ async function countClipboardItems(
   // the few rows sqlite can't decide are read and checked like the list does
   const uncertainRows = all<ClipboardItemRow>(
     database,
-    `SELECT ${listColumns} FROM "CLIPBOARD_ITEMS" WHERE ${where} AND ${uncertain}`,
+    `SELECT ${listColumns(true)} FROM "CLIPBOARD_ITEMS" WHERE ${where} AND ${uncertain}`,
     textPreviewLength,
     ...values,
   );
@@ -902,11 +1001,51 @@ export async function decryptRow<
 >(row: Row, app: TinyApp): Promise<Row | null> {
   if (row.encrypted !== 1 || row.value === null) return row;
   try {
-    return { ...row, value: await decryptText(row.value, app) };
+    return { ...row, value: await decryptCached(row.id, row.value, app) };
   } catch (error) {
     logError(`decrypting history item ${row.id} failed:`, error);
     return null;
   }
+}
+
+// A search counts its matches among every encrypted text, on each keystroke:
+// what was decrypted is kept a short while, so typing doesn't decrypt the
+// whole history again and again. Keyed by the row and the start of its
+// ciphertext, which is its random IV: a text encrypted again never matches.
+// Few, and soon let go of: decrypted secrets don't stay in memory for long.
+const decryptedCacheSize = 500;
+const decryptedCacheMs = 60_000;
+const decryptedTexts = new Map<string, string>();
+let forgetDecrypted: ReturnType<typeof setTimeout> | undefined;
+
+async function decryptCached(
+  id: string,
+  encryptedText: string,
+  app: TinyApp,
+): Promise<string> {
+  const key = `${id}:${encryptedText.slice(0, 24)}`;
+  clearTimeout(forgetDecrypted);
+  forgetDecrypted = setTimeout(() => decryptedTexts.clear(), decryptedCacheMs);
+  const known = decryptedTexts.get(key);
+  if (known !== undefined) {
+    // the most recently used last, so the oldest go first
+    decryptedTexts.delete(key);
+    decryptedTexts.set(key, known);
+    return known;
+  }
+  const text = await decryptText(encryptedText, app);
+  decryptedTexts.set(key, text);
+  if (decryptedTexts.size > decryptedCacheSize) {
+    decryptedTexts.delete(decryptedTexts.keys().next().value!);
+  }
+  return text;
+}
+
+/** Forget every decrypted text kept for searching: encryption was turned off,
+ *  or its key changed. */
+export function forgetDecryptedTexts(): void {
+  clearTimeout(forgetDecrypted);
+  decryptedTexts.clear();
 }
 
 /** Encrypt saved text that holds a secret but isn't encrypted yet: copied
@@ -928,15 +1067,27 @@ async function encryptPlainSecrets(
       WHERE kind = 'text' AND encrypted IS NULL AND value IS NOT NULL
     `,
   );
+  // encrypted first, written after in one transaction: stopped midway, the
+  // history is as it was rather than half encrypted
+  const encrypted: { id: string; value: string }[] = [];
   for (const { id, value } of rows) {
     if (!value || findSecrets(value).length === 0) continue;
-    run(
-      database,
-      `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = 1 WHERE id = ? AND encrypted IS NULL`,
-      await encryptText(value, app),
-      id,
-    );
+    encrypted.push({ id, value: await encryptText(value, app) });
   }
+  if (encrypted.length === 0) return;
+  transaction(database, () => {
+    for (const { id, value } of encrypted) {
+      run(
+        database,
+        `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = 1 WHERE id = ? AND encrypted IS NULL`,
+        value,
+        id,
+      );
+    }
+  });
+  // the plain keys are gone from the file (secure_delete); this takes them
+  // out of the write-ahead log too
+  checkpoint(database);
 }
 
 /** Turn "Encrypt API keys" on: get the Keychain key first, so a denied
@@ -955,8 +1106,10 @@ export async function turnOnSecretEncryption(app: TinyApp): Promise<boolean> {
 
 /** Turn "Encrypt API keys" off: save the keys in history as plain text and
  *  delete the Keychain key. Items that key can't decrypt could never be read
- *  again, so they're deleted. False, and still on, when the Keychain can't be
- *  read: decrypting needs the key. */
+ *  again, so they're deleted, as the user would delete them: other devices
+ *  hear of it. False, and still on, when the Keychain can't be read:
+ *  decrypting needs the key. The setting and the key change only after the
+ *  history has, so a stop midway leaves encryption on, as it was. */
 export async function turnOffSecretEncryption(app: TinyApp): Promise<boolean> {
   let hasKey: boolean;
   try {
@@ -970,6 +1123,7 @@ export async function turnOffSecretEncryption(app: TinyApp): Promise<boolean> {
   await exclusive(() => decryptEncryptedRows(database, app, hasKey));
 
   await updateSettings({ encryptSecrets: false }, app);
+  forgetDecryptedTexts();
   if (hasKey) await deleteEncryptionKey(app);
   return true;
 }
@@ -983,22 +1137,46 @@ async function decryptEncryptedRows(
     database,
     `SELECT id, value FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1`,
   );
+  // All decrypted first, then written in one transaction: a failure or a
+  // crash midway changes nothing. The key is read once (restrict...), so a
+  // row it can't decrypt was encrypted with another key, and can't be read
+  // on a second try either.
+  const decrypted: { id: string; plaintext: string | null }[] = [];
   for (const { id, value } of rows) {
-    const plaintext =
-      hasKey && value !== null
-        ? await decryptText(value, app).catch(() => null)
-        : null;
-    if (plaintext === null) {
-      run(database, `DELETE FROM "CLIPBOARD_ITEMS" WHERE id = ?`, id);
-    } else {
-      run(
-        database,
-        `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = NULL WHERE id = ?`,
-        plaintext,
-        id,
-      );
-    }
+    decrypted.push({
+      id,
+      plaintext:
+        hasKey && value !== null
+          ? await decryptText(value, app).catch(() => null)
+          : null,
+    });
   }
+  transaction(database, () => {
+    for (const { id, plaintext } of decrypted) {
+      if (plaintext === null) {
+        // a delete like the user's: a tombstone, never a row that vanishes
+        // from under the other devices
+        run(
+          database,
+          `
+            UPDATE "CLIPBOARD_ITEMS"
+            SET deletedAt = ifnull(deletedAt, ?), pinnedAt = NULL, syncSeq = ?, ${eraseText}
+            WHERE id = ? AND encrypted = 1
+          `,
+          Date.now(),
+          nextSyncSeq(database),
+          id,
+        );
+      } else {
+        run(
+          database,
+          `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = NULL WHERE id = ? AND encrypted = 1`,
+          plaintext,
+          id,
+        );
+      }
+    }
+  });
   if (rows.length) notifyClipboardHistoryChanged(app);
 }
 
@@ -1072,6 +1250,73 @@ const addedColumns = {
   imageBytes: "INTEGER",
   imageType: "TEXT",
 };
+
+// What the storage limit reads of each row, in a table of its own: reading
+// the history table, sqlite steps through a long text's pages to reach the
+// columns stored after it (dateCopied among them), on every copy. Kept by
+// triggers on every write, whoever makes it (a copy, sync, encryption, a
+// delete); the byte count is worked out only when a text or a path is.
+const itemBytes = (row: string) =>
+  `ifnull(length(CAST(${row}.value AS BLOB)), 0) + ifnull(length(CAST(${row}.path AS BLOB)), 0)`;
+
+function keepItemSizes(database: Database): void {
+  database.exec(`
+    DROP TRIGGER IF EXISTS clipboard_items_row_bytes_insert;
+    DROP TRIGGER IF EXISTS clipboard_items_row_bytes_update;
+    CREATE TABLE IF NOT EXISTS "CLIPBOARD_ITEM_SIZES" (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      imagePath TEXT,
+      dateCopied INTEGER NOT NULL,
+      pinned INTEGER NOT NULL,
+      deletedAt INTEGER,
+      hasValue INTEGER NOT NULL,
+      hasPath INTEGER NOT NULL,
+      bytes INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS clipboard_item_sizes_order_index
+      ON "CLIPBOARD_ITEM_SIZES" (dateCopied DESC, id DESC);
+    CREATE TRIGGER IF NOT EXISTS clipboard_item_sizes_insert
+    AFTER INSERT ON "CLIPBOARD_ITEMS" BEGIN
+      INSERT OR REPLACE INTO "CLIPBOARD_ITEM_SIZES" VALUES (
+        NEW.id, NEW.kind, CASE WHEN NEW.kind = 'image' THEN NEW.path END,
+        NEW.dateCopied, NEW.pinnedAt IS NOT NULL, NEW.deletedAt,
+        NEW.value IS NOT NULL, NEW.path IS NOT NULL, ${itemBytes("NEW")}
+      );
+    END;
+    CREATE TRIGGER IF NOT EXISTS clipboard_item_sizes_contents
+    AFTER UPDATE OF value, path ON "CLIPBOARD_ITEMS" BEGIN
+      UPDATE "CLIPBOARD_ITEM_SIZES" SET
+        imagePath = CASE WHEN NEW.kind = 'image' THEN NEW.path END,
+        hasValue = NEW.value IS NOT NULL, hasPath = NEW.path IS NOT NULL,
+        bytes = ${itemBytes("NEW")}
+      WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS clipboard_item_sizes_state
+    AFTER UPDATE OF kind, dateCopied, pinnedAt, deletedAt ON "CLIPBOARD_ITEMS" BEGIN
+      UPDATE "CLIPBOARD_ITEM_SIZES" SET
+        kind = NEW.kind, dateCopied = NEW.dateCopied,
+        pinned = NEW.pinnedAt IS NOT NULL, deletedAt = NEW.deletedAt
+      WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS clipboard_item_sizes_delete
+    AFTER DELETE ON "CLIPBOARD_ITEMS" BEGIN
+      DELETE FROM "CLIPBOARD_ITEM_SIZES" WHERE id = OLD.id;
+    END;
+  `);
+  // once, for the rows from before the table
+  run(
+    database,
+    `
+      INSERT OR IGNORE INTO "CLIPBOARD_ITEM_SIZES"
+      SELECT id, kind, CASE WHEN kind = 'image' THEN path END, dateCopied,
+        pinnedAt IS NOT NULL, deletedAt, value IS NOT NULL, path IS NOT NULL,
+        ${itemBytes('"CLIPBOARD_ITEMS"')}
+      FROM "CLIPBOARD_ITEMS"
+      WHERE id NOT IN (SELECT id FROM "CLIPBOARD_ITEM_SIZES")
+    `,
+  );
+}
 
 function addMissingColumns(database: Database): void {
   const columnNames = new Set(

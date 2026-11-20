@@ -1,6 +1,7 @@
 package com.michael.teneo.history;
 
 import android.content.Context;
+import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import java.security.SecureRandom;
@@ -15,7 +16,7 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
 
     public static final String NAME = "teneo.sqlite";
     /** 2: SYNC_PEERS has a maker. 3: an item may be an image. 4: a text that is a colour says so. */
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
 
     /** The columns of an item before images, in the order they are copied over */
     private static final String TEXT_COLUMNS =
@@ -59,6 +60,16 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
         super(context, name, null, VERSION);
         // a page is listed while a copy is saved, without waiting for it
         setWriteAheadLoggingEnabled(true);
+    }
+
+    @Override
+    public void onConfigure(SQLiteDatabase db) {
+        // What a delete or an update replaces is overwritten with zeros, so a
+        // deleted copy isn't left in the file's free space. A pragma that
+        // answers runs as a query: execSQL refuses those.
+        try (Cursor result = db.rawQuery("PRAGMA secure_delete = ON", null)) {
+            result.moveToFirst();
+        }
     }
 
     @Override
@@ -112,6 +123,18 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
             "CREATE INDEX clipboard_items_unpinned_index ON CLIPBOARD_ITEMS (dateCopied DESC, id DESC) WHERE pinnedAt IS NULL"
         );
         db.execSQL("CREATE INDEX clipboard_items_sync_seq_index ON CLIPBOARD_ITEMS (syncSeq)");
+        createLookupIndexes(db);
+    }
+
+    // Which row holds, or waits for, an image's bytes, asked for each piece
+    // a peer sends; and the texts the current detection rules haven't looked
+    // at, asked for before the list is read (undetected)
+    private static void createLookupIndexes(SQLiteDatabase db) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS clipboard_items_image_hash_index ON CLIPBOARD_ITEMS (imageHash) WHERE kind = 'image'");
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS clipboard_items_undetected_index ON CLIPBOARD_ITEMS (detectorVersion) " +
+            "WHERE kind = 'text' AND value IS NOT NULL"
+        );
     }
 
     /**
@@ -120,7 +143,10 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
      * in one transaction, so a phone has all of it or none.
      */
     private static void allowImages(SQLiteDatabase db) {
-        for (String index : new String[] { "clipboard_items_list_order_index", "clipboard_items_unpinned_index", "clipboard_items_sync_seq_index" }) {
+        for (String index : new String[] {
+            "clipboard_items_list_order_index", "clipboard_items_unpinned_index", "clipboard_items_sync_seq_index",
+            "clipboard_items_image_hash_index", "clipboard_items_undetected_index",
+        }) {
             db.execSQL("DROP INDEX IF EXISTS " + index);
         }
         db.execSQL("ALTER TABLE CLIPBOARD_ITEMS RENAME TO CLIPBOARD_ITEMS_TEXT_ONLY");
@@ -138,6 +164,8 @@ public final class HistoryDatabase extends SQLiteOpenHelper {
         // a text that is exactly one CSS colour, found with the secrets and the link; an
         // upgrade from before images made the column with the table
         else if (oldVersion < 4) db.execSQL("ALTER TABLE CLIPBOARD_ITEMS ADD COLUMN color TEXT");
+        // allowImages made them already
+        if (oldVersion >= 3 && oldVersion < 5) createLookupIndexes(db);
     }
 
     private static String randomHex(int bytes) {

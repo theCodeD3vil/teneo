@@ -33,7 +33,7 @@ const isLoading = computed(
 
 // The browser takes focus, so the panel gets out of the way
 async function openInBrowser(): Promise<void> {
-  await tiny.app.shell.open(url.value);
+  await tiny.api.call("openLink", { url: url.value });
   await hidePanel();
 }
 </script>

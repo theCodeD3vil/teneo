@@ -7,10 +7,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -86,47 +83,31 @@ public class LinkFetchPlugin extends Plugin {
             return result.put("blocked", true);
         }
         if (!LinkFetchRules.isWebAddress(url)) return result.put("blocked", true);
-        for (InetAddress resolved : InetAddress.getAllByName(url.getHost())) {
-            if (LinkFetchRules.isLocal(resolved)) return result.put("blocked", true);
+        InetAddress[] resolved = InetAddress.getAllByName(url.getHost());
+        for (InetAddress candidate : resolved) {
+            if (LinkFetchRules.isLocal(candidate)) return result.put("blocked", true);
         }
 
+        // to the addresses just checked and no other: looking the name up
+        // again could answer differently (PinnedHttp)
         long deadline = System.currentTimeMillis() + DEADLINE_MS;
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        try {
-            connection.setInstanceFollowRedirects(false);
-            connection.setConnectTimeout(TIMEOUT_MS);
-            connection.setReadTimeout(TIMEOUT_MS);
-            connection.setUseCaches(false);
-            connection.setRequestProperty("Accept", accept);
-            connection.setRequestProperty("User-Agent", userAgent);
-            int status = connection.getResponseCode();
-            result.put("status", status);
-            result.put("location", connection.getHeaderField("Location"));
-            result.put("contentType", connection.getContentType());
-            if (!LinkFetchRules.isSuccess(status)) return result;
-
-            byte[] body = read(connection.getInputStream(), maxBytes, allowCut, deadline);
-            if (body != null) result.put("body", Base64.encodeToString(body, Base64.NO_WRAP));
-            return result;
-        } finally {
-            connection.disconnect();
-        }
-    }
-
-    /** The first `maxBytes` of the answer, or null when it is longer and may not be cut */
-    private static byte[] read(InputStream stream, int maxBytes, boolean allowCut, long deadline) throws IOException {
-        try (InputStream in = stream) {
-            ByteArrayOutputStream body = new ByteArrayOutputStream();
-            byte[] chunk = new byte[16 * 1024];
-            while (body.size() < maxBytes) {
-                if (System.currentTimeMillis() > deadline) throw new IOException("the site answers too slowly");
-                int count = in.read(chunk, 0, Math.min(chunk.length, maxBytes - body.size()));
-                if (count < 0) return body.toByteArray();
-                body.write(chunk, 0, count);
+        IOException failure = new IOException("The site has no address");
+        for (InetAddress candidate : resolved) {
+            PinnedHttp.Response response;
+            try {
+                response = PinnedHttp.get(PinnedHttp.NETWORK, url, candidate, accept, userAgent, maxBytes, allowCut, deadline, TIMEOUT_MS);
+            } catch (java.net.ConnectException | java.net.NoRouteToHostException unreachable) {
+                failure = unreachable;
+                continue;
+            } catch (IllegalArgumentException notSent) {
+                return result.put("blocked", true);
             }
-            // exactly as long as allowed, or longer?
-            if (in.read() < 0 || allowCut) return body.toByteArray();
-            return null;
+            result.put("status", response.status);
+            result.put("location", response.location);
+            result.put("contentType", response.contentType);
+            if (response.body != null) result.put("body", Base64.encodeToString(response.body, Base64.NO_WRAP));
+            return result;
         }
+        throw failure;
     }
 }

@@ -71,6 +71,28 @@ public class HlcTest {
     }
 
     @Test
+    public void aStampFromDaysAheadCantPoisonTheClock() {
+        long now = 1_763_000_000_000L;
+        Hlc clock = new Hlc(A, () -> now);
+        clock.observe("ffffffffffff-ffff-" + B);
+        String stamp = clock.next();
+        assertTrue(Hlc.isStamp(stamp));
+        assertEquals(now, Long.parseLong(stamp.substring(0, 12), 16));
+        String hoursAhead = String.format("%012x-0005-%s", now + 3_600_000L, B);
+        clock.observe(hoursAhead);
+        assertTrue(clock.next().compareTo(hoursAhead) > 0);
+        assertTrue(Hlc.isFutureStamp("ffffffffffff-ffff-" + B, now));
+        assertFalse(Hlc.isFutureStamp(hoursAhead, now));
+    }
+
+    @Test
+    public void stampsNeverGrowAThirteenthDigit() {
+        Hlc clock = new Hlc(A, () -> 0xffff_ffff_ffffL);
+        for (int i = 0; i < 70_000; i++) assertTrue(Hlc.isStamp(clock.next()));
+        assertEquals("ffffffffffff-ffff-" + A, clock.next());
+    }
+
+    @Test
     public void onlyWellFormedStampsAndIdsAreAccepted() {
         assertFalse(Hlc.isStamp("nope"));
         assertFalse(Hlc.isStamp(null));

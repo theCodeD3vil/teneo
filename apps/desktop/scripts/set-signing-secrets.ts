@@ -3,12 +3,14 @@
 //   bun run release:secrets
 // They live in one 1Password item, "Teneo signing secrets" (Personal vault),
 // with one field per secret, named after it: MACOS_CERTIFICATE_P12 and
-// ANDROID_KEYSTORE_P12 hold the .p12 files in base64, the other two their
-// passwords. Each value goes from `op read` to `gh secret set` through a pipe,
+// ANDROID_KEYSTORE_P12 hold the .p12 files in base64, two more their
+// passwords, and ANDROID_SIGNING_LINEAGE the Android key's proof of rotation
+// (apksigner rotate), in base64. Each value goes from `op read` to `gh secret set` through a pipe,
 // never through arguments, the environment or a file.
 /* oxlint-disable no-console -- a command-line script reports on the console */
 import { spawnSync } from "node:child_process";
 
+import { ghArgs, ghCommand } from "./gh-command.ts";
 import {
   SIGNING_ITEM_TITLE,
   SIGNING_SECRETS,
@@ -21,11 +23,15 @@ function fail(message: string): never {
 }
 
 const repository = spawnSync(
-  "gh",
-  ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-  {
-    encoding: "utf8",
-  },
+  ...ghArgs([
+    "repo",
+    "view",
+    "--json",
+    "nameWithOwner",
+    "-q",
+    ".nameWithOwner",
+  ]),
+  { encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] },
 ).stdout.trim();
 if (!repository)
   fail("gh isn't signed in, or this isn't the repository folder.");
@@ -69,11 +75,13 @@ for (const name of SIGNING_SECRETS) {
       "-o",
       "pipefail",
       "-c",
-      'op read --no-newline "$1" | gh secret set "$2" --env release --repo "$3"',
+      // "${@:4}" is gh, as ghCommand runs it: bash can't see a shell's function
+      'op read --no-newline "$1" | "${@:4}" secret set "$2" --env release --repo "$3"',
       "bash",
       reference,
       name,
       repository,
+      ...ghCommand(),
     ],
     { stdio: ["ignore", "inherit", "inherit"] },
   );

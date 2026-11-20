@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 
 import { memoryChannelPair } from "./channel";
-import { maxTextBytes } from "./record";
-import { type TestDevice, TestNetwork } from "./testing";
+import { randomBytes } from "./crypto";
+import { SyncEngine } from "./engine";
+import { Hlc } from "./hlc";
+import { type ItemRecord, maxTextBytes } from "./record";
+import { MemoryStore, type TestDevice, TestNetwork } from "./testing";
 
 const live = (device: TestDevice) => device.store.liveTexts().sort();
 const same = (...devices: TestDevice[]) => {
@@ -71,6 +74,33 @@ test("pinning, unpinning and deleting sync, and the latest pin wins", async () =
   expect(a.store.snapshot()[0]!.deletedAt).not.toBeNull();
   expect(live(a)).toEqual([]);
   same(a, b);
+  net.stop();
+});
+
+test("a pin stamped days ahead by a rogue peer is refused, and pins keep working", async () => {
+  const net = new TestNetwork();
+  const [rogue, b] = [net.add("a"), net.add("b")];
+  const poisoned = rogue.copy("poisoned");
+  const record = rogue.store.snapshot().find((r) => r.id === poisoned)!;
+  // the largest stamp there is, which would leave b no larger one to make
+  (rogue.store as unknown as { write(r: ItemRecord, s: boolean): void }).write(
+    {
+      ...record,
+      pinned: { at: 1, stamp: `ffffffffffff-ffff-${record.origin}` },
+    },
+    false,
+  );
+  const honest = rogue.copy("honest");
+  net.connect(rogue, b);
+  await net.settle();
+  expect(b.store.has(honest)).toBe(true);
+  expect(b.store.has(poisoned)).toBe(false);
+
+  b.pin(honest, true);
+  await net.settle();
+  const pinned = rogue.store.snapshot().find((r) => r.id === honest)!.pinned;
+  expect(pinned?.at).not.toBeNull();
+  expect(pinned?.stamp.startsWith("ffff")).toBe(false);
   net.stop();
 });
 
@@ -773,5 +803,127 @@ test("an image too large, or of a kind not every device shows, stays put", async
     "image/png",
   ]);
   expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a peer that floods image requests is cut off, and the images it asked for are not read", async () => {
+  const net = new TestNetwork();
+  const [a, b] = [net.add("a"), net.add("b")];
+  // serving is slow, as a large image's is: requests pile up behind it
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let sizesAsked = 0;
+  const size = b.store.images.size.bind(b.store.images);
+  b.store.images.size = async (hash) => {
+    sizesAsked += 1;
+    await held;
+    return size(hash);
+  };
+  net.connect(a, b);
+  await net.settle();
+  expect(net.isConnected(a, b)).toBe(true);
+
+  // a's link to b, used the way a hostile copy of the app would
+  const link = (
+    a.engine as unknown as {
+      links: Map<string, { session: { send(frame: unknown): Promise<void> } }>;
+    }
+  ).links.get(b.id)!;
+  const hash = "f".repeat(64);
+  await Promise.all(
+    Array.from({ length: 1000 }, () =>
+      link.session.send({ t: "blob-want", hash }).catch(() => {}),
+    ),
+  );
+  for (let i = 0; i < 50; i++) await new Promise((r) => setTimeout(r, 0));
+  expect(
+    net.errors.some((error) => String(error).includes("too many images")),
+  ).toBe(true);
+  release();
+  await net.settle();
+  // only the first request was being served; the queued ones stopped at once
+  expect(sizesAsked).toBe(1);
+  net.stop();
+});
+
+test("a phone joins with a pairing code's one-time key, gets the vault key, and the code is spent", async () => {
+  const net = new TestNetwork();
+  const vaultKey = net.vaultKey;
+  const pairingKey = randomBytes(32);
+  let live: Uint8Array | null = pairingKey;
+  let paired = 0;
+  const macStore = new MemoryStore(
+    "m".repeat(32),
+    new Hlc("a".repeat(32), net.now),
+    net.now,
+  );
+  const mac = new SyncEngine({
+    deviceId: "a".repeat(32),
+    name: "Mac",
+    platform: "mac",
+    vaultKey,
+    store: macStore,
+    now: net.now,
+    scheduler: net.scheduler,
+    pairingKey: () => live as never,
+    onPaired: () => {
+      paired += 1;
+      live = null;
+    },
+  });
+  const join = async (deviceId: string) => {
+    let received: Uint8Array | null = null;
+    const phone = new SyncEngine({
+      deviceId,
+      name: "Phone",
+      platform: "android",
+      vaultKey: pairingKey,
+      store: new MemoryStore(deviceId, new Hlc(deviceId, net.now), net.now),
+      now: net.now,
+      scheduler: net.scheduler,
+      onVaultKey: (key) => {
+        received = key;
+      },
+    });
+    const pair = memoryChannelPair();
+    const [phoneEnded] = await Promise.all([
+      phone.attach(pair.initiator),
+      mac.attach(pair.responder),
+    ]);
+    phone.stop();
+    return { received: received as Uint8Array | null, phoneEnded };
+  };
+
+  const first = await join("b".repeat(32));
+  expect(first.received).toEqual(vaultKey);
+  expect(paired).toBe(1);
+  // the Mac's history never went to it
+  expect(macStore.cursorSaves).toEqual([]);
+
+  // a photo of the same code, used later, is refused
+  const second = await join("c".repeat(32));
+  expect(second.received).toBeNull();
+  expect(second.phoneEnded?.code).toBe("auth");
+  mac.stop();
+});
+
+test("a vault key sent on an ordinary connection ends it, and changes nothing", async () => {
+  const net = new TestNetwork();
+  const [a, b] = [net.add("a"), net.add("b")];
+  net.connect(a, b);
+  await net.settle();
+  const link = (
+    a.engine as unknown as {
+      links: Map<string, { session: { send(frame: unknown): Promise<void> } }>;
+    }
+  ).links.get(b.id)!;
+  await link.session.send({
+    t: "vault",
+    key: Buffer.from(randomBytes(32)).toString("base64"),
+  });
+  await net.settle();
+  expect(
+    net.errors.some((error) => String(error).includes("key unasked")),
+  ).toBe(true);
   net.stop();
 });

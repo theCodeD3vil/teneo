@@ -6,7 +6,7 @@ const props = defineProps<{ name: string; url: string }>();
 
 // Opens in the default browser; the settings window can't navigate away
 function openLink(): void {
-  void tiny.app.shell.open(props.url);
+  void tiny.api.call("openLink", { url: props.url });
 }
 </script>
 

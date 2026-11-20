@@ -15,6 +15,7 @@ import { LinkFetch, nativeLinkFetcher } from "./previews/link-fetch-plugin";
 import { LinkPreviews } from "./previews/link-previews";
 import { indexedDbPreviewCache } from "./previews/preview-cache";
 import { drawThumbnail } from "./previews/thumbnail";
+import { initSentry } from "./sentry";
 import { Updates } from "./updates/native-update-plugin";
 import { Updater } from "./updates/updater";
 
@@ -30,6 +31,7 @@ colorScheme.addEventListener("change", applyColorScheme);
 initNavigation(isSetupDone() ? "history" : "setup");
 
 const app = createApp(App);
+initSentry(app);
 // the phone keeps its own history and syncs it; a browser shows sample items
 provideClient(
   app,
@@ -55,11 +57,16 @@ function nativeClient(): NativeClient {
   return client;
 }
 
-// in a browser an update can only be a download link
-provideUpdater(
-  new Updater({
-    current: async () => __APP_VERSION__,
-    plugin: Capacitor.isNativePlatform() ? Updates : null,
-  }),
-);
+// The build from GitHub updates itself, with its update plugin. Google
+// Play's has no such plugin, and no updater: Play updates it. In a browser
+// an update can only be a download link.
+const isNative = Capacitor.isNativePlatform();
+if (!isNative || Capacitor.isPluginAvailable("Updates")) {
+  provideUpdater(
+    new Updater({
+      current: async () => __APP_VERSION__,
+      plugin: isNative ? Updates : null,
+    }),
+  );
+}
 app.mount("#app");

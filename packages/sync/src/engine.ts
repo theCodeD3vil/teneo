@@ -15,7 +15,7 @@ import {
   fromBase64,
   toBase64,
 } from "./crypto";
-import type { Hlc } from "./hlc";
+import { type Hlc, isFutureStamp } from "./hlc";
 import {
   batchLimits,
   blobChunkBytes,
@@ -24,6 +24,7 @@ import {
   type BlobWantFrame,
   capabilities,
   type ChangesFrame,
+  handshakeMs,
   type Frame,
   iconLimits,
   type IconsFrame,
@@ -132,6 +133,14 @@ export interface EngineOptions {
   onIconsChanged?: () => void;
   /** A connection failed because of something on this device. */
   onError?: (error: unknown) => void;
+  /** The Mac, while it shows a pairing code: that code's one-time key, which
+   *  a phone joining may prove instead of the vault's (pairing.ts), or null. */
+  pairingKey?: () => Bytes | null;
+  /** The Mac: a phone proved the pairing key and was given the vault's. */
+  onPaired?: () => void;
+  /** A phone that joined with a pairing key (its vaultKey here): the vault
+   *  key the Mac gave it. Without this, a vault frame ends the connection. */
+  onVaultKey?: (vaultKey: Bytes) => void;
 }
 
 export interface ConnectedPeer {
@@ -145,6 +154,9 @@ export interface ConnectedPeer {
 
 // How many rows one read of the store asks for
 const scanPage = batchLimits.items;
+/** Image requests from one peer that may wait to be served. It asks for one
+ *  at a time, so a few is already more than it should. */
+const maxQueuedBlobWants = 16;
 
 interface Link {
   session: Session;
@@ -204,12 +216,17 @@ export class SyncEngine {
       if (this.stopped) throw new SyncError("closed", "Sync is off");
       const keys = await this.keys;
       await this.seedClock();
+      const pairingKey = this.options.pairingKey?.() ?? null;
       session = await Session.open(channel, {
         deviceId: this.options.deviceId,
         authKey: keys.authKey,
+        pairingAuthKey: pairingKey
+          ? (await deriveVaultKeys(pairingKey)).authKey
+          : undefined,
         scheduler: this.options.scheduler,
         now: this.options.now,
       });
+      if (session.usedPairingKey) return await this.pair(session);
       link = await this.register(session);
     } catch (error) {
       session?.close();
@@ -230,6 +247,22 @@ export class SyncEngine {
       this.options.onPeersChanged?.();
     }
     return ended;
+  }
+
+  /** A phone proved the pairing code's one-time key: it gets the vault key,
+   *  and nothing else, on this connection. The code is spent. */
+  private async pair(session: Session): Promise<SyncError | null> {
+    await session.send({ t: "vault", key: toBase64(this.options.vaultKey) });
+    this.options.onPaired?.();
+    // the phone closes once it has read the key: closing first could drop it
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      session.closed,
+      new Promise((resolve) => (timer = setTimeout(resolve, handshakeMs))),
+    ]);
+    clearTimeout(timer);
+    session.close();
+    return null;
   }
 
   /** Tell the engine this device wrote to its history, or changed what may sync. */
@@ -341,6 +374,7 @@ export class SyncEngine {
     link: Link,
     frame: Parameters<FrameHandler>[0],
   ): Promise<void> {
+    if (frame.t === "vault") return this.handleVault(link, frame.key);
     if (frame.t === "state") await this.handleState(link, frame);
     else if (frame.t === "changes") await this.handleChanges(link, frame);
     else if (frame.t === "icons-want") await this.handleIconsWant(link, frame);
@@ -392,6 +426,11 @@ export class SyncEngine {
     const records: ItemRecord[] = [];
     for (const item of frame.items) {
       const record = parseRecord(item);
+      // A pin stamped days ahead is from a broken clock or a peer that
+      // means harm: it would win every merge of that item for good
+      if (record?.pinned && isFutureStamp(record.pinned.stamp, this.now())) {
+        continue;
+      }
       // an image is only taken by a device that can keep its bytes
       if (record && (record.kind === "text" || this.options.images)) {
         records.push(record);
@@ -403,6 +442,7 @@ export class SyncEngine {
     // connection resumes at the last batch that was fully applied
     const changed = await store.transaction(async (tx) => {
       let changed = false;
+      await tx.prefetch?.(records.map((record) => record.id));
       for (const record of records) {
         if (record.pinned) this.options.clock?.observe(record.pinned.stamp);
         changed = (await this.applyRecord(tx, record)) || changed;
@@ -559,10 +599,29 @@ export class SyncEngine {
     await this.sendOrClosed(link, { t: "blob-want", hash });
   }
 
+  /** The vault key, from the Mac whose pairing code this phone scanned. Any
+   *  other device sending one is not to be believed. */
+  private handleVault(link: Link, key: string): void {
+    const vaultKey = fromBase64(key);
+    if (!this.options.onVaultKey || vaultKey?.length !== 32) {
+      throw new SyncError("protocol", "The other device sent a key unasked");
+    }
+    this.options.onVaultKey(vaultKey);
+    link.session.close();
+  }
+
   /** The peer asked for an image: send it in pieces, after the ones it asked
    *  for before. Not awaited by the caller, so the peer's other frames (a
-   *  ping among them) are read meanwhile. */
+   *  ping among them) are read meanwhile. A peer asks for one at a time
+   *  (blobQueue), so a pile of requests is one flooding this device, and the
+   *  connection ends. */
   private handleBlobWant(link: Link, frame: BlobWantFrame): void {
+    if (link.servingCount >= maxQueuedBlobWants) {
+      throw new SyncError(
+        "protocol",
+        "The other device asked for too many images at once",
+      );
+    }
     link.servingCount += 1;
     link.serving = link.serving
       .then(() => this.sendImage(link, frame.hash))
@@ -572,7 +631,14 @@ export class SyncEngine {
       });
   }
 
+  /** Whether the link is still this engine's connection to its peer */
+  private isLive(link: Link): boolean {
+    return !this.stopped && this.links.get(link.peerId) === link;
+  }
+
   private async sendImage(link: Link, hash: string): Promise<void> {
+    // one asked for on a connection since closed is read from disk for no one
+    if (!this.isLive(link)) return;
     const { images } = this.options;
     const total = (await images?.size(hash).catch(() => null)) ?? null;
     if (!images || total === null || total < 1 || total > maxImageBytes) {
@@ -580,6 +646,7 @@ export class SyncEngine {
       return;
     }
     for (let offset = 0; offset < total; offset += blobChunkBytes) {
+      if (!this.isLive(link)) return;
       const length = Math.min(blobChunkBytes, total - offset);
       const piece = await images.read(hash, offset, length).catch(() => null);
       if (!piece || piece.length !== length) {

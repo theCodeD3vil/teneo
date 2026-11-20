@@ -4,7 +4,7 @@ import { computed } from "vue";
 
 import { useNavigation } from "../../composables/useNavigation";
 import { useSettings } from "../../composables/useSettings";
-import { useUpdates } from "../../composables/useUpdates";
+import { hasUpdater, useUpdates } from "../../composables/useUpdates";
 import { formatSize } from "../../updates/updater";
 import UpdateProgress from "../UpdateProgress.vue";
 import ExternalLink from "./ExternalLink.vue";
@@ -12,6 +12,8 @@ import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
 const version = __APP_VERSION__;
+// Google Play updates the build it installed, so that one offers no updates
+const selfUpdates = hasUpdater();
 const { openSetup } = useNavigation();
 const { settings, updateSettings } = useSettings();
 const { state, check, install, cancel } = useUpdates();
@@ -70,7 +72,7 @@ const action = computed<Action>(() => {
         </span>
       </SettingsField>
 
-      <SettingsField>
+      <SettingsField v-if="selfUpdates">
         <template #label>Software update</template>
         <template #description>{{ updateStatus }}</template>
         <button
@@ -87,7 +89,7 @@ const action = computed<Action>(() => {
         </template>
       </SettingsField>
 
-      <SettingsField>
+      <SettingsField v-if="selfUpdates">
         <template #label>Check for updates</template>
         <Switch v-model="checkForUpdates" />
       </SettingsField>

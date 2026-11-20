@@ -80,26 +80,38 @@ test("a short, long or empty recovery code is refused", async () => {
   expect(await parseRecoveryCode(code + "-AAAA")).toBeNull();
 });
 
-test("the pairing link carries the key and the addresses", () => {
+test("the pairing link carries a one-time key and the addresses, never the vault's", () => {
   const key = randomBytes(32);
   const link = buildPairingLink(key, ["192.168.1.20:47823", "10.0.0.5:47824"]);
-  expect(link).toStartWith("teneo://pair?v=1&k=");
+  expect(link).toStartWith("teneo://pair?v=2&p=");
   expect(parsePairingLink(link)).toEqual({
-    vaultKey: key,
+    kind: "pairing",
+    pairingKey: key,
     addresses: ["192.168.1.20:47823", "10.0.0.5:47824"],
   });
   expect(parsePairingLink(buildPairingLink(key, []))).toEqual({
-    vaultKey: key,
+    kind: "pairing",
+    pairingKey: key,
     addresses: [],
+  });
+});
+
+test("an older Mac's link, with the vault key in it, still reads", () => {
+  const key = randomBytes(32);
+  const link = `teneo://pair?v=1&k=${buildPairingLink(key, []).split("p=")[1]!.split("&")[0]}&a=192.168.1.20:47823`;
+  expect(parsePairingLink(link)).toEqual({
+    kind: "vault",
+    vaultKey: key,
+    addresses: ["192.168.1.20:47823"],
   });
 });
 
 test("a pairing link of another version, or a damaged one, is refused", () => {
   const key = randomBytes(32);
   const link = buildPairingLink(key, ["192.168.1.20:47823"]);
-  expect(parsePairingLink(link.replace("v=1", "v=2"))).toBeNull();
+  expect(parsePairingLink(link.replace("v=2", "v=3"))).toBeNull();
   expect(parsePairingLink(link.replace("teneo://", "https://"))).toBeNull();
-  expect(parsePairingLink(link.replace(/k=[^&]+/, "k=SHORT"))).toBeNull();
+  expect(parsePairingLink(link.replace(/p=[^&]+/, "p=SHORT"))).toBeNull();
   expect(
     parsePairingLink(link.replace("192.168.1.20:47823", "not an address")),
   ).toBeNull();
@@ -111,7 +123,8 @@ test("each label derives its own key, the same way every time", async () => {
   const keys = await deriveVaultKeys(vault);
   expect(await deriveVaultKeys(vault)).toEqual(keys);
   expect(keys.authKey).not.toEqual(keys.dataKey);
-  expect(keys.tag).toMatch(/^[0-9a-f]{16}$/);
+  // the discovery key: 32 bytes, never sent (discovery-record.ts)
+  expect(keys.tag).toMatch(/^[0-9a-f]{64}$/);
   const other = await deriveVaultKeys(randomBytes(32));
   expect(other.tag).not.toBe(keys.tag);
   expect(other.authKey).not.toEqual(keys.authKey);

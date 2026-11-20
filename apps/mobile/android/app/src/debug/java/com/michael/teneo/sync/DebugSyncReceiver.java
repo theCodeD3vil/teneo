@@ -16,6 +16,8 @@ import android.util.Log;
  *     --es pair "<recovery code or teneo://pair link>"
  *   ... --ez unpair true     turn sync off and forget the key
  *   ... --es copy "text"     a copy made on this phone, to see it reach the others
+ *   ... --es dialAddress 10.0.2.2:47824   dial that address once, for
+ *                            emulators, which can't see Bonjour across their networks
  *   ... --ez dial false      from the next start of the page: only listen and
  *                            announce, never dial
  *   ... --ez crashPage true  kill the web views' process, as the system would
@@ -31,6 +33,6 @@ public final class DebugSyncReceiver extends BroadcastReceiver {
             controller.debugPair(code);
         }
         if (intent.getBooleanExtra("unpair", false)) controller.unpair();
-        if (intent.hasExtra("copy") || intent.hasExtra("dial") || intent.hasExtra("crashPage")) controller.debugCommand(intent);
+        if (intent.hasExtra("copy") || intent.hasExtra("dialAddress") || intent.hasExtra("dial") || intent.hasExtra("crashPage")) controller.debugCommand(intent);
     }
 }

@@ -314,6 +314,21 @@ describe("waiting after a failure", () => {
     expect(harness.log.connects).toHaveLength(dials);
   });
 
+  test("a dial closed at once because both devices dialed is no failure", async () => {
+    const harness = setup();
+    await harness.transport.start();
+    harness.transport.found(mac());
+    // Five times the Mac's own dial wins: the engine keeps it and closes
+    // this one. Counted as failures, the wait would be 32 seconds by now
+    for (let round = 1; round <= 5; round++) {
+      harness.peers.push({ deviceId: macId });
+      await dialLasting(harness, round, 100, null);
+      harness.peers.length = 0;
+      harness.timers.advance(5000);
+    }
+    expect(harness.log.connects).toHaveLength(6);
+  });
+
   test("a wrong key, version or protocol is a failure however long it lasted", async () => {
     for (const code of ["auth", "version", "protocol"] as SyncErrorCode[]) {
       const harness = setup();

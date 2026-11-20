@@ -6,7 +6,8 @@
     "./types/*": "./src/types/*.ts",
     "./detection/*": "./src/detection/*.ts",
     "./links/*": "./src/links/*.ts",
-    "./time/*": "./src/time/*.ts"
+    "./time/*": "./src/time/*.ts",
+    "./privacy/*": "./src/privacy/*.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

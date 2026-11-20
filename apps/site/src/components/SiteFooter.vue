@@ -18,6 +18,9 @@ const linkClass =
         </a>
       </p>
       <p>
+        <a href="/privacy.html" :class="linkClass">Privacy</a>
+      </p>
+      <p>
         Photo by
         <a
           href="https://unsplash.com/@enginakyurt?utm_source=unsplash&amp;utm_medium=referral&amp;utm_content=creditCopyText"

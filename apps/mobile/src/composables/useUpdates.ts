@@ -12,6 +12,15 @@ export function provideUpdater(instance: Updater): void {
   instance.onChange((next) => {
     state.value = next;
   });
+  // back from Android's settings or its installer (Updater.resumed)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void instance.resumed();
+  });
+}
+
+/** Whether the app updates itself. Google Play's build doesn't: Play does. */
+export function hasUpdater(): boolean {
+  return updater !== null;
 }
 
 function requireUpdater(): Updater {

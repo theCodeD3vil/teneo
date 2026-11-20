@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
+import { appSignatureProblems } from "./app-signature.ts";
 import { buildManifest } from "./release-manifest.ts";
 
 const option = (name: string) => {
@@ -52,6 +53,13 @@ for (const arch of ["arm64", "x86_64"] as const) {
     entry.endsWith(".dmg"),
   )) {
     renameSync(join("dist", file), join(out, file));
+  }
+  // the hardened runtime is what keeps other software out of a self-signed app
+  const problems = appSignatureProblems(join("dist", `${title}.app`));
+  if (problems.length > 0) {
+    throw new Error(
+      `the ${arch} app's signature is wrong:\n  - ${problems.join("\n  - ")}`,
+    );
   }
   const zip = `${name}-${version}-macos-${arch}.zip`;
   if (

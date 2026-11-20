@@ -1,8 +1,12 @@
 package com.michael.teneo.capture;
 
+import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.Process;
+import android.system.ErrnoException;
+import android.system.Os;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
@@ -75,7 +79,8 @@ public final class Capture {
             if (copied == null || copied.getItemCount() == 0) return;
             store.rememberSeenClip(copiedAt);
             Uri image = copied.getItemAt(0).getUri();
-            // an image Teneo itself put there is in the history already
+            // an image Teneo itself put there is in the history already, and
+            // copyToTemp reads no other address of Teneo's either
             if (image == null || ClipboardWriter.imageAuthority(context).equals(image.getAuthority())) return;
             File temp = copyToTemp(context, image);
             if (temp != null) saveImage(context, store, temp, CaptureRules.dateCopied(copiedAt, System.currentTimeMillis()));
@@ -93,7 +98,14 @@ public final class Capture {
         boolean isSameUntimedClip = CaptureRules.isSameUntimedClip(copiedAt, store.isSeenClipText(text));
         store.rememberSeenClipText(text);
         if (isSameUntimedClip) return;
-        if (CaptureRules.isOwnWrite(store.isWrittenClip(text), store.writtenClipTime(), copiedAt)) return;
+        if (CaptureRules.isOwnWrite(store.isWrittenClip(text), store.writtenClipTime(), copiedAt)) {
+            // Its echo, read once. Where clips have no time, the text is all
+            // there is to go on: kept longer, the mark would also swallow the
+            // user's own copy of that text later on. Read again unchanged, the
+            // clip is still told apart as the one seen (isSameUntimedClip)
+            store.forgetWrittenClip();
+            return;
+        }
         // another clip is on the clipboard now, so what Teneo wrote is gone
         // from it: the same text copied later is the user's own copy
         store.forgetWrittenClip();
@@ -102,15 +114,26 @@ public final class Capture {
 
     /**
      * Copy what a clip or a share hands over into a file of Teneo's own, while
-     * Teneo may still read it. Null when it can't be read or is larger than an
-     * image may be.
+     * Teneo may still read it. Null when it can't be read, is larger than an
+     * image may be, or isn't another app's to give: ShareActivity takes
+     * intents from any app, and Teneo opens what they name with its own
+     * rights (CaptureRules.isOtherAppsContent).
      */
     public static File copyToTemp(Context context, Uri image) {
+        if (!CaptureRules.isOtherAppsContent(image.getScheme(), image.getAuthority(), context.getPackageName())) {
+            Log.w(TAG, "Refused an image that isn't another app's to share: " + image.getScheme() + "://" + image.getAuthority());
+            return null;
+        }
         File temp = null;
-        try {
+        try (AssetFileDescriptor file = context.getContentResolver().openAssetFileDescriptor(image, "r")) {
+            if (file == null) throw new IOException("Nothing to read");
+            // a provider may hand back one of Teneo's own files, through a
+            // link it made: Teneo owns it, and no other app gives it out
+            if (Os.fstat(file.getParcelFileDescriptor().getFileDescriptor()).st_uid == Process.myUid()) {
+                throw new IOException("That file is Teneo's own");
+            }
             temp = File.createTempFile("capture", ".image", context.getCacheDir());
-            try (InputStream in = context.getContentResolver().openInputStream(image); OutputStream out = new FileOutputStream(temp)) {
-                if (in == null) throw new IOException("Nothing to read");
+            try (InputStream in = file.createInputStream(); OutputStream out = new FileOutputStream(temp)) {
                 byte[] chunk = new byte[64 * 1024];
                 long copied = 0;
                 for (int read = in.read(chunk); read >= 0; read = in.read(chunk)) {
@@ -120,7 +143,7 @@ public final class Capture {
                 }
             }
             return temp;
-        } catch (IOException | RuntimeException error) {
+        } catch (IOException | ErrnoException | RuntimeException error) {
             Log.w(TAG, "Couldn't read the image", error);
             if (temp != null) temp.delete();
             return null;
@@ -141,9 +164,17 @@ public final class Capture {
             BitmapFactory.decodeFile(temp.getPath(), bounds);
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false;
             File image = temp;
+            int width = bounds.outWidth;
+            int height = bounds.outHeight;
             if (ImageFiles.typeOf(ImageFiles.head(temp)) == null) {
-                Bitmap bitmap = BitmapFactory.decodeFile(temp.getPath());
+                // a camera's HEIC is 8000x6000 or so: whole, 192 MB of memory.
+                // Drawn again at most MAX_REDRAWN_SIDE wide or high
+                BitmapFactory.Options sampled = new BitmapFactory.Options();
+                sampled.inSampleSize = CaptureRules.sampleSize(width, height);
+                Bitmap bitmap = BitmapFactory.decodeFile(temp.getPath(), sampled);
                 if (bitmap == null) return false;
+                width = bitmap.getWidth();
+                height = bitmap.getHeight();
                 redrawn = File.createTempFile("capture", ".redrawn", context.getCacheDir());
                 try (OutputStream out = new FileOutputStream(redrawn)) {
                     // a picture with see-through parts keeps them
@@ -156,7 +187,7 @@ public final class Capture {
                 }
                 image = redrawn;
             }
-            return store.saveImage(image, bounds.outWidth, bounds.outHeight, deviceName(context), dateCopied) != null;
+            return store.saveImage(image, width, height, deviceName(context), dateCopied) != null;
         } catch (IOException | RuntimeException | OutOfMemoryError error) {
             Log.w(TAG, "Couldn't save the image", error);
             return false;

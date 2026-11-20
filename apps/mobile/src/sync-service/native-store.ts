@@ -71,9 +71,6 @@ const isUnpinned = (row: WireRow): boolean =>
 const isNewer = (a: WireRow, b: WireRow): boolean =>
   a.dateCopied !== b.dateCopied ? a.dateCopied > b.dateCopied : a.id > b.id;
 
-/** What the history changed under a transaction that was reading */
-class Stale extends Error {}
-
 export class NativeSyncStore implements SyncStore {
   private readonly history: HistoryBridge;
   private readonly deviceId: string;
@@ -184,12 +181,8 @@ export class NativeSyncStore implements SyncStore {
   ): Promise<T> {
     for (let attempt = 1; ; attempt++) {
       const tx = new NativeTransaction(this.history, this.deviceId);
-      try {
-        const result = await work(tx);
-        if (tx.save()) return result;
-      } catch (error) {
-        if (!(error instanceof Stale)) throw error;
-      }
+      const result = await work(tx);
+      if (tx.save()) return result;
       if (attempt >= maxAttempts) {
         throw new Error("The history kept changing, so a change was not saved");
       }
@@ -208,28 +201,41 @@ export class NativeSyncStore implements SyncStore {
 class NativeTransaction implements SyncTransaction {
   private readonly history: HistoryBridge;
   private readonly deviceId: string;
-  /** The highest change number at the first read */
-  private head: number | null = null;
+  /** The rows read from the database, by id; null for none. The batch is
+   *  saved only if they are still as read (WireBatch.reads). */
+  private readonly read = new Map<string, WireRow | null>();
   /** The rows as they will be written, by id: what the transaction reads sees them */
   private readonly written = new Map<string, WireRow>();
   private readonly peers = new Map<string, PeerPatch>();
-  /** The newest unpinned row in the database that isn't written here */
-  private storedNewest: { row: WireRow | null } | null = null;
+  /** The newest unpinned row in the database that isn't written here, and
+   *  the ids that were left out when asking */
+  private storedNewest: { row: WireRow | null; skipped: string[] } | null =
+    null;
 
   constructor(history: HistoryBridge, deviceId: string) {
     this.history = history;
     this.deviceId = deviceId;
   }
 
-  /** The row native code answered, after checking nothing was written since the first read */
-  private seen<R extends { head: number }>(answer: R): R {
-    this.head ??= answer.head;
-    if (answer.head !== this.head) throw new Stale();
-    return answer;
+  /** A batch's rows, in one call across the bridge rather than one each */
+  async prefetch(ids: string[]): Promise<void> {
+    const wanted = [
+      ...new Set(
+        ids.filter((id) => !this.read.has(id) && !this.written.has(id)),
+      ),
+    ];
+    if (wanted.length === 0) return;
+    const found = new Map(
+      this.history.rows(wanted).map((row) => [row.id, row]),
+    );
+    for (const id of wanted) this.read.set(id, found.get(id) ?? null);
   }
 
   private rowOf(id: string): WireRow | null {
-    return this.written.get(id) ?? this.seen(this.history.row(id)).row;
+    const written = this.written.get(id);
+    if (written) return written;
+    if (!this.read.has(id)) this.read.set(id, this.history.row(id).row);
+    return this.read.get(id) ?? null;
   }
 
   async get(id: string): Promise<ItemRecord | null> {
@@ -310,9 +316,10 @@ class NativeTransaction implements SyncTransaction {
       !this.storedNewest ||
       (this.storedNewest.row && this.written.has(this.storedNewest.row.id))
     ) {
+      const skipped = [...this.written.keys()];
       this.storedNewest = {
-        row: this.seen(this.history.newestUnpinned([...this.written.keys()]))
-          .row,
+        row: this.history.newestUnpinned(skipped).row,
+        skipped,
       };
     }
     const stored = this.storedNewest.row;
@@ -334,9 +341,26 @@ class NativeTransaction implements SyncTransaction {
   /** Save what was written. False when the history changed since it was read. */
   save(): boolean {
     if (this.written.size === 0 && this.peers.size === 0) return true;
+    // a cursor doesn't depend on what was read
+    const depends = this.written.size > 0;
+    const newest = this.storedNewest;
     const batch: WireBatch = {
-      // a cursor doesn't depend on what was read
-      expectedHead: this.written.size > 0 ? this.head : null,
+      reads: depends
+        ? [...this.read].map(([id, row]) => ({
+            id,
+            syncSeq: row?.syncSeq ?? null,
+          }))
+        : [],
+      newest:
+        depends && newest
+          ? {
+              skipped: newest.skipped,
+              row: newest.row && {
+                id: newest.row.id,
+                syncSeq: newest.row.syncSeq,
+              },
+            }
+          : null,
       puts: [...this.written.values()],
       peers: Object.fromEntries(this.peers),
     };

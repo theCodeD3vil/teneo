@@ -110,11 +110,13 @@ export class LinkPreviews {
    *  tries again later instead of remembering that there's no preview. */
   async icon(url: string): Promise<string | null> {
     const page = publicPage(url);
-    if (!page) return null;
+    // a link carrying a key or a one-time token may be a tracker made for
+    // this one copy: its site isn't contacted at all, not even for an icon
+    if (!page || !canOpenPage(page)) return null;
     const siteIcon = await this.cached(`site-${page.origin}`, () =>
       this.findSiteIcon(page.origin),
     );
-    if (siteIcon || !canOpenPage(page)) return siteIcon;
+    if (siteIcon) return siteIcon;
     return this.cached(`page-${page.href}`, () =>
       this.findPageImage(page.href, previewSize),
     );
@@ -125,9 +127,9 @@ export class LinkPreviews {
    *  then the site's icon. Null when there's none. */
   async image(url: string): Promise<LinkPreviewImage | null> {
     const page = publicPage(url);
-    if (!page) return null;
+    if (!page || !canOpenPage(page)) return null;
     const isHomePage = page.href === new URL(page.origin).href;
-    if (!isHomePage && canOpenPage(page)) {
+    if (!isHomePage) {
       const image = await this.cached(`page-large-${page.href}`, () =>
         this.findPageImage(page.href, largePreviewSize),
       );

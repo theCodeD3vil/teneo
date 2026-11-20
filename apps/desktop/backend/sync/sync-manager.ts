@@ -40,6 +40,10 @@ export interface SyncManagerDeps {
 
 // a dev run keeps its own vault key, so it never reads or replaces the real one
 const vaultKeyName = () => devName("sync-vault-key");
+/** How long a pairing code's one-time key is taken */
+const pairingLifetimeMs = 10 * 60 * 1000;
+/** A code with less time than this left is replaced when shown again */
+const pairingRenewMs = 2 * 60 * 1000;
 const vaultKeyLength = 32;
 
 export class SyncManager {
@@ -47,6 +51,9 @@ export class SyncManager {
   private readonly deps: SyncManagerDeps;
   private service: SyncService | null = null;
   private vaultKey: Bytes | null = null;
+  /** The one-time key the pairing code on show carries, and when it stops
+   *  being taken. A phone that proves it gets the vault key, once. */
+  private pairing: { key: Bytes; expiresAt: number } | null = null;
   private problem: string | null = null;
   private deviceName: string | null = null;
   // changes run one at a time: a double click must not start two engines
@@ -160,9 +167,18 @@ export class SyncManager {
       service.port === null
         ? []
         : pairingAddresses(this.deps.networkAddresses(), service.port);
+    // A code shown again keeps its key while it has time left; one used or
+    // run out gets a new key, and the old code stops working
+    if (!this.pairing || this.pairing.expiresAt - Date.now() < pairingRenewMs) {
+      this.pairing = {
+        key: randomBytes(32),
+        expiresAt: Date.now() + pairingLifetimeMs,
+      };
+    }
     return {
       recoveryCode: await formatRecoveryCode(vaultKey),
-      link: buildPairingLink(vaultKey, addresses),
+      link: buildPairingLink(this.pairing.key, addresses),
+      expiresAt: this.pairing.expiresAt,
     };
   }
 
@@ -223,6 +239,14 @@ export class SyncManager {
       syncSecrets: () => getSettings().syncSecrets,
       onPeersChanged: () => void this.publish(),
       onError: (error) => this.deps.log("sync:", error),
+      pairingKey: () =>
+        this.pairing && Date.now() < this.pairing.expiresAt
+          ? this.pairing.key
+          : null,
+      // spent: a photo of the code is of no use from here on
+      onPaired: () => {
+        this.pairing = null;
+      },
     });
     this.vaultKey = key;
     this.problem =
@@ -235,6 +259,7 @@ export class SyncManager {
     const service = this.service;
     this.service = null;
     this.vaultKey = null;
+    this.pairing = null;
     await service?.stop();
   }
 

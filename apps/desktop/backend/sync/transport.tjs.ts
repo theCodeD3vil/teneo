@@ -59,6 +59,7 @@ interface Started {
 async function withTransport(
   isLocalAddress: ((address: string) => boolean) | undefined,
   body: (started: Started) => Promise<void>,
+  allowLoopback = true,
 ): Promise<void> {
   const { engine, attached } = stubEngine();
   const discovery = new StubDiscovery();
@@ -69,6 +70,7 @@ async function withTransport(
     knownPeers: async () => [],
     ports: [nextPort++],
     isLocalAddress,
+    allowLoopback,
   });
   await transport.start();
   try {
@@ -146,6 +148,38 @@ await test("a local address is let in, and a plain web request is told to upgrad
       "the engine to get the connection",
     );
   });
+});
+
+await test("a web page's request is turned away before it costs a try", async () => {
+  await withTransport(undefined, async ({ port, attached }) => {
+    const fromPage = await fetch(`http://127.0.0.1:${port}/`, {
+      headers: { origin: "https://tracker.example" },
+    });
+    same(fromPage.status, 403, "a request with a page's origin");
+    const withFetchHeaders = await fetch(`http://127.0.0.1:${port}/`, {
+      headers: { "sec-fetch-mode": "websocket" },
+    });
+    same(withFetchHeaders.status, 403, "a request a browser marked");
+    // the Mac's own WebSocket names the server as its origin, and gets in
+    same(
+      await opensWebSocket(`ws://127.0.0.1:${port}`),
+      true,
+      "a Teneo WebSocket opened",
+    );
+    await until(() => attached.length === 1, "the engine to get it");
+  });
+});
+
+await test("this Mac itself is refused unless a test or dev run allows it", async () => {
+  await withTransport(
+    undefined,
+    async ({ port, attached }) => {
+      const reply = await fetch(`http://127.0.0.1:${port}/`);
+      same(reply.status, 403, "a request from 127.0.0.1");
+      same(attached.length, 0, "connections handed to the engine");
+    },
+    false,
+  );
 });
 
 await test("a device is not dialed at an address the filter refuses", async () => {

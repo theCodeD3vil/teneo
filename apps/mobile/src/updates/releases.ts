@@ -15,7 +15,12 @@ export interface Update {
   size: number;
   /** Hex, from GitHub's digest of the asset; null when GitHub has none */
   sha256: string | null;
+  /** The release's android-manifest.json, signed with Teneo's update key.
+   *  The app installs only the APK it names (SignedManifest.java). */
+  manifestUrl: string;
 }
+
+const manifestName = "android-manifest.json";
 
 export interface FindOptions {
   fetch?: typeof fetch;
@@ -111,14 +116,22 @@ export async function findUpdate(
   return null;
 }
 
+/** The release's APK and its signed manifest; null without either: a release
+ *  nobody signed is not an update */
 function findApk(
   release: Release,
   version: string,
-): Pick<Update, "apkUrl" | "size" | "sha256"> | null {
+): Pick<Update, "apkUrl" | "size" | "sha256" | "manifestUrl"> | null {
   const assets = Array.isArray(release.assets)
     ? (release.assets as ReleaseAsset[])
     : [];
   const prefix = `https://github.com/${repository}/releases/download/${tagPrefix}${version}/`;
+  const manifestUrl = `${prefix}${manifestName}`;
+  const hasManifest = assets.some(
+    (asset) =>
+      asset.name === manifestName && asset.browser_download_url === manifestUrl,
+  );
+  if (!hasManifest) return null;
   for (const asset of assets) {
     const name = typeof asset.name === "string" ? asset.name : "";
     const url =
@@ -133,7 +146,12 @@ function findApk(
       typeof asset.digest === "string"
         ? /^sha256:([0-9a-f]{64})$/i.exec(asset.digest)?.[1]
         : undefined;
-    return { apkUrl: url, size, sha256: digest?.toLowerCase() ?? null };
+    return {
+      apkUrl: url,
+      size,
+      sha256: digest?.toLowerCase() ?? null,
+      manifestUrl,
+    };
   }
   return null;
 }

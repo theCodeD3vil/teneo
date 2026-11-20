@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The build released on GitHub only: it updates itself from there, which
+     Google Play doesn't allow of the build it distributes -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- looks for a newer release once a day and says so in a
+             notification (updates/UpdateCheckJob.java): only Android's job
+             scheduler may run it -->
+        <service
+            android:name=".updates.UpdateCheckJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+    </application>
+
+    <!-- installs an update downloaded in Settings › About; the user allows
+         it in "Install unknown apps" and confirms each install -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>

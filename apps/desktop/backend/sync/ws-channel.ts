@@ -1,4 +1,4 @@
-import type { Channel } from "@teneo/sync";
+import { type Channel, parseBye } from "@teneo/sync";
 
 /** What a WebSocket end can do, whichever side of the connection it is. */
 export interface SocketEnd {
@@ -10,6 +10,9 @@ export interface SocketEnd {
  *  `deliver` and `ended`. A message that arrives before the engine has set its
  *  handler waits for it: the other device's hello comes straight away, and the
  *  engine is still starting up. */
+/** Messages that may wait for the engine to start listening */
+const maxWaiting = 8;
+
 export class SocketChannel implements Channel {
   readonly initiator: boolean;
   readonly remoteAddress: string | undefined;
@@ -57,6 +60,18 @@ export class SocketChannel implements Channel {
 
   deliver(message: string): void {
     if (this.ended_) return;
+    // the other side says why it is closing (byeMessage), and then closes
+    const bye = parseBye(message);
+    if (bye !== null) {
+      this.ended(bye);
+      return;
+    }
+    // Before the engine listens, a peer has sent its hello and nothing else:
+    // a pile of messages is one flooding the connection, which ends
+    if (!this.messageHandler && this.waiting.length >= maxWaiting) {
+      this.close("Too many messages before the handshake");
+      return;
+    }
     this.waiting.push(message);
     this.drain();
   }

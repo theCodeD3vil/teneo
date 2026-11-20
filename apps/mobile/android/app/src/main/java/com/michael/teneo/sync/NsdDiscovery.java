@@ -17,15 +17,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
-import java.util.regex.Pattern;
 
 /**
  * Bonjour for the phone, through Android's NsdManager: announces this device
  * and looks for the others of its vault, the way the Mac does with `dns-sd`
- * (discovery-macos.ts). The service type is _teneo-sync._tcp, the instance is
- * named teneo-<first 12 hex digits of the device id>, and its TXT records are
- * vt=<vault tag> and dev=<device id>. A service with another tag is another
- * vault's and is ignored; so is this device's own.
+ * (discovery-macos.ts). The service type is _teneo-sync._tcp; the instance
+ * name and TXT records are salted anew at every start (DiscoveryRecord), so
+ * they say nothing to anyone without the vault's key and differ on every
+ * network. A service another vault announced is ignored; so is this device's.
  *
  * Every callback is moved to the handler's thread, so none of the state
  * below needs a lock. `restart` is for when the network changed.
@@ -39,7 +38,6 @@ final class NsdDiscovery {
 
     private static final String TAG = "TeneoSync";
     private static final String SERVICE_TYPE = "_teneo-sync._tcp";
-    private static final Pattern DEVICE_ID = Pattern.compile("^[0-9a-f]{32}$");
 
     /** Browsing or announcing that ended by itself is started again after this */
     private static final long RETRY_MS = 5_000;
@@ -47,6 +45,11 @@ final class NsdDiscovery {
     private static final long RESOLVE_TIMEOUT_MS = 4_000;
     /** How long to wait for the old announcement to be withdrawn before a new one */
     private static final long WITHDRAW_MS = 1_500;
+    /** Android 13 and earlier can't call a resolve off: one that timed out may
+     *  still hold the one place in line, and the next fails "already active".
+     *  That one waits this long and goes again, this many times, at no attempt */
+    private static final long BUSY_RETRY_MS = 3_000;
+    private static final int MAX_BUSY = 6;
     /** Every instance in view is resolved again this often: a device that
      *  moved to another address or port without leaving is not found again
      *  by the browse, and one that could not be resolved gets another try */
@@ -72,6 +75,10 @@ final class NsdDiscovery {
     private final Map<String, NsdServiceInfo> inView = new HashMap<>();
     /** Where each device was last told to be, so only a move is told again */
     private final Map<String, String> told = new HashMap<>();
+    /** The device each instance name was found to be: names are salted */
+    private final Map<String, String> deviceOf = new HashMap<>();
+    /** This start's salt: a new one each start, so each network sees a new name */
+    private String salt = DiscoveryRecord.newSalt();
     private final ArrayDeque<Pending> resolveQueue = new ArrayDeque<>();
     private boolean resolving;
     /** Names with a resolve under way, first or refresh */
@@ -82,10 +89,17 @@ final class NsdDiscovery {
 
         final NsdServiceInfo info;
         final int attempt;
+        /** How often Android said a resolve was still going on: those cost no attempt */
+        final int busy;
 
         Pending(NsdServiceInfo info, int attempt) {
+            this(info, attempt, 0);
+        }
+
+        Pending(NsdServiceInfo info, int attempt, int busy) {
             this.info = info;
             this.attempt = attempt;
+            this.busy = busy;
         }
     }
 
@@ -130,6 +144,8 @@ final class NsdDiscovery {
         handled.clear();
         inView.clear();
         told.clear();
+        deviceOf.clear();
+        salt = DiscoveryRecord.newSalt();
         if (port > 0) announce(mine);
         browse(mine);
         handler.postDelayed(() -> refresh(mine), REFRESH_MS);
@@ -186,7 +202,7 @@ final class NsdDiscovery {
     // --- announcing
 
     private String instanceName() {
-        return "teneo-" + deviceId.substring(0, 12);
+        return "teneo-" + salt;
     }
 
     private void announce(int mine) {
@@ -194,8 +210,9 @@ final class NsdDiscovery {
         info.setServiceName(instanceName());
         info.setServiceType(SERVICE_TYPE);
         info.setPort(port);
-        info.setAttribute("vt", tag);
-        info.setAttribute("dev", deviceId);
+        for (Map.Entry<String, String> field : DiscoveryRecord.make(tag, deviceId, salt).txt.entrySet()) {
+            info.setAttribute(field.getKey(), field.getValue());
+        }
         NsdManager.RegistrationListener listener = new NsdManager.RegistrationListener() {
             @Override
             public void onServiceRegistered(NsdServiceInfo registered) {
@@ -266,7 +283,8 @@ final class NsdDiscovery {
                     inView.remove(name);
                     resolvingNow.remove(name);
                     // found again later, it is told again even at the same place
-                    told.keySet().removeIf(device -> name.startsWith("teneo-" + device.substring(0, 12)));
+                    String device = deviceOf.remove(name);
+                    if (device != null) told.remove(device);
                 });
             }
 
@@ -407,6 +425,21 @@ final class NsdDiscovery {
             public void onResolveFailed(NsdServiceInfo failed, int errorCode) {
                 handler.post(() -> {
                     if (done[0]) return;
+                    if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE && pending.busy < MAX_BUSY && generation == mine) {
+                        // an earlier resolve, timed out here, is still going on in Android
+                        done[0] = true;
+                        handler.postDelayed(
+                            () -> {
+                                // a restart since has its own line, and its own flag
+                                if (generation != mine) return;
+                                resolving = false;
+                                resolveQueue.addFirst(new Pending(found, attempt, pending.busy + 1));
+                                resolveNext(mine);
+                            },
+                            BUSY_RETRY_MS
+                        );
+                        return;
+                    }
                     next.run();
                     gaveUpOn(mine, found, attempt, "error " + errorCode);
                 });
@@ -464,9 +497,14 @@ final class NsdDiscovery {
      *  device, which are not ours and not to be tried again. */
     private boolean deliver(int mine, String name, Map<String, byte[]> attributes, List<String> found, int servicePort) {
         resolvingNow.remove(name);
-        String vaultTag = text(attributes.get("vt"));
-        String device = text(attributes.get("dev"));
-        if (!tag.equals(vaultTag) || device == null || !DEVICE_ID.matcher(device).matches() || device.equals(deviceId)) return true;
+        Map<String, String> txt = new HashMap<>();
+        for (String field : new String[] { "s", "vt", "dev" }) {
+            String value = text(attributes.get(field));
+            if (value != null) txt.put(field, value);
+        }
+        String device = DiscoveryRecord.read(tag, txt);
+        if (device == null || device.equals(deviceId)) return true;
+        deviceOf.put(name, device);
 
         List<String> addresses = new ArrayList<>();
         for (String address : found) {

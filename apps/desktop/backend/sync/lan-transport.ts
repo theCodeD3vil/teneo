@@ -6,10 +6,20 @@
 //     paired before, and the router (on a phone's hotspot, that is the phone)
 //   - a dropped connection is tried again, with a growing wait
 // What goes over a connection is the engine's business: this only makes them.
-import type { PeerRecord, SyncEngine, SyncError } from "@teneo/sync";
+import {
+  byeMessage,
+  type PeerRecord,
+  type SyncEngine,
+  type SyncError,
+} from "@teneo/sync";
 
+import { isFromWebPage } from "./browser-request";
 import type { DiscoveredDevice, Discovery } from "./discovery";
-import { isAtHost, isLocalNetworkAddress } from "./local-address";
+import {
+  isAtHost,
+  isLocalNetworkAddress,
+  isLoopbackAddress,
+} from "./local-address";
 import { syncPorts } from "./ports";
 import { SocketChannel } from "./ws-channel";
 
@@ -51,6 +61,9 @@ export interface LanTransportOptions {
   /** Which addresses may connect to us and be dialed: local networks only,
    *  unless a test needs another rule. */
   isLocalAddress?: (address: string) => boolean;
+  /** Take connections from this Mac itself (127.0.0.1, ::1): for tests and
+   *  dev runs only, as any app or web page here can connect from there. */
+  allowLoopback?: boolean;
   /** Something unexpected, never an ordinary refusal or disconnect. */
   onError?: (error: unknown) => void;
 }
@@ -78,7 +91,10 @@ export class LanTransport {
 
   constructor(options: LanTransportOptions) {
     this.options = options;
-    this.isLocal = options.isLocalAddress ?? isLocalNetworkAddress;
+    const isLocal = options.isLocalAddress ?? isLocalNetworkAddress;
+    this.isLocal = options.allowLoopback
+      ? isLocal
+      : (address) => isLocal(address) && !isLoopbackAddress(address);
   }
 
   /** The port this device listens on, or null when none of the five was free. */
@@ -147,7 +163,8 @@ export class LanTransport {
     server: Server,
     address: string,
   ): Response | undefined {
-    if (!this.isLocal(address)) {
+    // a web page, before anything else: it must not use up a device's tries
+    if (!this.isLocal(address) || isFromWebPage(request.headers)) {
       return new Response("Forbidden", { status: 403 });
     }
     if (this.isBlocked(address)) {
@@ -178,7 +195,12 @@ export class LanTransport {
       remoteAddress: data.address,
       socket: {
         send: (message) => ws.sendText(message),
-        close: (reason) => ws.close(1000, reason),
+        // txiki ends a server-side socket with no close frame, so the reason
+        // goes first as a message (byeMessage), with a moment to be sent
+        close: (reason) => {
+          if (reason) ws.sendText(byeMessage(reason));
+          setTimeout(() => ws.close(1000, reason), reason ? 100 : 0);
+        },
       },
     });
     data.channel = channel;
@@ -295,8 +317,12 @@ export class LanTransport {
     const failedHard =
       result.error !== null &&
       ["auth", "version", "protocol"].includes(result.error.code);
+    // Both devices dialed at once: the engine kept the other connection and
+    // closed this one at once. That is no failure (engine.ts prefersNew)
+    const duplicate = result.connected && !failedHard && this.connectedTo(key);
     const healthy =
-      result.connected && result.lastedMs >= healthyMs && !failedHard;
+      duplicate ||
+      (result.connected && result.lastedMs >= healthyMs && !failedHard);
     const failures = healthy ? 0 : (this.retry.get(key)?.failures ?? 0) + 1;
     const wait = healthy ? 1000 : Math.min(60_000, 1000 * 2 ** failures);
     this.retry.set(key, { failures, notBefore: Date.now() + wait });

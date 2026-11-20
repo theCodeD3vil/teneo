@@ -52,6 +52,8 @@ export class FakeHistory implements NativeHistory {
   /** Called after each call, to make the app change the history at that moment */
   beforeCommit: (() => void) | null = null;
   commitCalls = 0;
+  /** historyRows calls: a batch's rows come in one */
+  rowsCalls = 0;
 
   private seq = 0;
   private readonly clock: Hlc;
@@ -146,6 +148,11 @@ export class FakeHistory implements NativeHistory {
   }
 
   private newestUnpinned(skipped: string[]): WireRow | null {
+    return this.findNewestUnpinned(skipped);
+  }
+
+  /** The commit's own check, which counts as no question asked */
+  private findNewestUnpinned(skipped: string[]): WireRow | null {
     const candidates = [...this.rows.values()].filter(
       (row) =>
         row.deletedAt === null &&
@@ -204,6 +211,16 @@ export class FakeHistory implements NativeHistory {
     return ok({ row: this.read(this.rows.get(id)), head: this.seq });
   }
 
+  historyRows(ids: string): string {
+    this.rowsCalls += 1;
+    return ok(
+      (JSON.parse(ids) as string[]).flatMap((id) => {
+        const row = this.read(this.rows.get(id));
+        return row ? [row] : [];
+      }),
+    );
+  }
+
   historyNewestUnpinned(skipped: string): string {
     const row = this.newestUnpinned(JSON.parse(skipped) as string[]);
     return ok({ row: this.read(row), head: this.seq });
@@ -224,9 +241,23 @@ export class FakeHistory implements NativeHistory {
     this.commitCalls += 1;
     this.beforeCommit?.();
     const batch = JSON.parse(text) as WireBatch;
-    if (batch.expectedHead !== null && batch.expectedHead !== this.seq) {
-      return ok(false);
-    }
+    // as HistoryStore.syncApply: every row read is as it was read
+    const isAsRead = (
+      read: { id: string; syncSeq: number | null } | null,
+      now: WireRow | null,
+    ) =>
+      (read?.id ?? null) === (now?.id ?? null) &&
+      (read?.syncSeq ?? null) === (now?.syncSeq ?? null);
+    const changed =
+      batch.reads.some(
+        (read) => (this.rows.get(read.id)?.syncSeq ?? null) !== read.syncSeq,
+      ) ||
+      (batch.newest !== null &&
+        !isAsRead(
+          batch.newest.row,
+          this.findNewestUnpinned(batch.newest.skipped),
+        ));
+    if (changed) return ok(false);
     // all or nothing: a refused patch leaves everything as it was
     for (const patch of Object.values(batch.peers)) {
       for (const field of Object.keys(patch)) {

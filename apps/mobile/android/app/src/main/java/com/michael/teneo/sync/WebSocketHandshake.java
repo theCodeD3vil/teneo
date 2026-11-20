@@ -46,7 +46,9 @@ final class WebSocketHandshake {
         /** an ordinary web request: told to upgrade (426) */
         NOT_AN_UPGRADE,
         /** an upgrade that is wrong in a way a proper client would not be (400) */
-        BAD
+        BAD,
+        /** a web page's: turned away (403), without counting as a failed try */
+        FROM_WEB_PAGE
     }
 
     /** Sec-WebSocket-Accept for a Sec-WebSocket-Key */
@@ -112,10 +114,37 @@ final class WebSocketHandshake {
 
     // --- server
 
+    /**
+     * The host of a Host header without its port: a name or IPv4 address
+     * loses ":port", a bracketed IPv6 address "]:port", a bare one nothing.
+     */
+    static String hostWithoutPort(String host) {
+        if (host.startsWith("[")) return host.substring(0, host.indexOf(']') + 1);
+        return host.split(":", -1).length == 2 ? host.substring(0, host.indexOf(':')) : host;
+    }
+
+    /**
+     * A request a web page made, in a browser on this phone or the network:
+     * browsers add Sec-Fetch-* headers and the page's Origin to a WebSocket,
+     * and no page can take either off. Teneo's peers send neither, except
+     * the Mac's WebSocket (txiki), which names the address it connects to.
+     * The same rule as the Mac's backend/sync/browser-request.ts.
+     */
+    static boolean isFromWebPage(Map<String, String> headers) {
+        for (String name : headers.keySet()) {
+            if (name.startsWith("sec-fetch-")) return true;
+        }
+        String origin = headers.get("origin");
+        if (origin == null) return false;
+        String host = hostWithoutPort(headers.getOrDefault("host", ""));
+        return host.isEmpty() || !origin.toLowerCase(Locale.ROOT).equals("http://" + host.toLowerCase(Locale.ROOT));
+    }
+
     static Verdict judge(Head request) {
         String[] parts = request.firstLine.split(" ");
         // "METHOD target HTTP/x.y": anything else is not a web request at all
         if (parts.length != 3 || !parts[2].startsWith("HTTP/")) return Verdict.BAD;
+        if (isFromWebPage(request.headers)) return Verdict.FROM_WEB_PAGE;
         boolean isGet = parts.length == 3 && parts[0].equals("GET") && parts[2].equals("HTTP/1.1");
         String upgrade = request.headers.getOrDefault("upgrade", "").toLowerCase(Locale.ROOT);
         boolean asksToUpgrade = hasToken(request.headers.get("connection"), "upgrade") && upgrade.equals("websocket");

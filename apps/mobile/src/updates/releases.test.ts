@@ -15,6 +15,16 @@ function asset(version: string, extra: Record<string, unknown> = {}) {
   };
 }
 
+/** The release's signed android-manifest.json */
+function manifest(version: string) {
+  return {
+    name: "android-manifest.json",
+    size: 700,
+    digest: `sha256:${"cd".repeat(32)}`,
+    browser_download_url: `https://github.com/theCodeD3vil/teneo/releases/download/android-v${version}/android-manifest.json`,
+  };
+}
+
 /** GitHub with these android-v tags, and releases for some of them */
 function github(
   tags: string[],
@@ -50,7 +60,7 @@ function github(
 describe("findUpdate", () => {
   test("finds the newest full release for a full-release install", async () => {
     const { fetch, requested } = github(["0.1.0", "0.2.0", "0.3.0-beta.1"], {
-      "0.2.0": { draft: false, assets: [asset("0.2.0")] },
+      "0.2.0": { draft: false, assets: [manifest("0.2.0"), asset("0.2.0")] },
     });
     expect(await findUpdate("0.1.0", { fetch })).toEqual({
       version: "0.2.0",
@@ -58,6 +68,7 @@ describe("findUpdate", () => {
       apkUrl: asset("0.2.0").browser_download_url,
       size: 9_000_000,
       sha256: digest,
+      manifestUrl: manifest("0.2.0").browser_download_url,
     });
     expect(requested).toEqual([
       "/git/matching-refs/tags/android-v",
@@ -84,7 +95,7 @@ describe("findUpdate", () => {
         ]);
       }
       if (url === `${api}/releases/tags/android-v1.0.0`) {
-        return Response.json({ assets: [asset("1.0.0")] });
+        return Response.json({ assets: [manifest("1.0.0"), asset("1.0.0")] });
       }
       return new Response("", { status: 404 });
     }) as typeof globalThis.fetch;
@@ -110,8 +121,10 @@ describe("findUpdate", () => {
 
   test("offers a beta install only betas", async () => {
     const releases = {
-      "0.2.0-beta.2": { assets: [asset("0.2.0-beta.2")] },
-      "0.2.0": { assets: [asset("0.2.0")] },
+      "0.2.0-beta.2": {
+        assets: [manifest("0.2.0-beta.2"), asset("0.2.0-beta.2")],
+      },
+      "0.2.0": { assets: [manifest("0.2.0"), asset("0.2.0")] },
     };
     const beta = github(["0.2.0-beta.1", "0.2.0-beta.2"], releases);
     expect((await findUpdate("0.2.0-beta.1", beta))?.version).toBe(
@@ -137,17 +150,17 @@ describe("findUpdate", () => {
 
   test("passes over a tag with no finished release", async () => {
     const { fetch } = github(["0.2.0", "0.3.0", "0.4.0"], {
-      "0.4.0": { draft: true, assets: [asset("0.4.0")] },
+      "0.4.0": { draft: true, assets: [manifest("0.4.0"), asset("0.4.0")] },
       // the workflow failed before the APK was uploaded
       "0.3.0": { assets: [] },
-      "0.2.0": { assets: [asset("0.2.0")] },
+      "0.2.0": { assets: [manifest("0.2.0"), asset("0.2.0")] },
     });
     expect((await findUpdate("0.1.0", { fetch }))?.version).toBe("0.2.0");
   });
 
   test("looks at three releases at most", async () => {
     const { fetch, requested } = github(["0.2.0", "0.3.0", "0.4.0", "0.5.0"], {
-      "0.2.0": { assets: [asset("0.2.0")] },
+      "0.2.0": { assets: [manifest("0.2.0"), asset("0.2.0")] },
     });
     expect(await findUpdate("0.1.0", { fetch })).toBeNull();
     expect(requested).toHaveLength(4);
@@ -163,6 +176,7 @@ describe("findUpdate", () => {
     const { fetch } = github(["0.2.0"], {
       "0.2.0": {
         assets: [
+          manifest("0.2.0"),
           { ...asset("0.2.0"), name: "Teneo-0.2.0.zip" },
           elsewhere,
           otherTag,
@@ -173,9 +187,27 @@ describe("findUpdate", () => {
     expect(await findUpdate("0.1.0", { fetch })).toBeNull();
   });
 
+  test("passes over a release with no signed manifest, or one from elsewhere", async () => {
+    const { fetch } = github(["0.3.0", "0.2.0"], {
+      "0.3.0": { assets: [asset("0.3.0")] },
+      "0.2.0": {
+        assets: [
+          {
+            ...manifest("0.2.0"),
+            browser_download_url: manifest("0.1.0").browser_download_url,
+          },
+          asset("0.2.0"),
+        ],
+      },
+    });
+    expect(await findUpdate("0.1.0", { fetch })).toBeNull();
+  });
+
   test("leaves the digest out when GitHub has none", async () => {
     const { fetch } = github(["0.2.0"], {
-      "0.2.0": { assets: [asset("0.2.0", { digest: null })] },
+      "0.2.0": {
+        assets: [manifest("0.2.0"), asset("0.2.0", { digest: null })],
+      },
     });
     expect((await findUpdate("0.1.0", { fetch }))?.sha256).toBeNull();
   });

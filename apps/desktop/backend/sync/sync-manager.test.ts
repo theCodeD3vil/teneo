@@ -9,6 +9,7 @@ import {
   type PeerRecord,
   formatRecoveryCode,
   fromBase64,
+  parsePairingLink,
   parseRecoveryCode,
   randomBytes,
   toBase64,
@@ -295,15 +296,29 @@ test("with sync off, the secrets setting is only remembered", async () => {
   expect(calls.restamped).toBe(0);
 });
 
-test("pairing info carries the vault key as a recovery code and a link", async () => {
-  const { manager, secrets } = await setup();
+test("pairing info carries the vault key as a recovery code, and a link with a one-time key", async () => {
+  const { manager, secrets, calls } = await setup();
   await manager.turnOn();
   const info = await manager.pairingInfo();
-  expect(await parseRecoveryCode(info.recoveryCode)).toEqual(
-    savedKey(secrets)!,
-  );
-  expect(info.link).toStartWith("teneo://pair?v=1&k=");
+  const vaultKey = savedKey(secrets)!;
+  expect(await parseRecoveryCode(info.recoveryCode)).toEqual(vaultKey);
+  expect(info.link).toStartWith("teneo://pair?v=2&p=");
   expect(info.link).toContain("a=192.168.1.20:47823");
+  const link = parsePairingLink(info.link);
+  expect(link?.kind).toBe("pairing");
+  // the code holds no part of the vault key
+  expect(link?.kind === "pairing" && link.pairingKey).not.toEqual(vaultKey);
+  expect(info.expiresAt).toBeGreaterThan(Date.now());
+
+  // the engine takes that key until a phone uses it, then never again
+  const started = calls.started.at(-1)!;
+  expect(link?.kind === "pairing" && started.pairingKey?.()).toEqual(
+    link?.kind === "pairing" ? link.pairingKey : null,
+  );
+  expect((await manager.pairingInfo()).link).toBe(info.link);
+  started.onPaired?.();
+  expect(started.pairingKey?.()).toBeNull();
+  expect((await manager.pairingInfo()).link).not.toBe(info.link);
 });
 
 test("pairing info needs sync on", async () => {

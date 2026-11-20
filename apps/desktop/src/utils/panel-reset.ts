@@ -8,9 +8,20 @@ export function resetPanel(): void {
   window.dispatchEvent(new Event(resetPanelEvent));
 }
 
+// Whether the panel is up: null on any page but the panel's own (Settings,
+// Setup), which never hides this way
+let panelShown: boolean | null = null;
+
+/** The panel's page, hidden: what it shows needn't be kept fresh. */
+export function isPanelHidden(): boolean {
+  return panelShown === false;
+}
+
 /** Tells the page the panel was just hidden or shown: while it's hidden, what
- *  it cached for the list is let go of (see usePanelIdleCleanup). */
+ *  it cached for the list is let go of (see usePanelIdleCleanup), and history
+ *  changes wait for it to show (catchUpOnHistory). */
 export function notifyPanelVisibility(visible: boolean): void {
+  panelShown = visible;
   window.dispatchEvent(
     new CustomEvent(panelVisibilityEvent, { detail: { visible } }),
   );

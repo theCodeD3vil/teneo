@@ -6,9 +6,17 @@ name: Release Android
 # its own version (release.yml); a PR can bump either or both. A version with
 # a beta suffix, such as 0.1.0-beta.1, is published as a pre-release.
 #
-# When the PR bumps both, the APK is added to the Mac app's release as well,
-# so one release holds everything the PR shipped. The Android release is
-# still published: phones find their updates under its android-v tag.
+# When the PR bumps both, the APK is added to the Mac app's draft as well,
+# so one release holds everything the PR shipped. Phones still find their
+# updates under the android-v tag. release:publish waits for this workflow
+# before it publishes the Mac draft, which is locked once published.
+# CI builds the release as a DRAFT with a plain android-manifest.json naming
+# the APK's version, size and hash. Phones install only an APK that a
+# manifest signed with Teneo's update key names, and that key never leaves
+# the maintainer's Mac: `bun run release:publish` (in apps/desktop) checks
+# the draft, signs the manifest and publishes it, as for the Mac app. See
+# docs/release-process.md.
+#
 # Runs on the push a merge into main makes: main's own copy of this workflow
 # runs (a pull_request run would use the PR's copy, which anyone with a
 # branch can write), and only main may use the "release" environment's
@@ -76,6 +84,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: read # the merged PR's title and body are the notes
+      id-token: write # build provenance attestations
+      attestations: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
@@ -97,45 +107,12 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      # Android only installs an update signed with the key of the app it
-      # replaces, so every release must be signed with this one key
-      - name: Write signing key
-        env:
-          KEYSTORE_P12: ${{ secrets.ANDROID_KEYSTORE_P12 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: |
-          if [ -z "$KEYSTORE_P12" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::ANDROID_KEYSTORE_P12 or ANDROID_KEYSTORE_PASSWORD is missing from the release environment: copy them from 1Password with `bun run release:secrets` (docs/release-process.md)."
-            exit 1
-          fi
-          echo "$KEYSTORE_P12" | base64 --decode > "$RUNNER_TEMP/release.p12"
-          echo "TENEO_ANDROID_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
-
-      - name: Build the app
-        working-directory: apps/mobile
-        env:
-          TENEO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: |
-          bun run build
-          CI=true bunx cap sync android
-          ./android/gradlew -p android :app:assembleRelease
-          mv android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Teneo-$VERSION.apk"
-          rm "$RUNNER_TEMP/release.p12"
-
-      # An unsigned or wrongly versioned APK is one nobody can install or
-      # update to. A beta is its own app, Teneo Beta: under the full release's
-      # id it would replace Teneo on the phones that have both
-      - name: Verify the APK
-        run: |
-          build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
-          "$build_tools/apksigner" verify --verbose "$RUNNER_TEMP/Teneo-$VERSION.apk"
-          package=com.michael.teneo
-          if [[ "$VERSION" == *-beta.* ]]; then package=com.michael.teneo.beta; fi
-          "$build_tools/aapt2" dump badging "$RUNNER_TEMP/Teneo-$VERSION.apk" \
-            | grep -q "^package: name='$package' .*versionName='$VERSION'"
-
       # Shown on the release page and in the in-app update prompt: the title
-      # and body of the pull request this push merged
+      # and body of the pull request this push merged. Installed apps up to
+      # 0.4.3 show them as HTML, so they must be plain Markdown: HTML
+      # comments are dropped, and raw HTML, images or non-https links fail
+      # the run (scripts/release-notes.ts). release:publish shows them whole
+      # before anything is signed.
       - name: Write release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,24 +124,143 @@ jobs:
             exit 1
           fi
           printf '%s\n\n%s\n' "$(jq -r .title <<< "$pr")" "$(jq -r '.body // ""' <<< "$pr")" > "$RUNNER_TEMP/notes.md"
+          bun apps/desktop/scripts/release-notes.ts "$RUNNER_TEMP/notes.md"
 
-      # Never "latest": the Mac app updates from releases/latest, which must
-      # stay a Mac release
-      - name: Create release
+      # Android only installs an update signed with the key of the app it
+      # replaces. The key was rotated on 2026-11-20 (the old one was exposed):
+      # ANDROID_SIGNING_LINEAGE is the old key's signed proof that the new one
+      # takes its place, and every APK carries it (Sign the APK, below)
+      - name: Write signing key
+        env:
+          KEYSTORE_P12: ${{ secrets.ANDROID_KEYSTORE_P12 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_LINEAGE: ${{ secrets.ANDROID_SIGNING_LINEAGE }}
+        run: |
+          if [ -z "$KEYSTORE_P12" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$SIGNING_LINEAGE" ]; then
+            echo "::error::ANDROID_KEYSTORE_P12, ANDROID_KEYSTORE_PASSWORD or ANDROID_SIGNING_LINEAGE is missing from the release environment: copy them from 1Password with `bun run release:secrets` (docs/release-process.md)."
+            exit 1
+          fi
+          echo "$KEYSTORE_P12" | base64 --decode > "$RUNNER_TEMP/release.p12"
+          echo "$SIGNING_LINEAGE" | base64 --decode > "$RUNNER_TEMP/lineage.bin"
+          echo "TENEO_ANDROID_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+
+      - name: Build the app
+        working-directory: apps/mobile
+        env:
+          TENEO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          # uploads the source maps that make Sentry's stack traces readable
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          bun run build
+          CI=true bunx cap sync android
+          ./android/gradlew -p android :app:assembleGithubRelease
+          mv android/app/build/outputs/apk/github/release/app-github-release.apk "$RUNNER_TEMP/Teneo-$VERSION.apk"
+          # Google Play's build of a full release: a bundle, with no updater
+          # of its own, signed with the same key (Play's upload key)
+          if [[ "$VERSION" != *-beta.* ]]; then
+            ./android/gradlew -p android :app:bundlePlayRelease
+            mv android/app/build/outputs/bundle/playRelease/app-play-release.aab "$RUNNER_TEMP/Teneo-$VERSION.aab"
+          fi
+
+      # The APK again, with the key's proof of rotation in its v3 signature:
+      # a phone with Teneo signed by the old key takes it as an update, and
+      # from then on refuses anything signed by the old key alone (rollback
+      # is off in the proof). v3 only: every phone Teneo runs on (Android 10
+      # and up) reads it, and v1/v2 would need the old key, which stays out
+      # of CI. Tested on emulators on 2026-11-20 (docs/release-process.md)
+      - name: Sign the APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$build_tools/apksigner" sign \
+            --v1-signing-enabled false --v2-signing-enabled false \
+            --ks "$RUNNER_TEMP/release.p12" --ks-key-alias teneo --ks-pass env:KEYSTORE_PASSWORD \
+            --lineage "$RUNNER_TEMP/lineage.bin" --rotation-min-sdk-version 28 \
+            "$RUNNER_TEMP/Teneo-$VERSION.apk"
+          rm "$RUNNER_TEMP/release.p12" "$RUNNER_TEMP/lineage.bin"
+
+      # An unsigned or wrongly versioned APK is one nobody can install or
+      # update to. A beta is its own app, Teneo Beta: under the full release's
+      # id it would replace Teneo on the phones that have both
+      - name: Verify the APK
+        run: |
+          build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$build_tools/apksigner" verify --verbose "$RUNNER_TEMP/Teneo-$VERSION.apk"
+          # it carries the proof from the key that signed every earlier release
+          "$build_tools/apksigner" lineage --in "$RUNNER_TEMP/Teneo-$VERSION.apk" --print-certs \
+            | grep -q "ce64829686893f5d481b38f9ad15ae73fbf625043ebe4b0044f11290d1493832"
+          package=com.michael.teneo
+          if [[ "$VERSION" == *-beta.* ]]; then package=com.michael.teneo.beta; fi
+          "$build_tools/aapt2" dump badging "$RUNNER_TEMP/Teneo-$VERSION.apk" \
+            | grep -q "^package: name='$package' .*versionName='$VERSION'"
+
+      # The bundle is for the Play Console, not for phones, so it is kept
+      # with this run instead of on the release. Play refuses one that is
+      # unsigned or that can install apps.
+      - name: Verify the Play bundle
+        if: ${{ !contains(needs.version.outputs.version, '-beta.') }}
+        run: |
+          jarsigner -verify "$RUNNER_TEMP/Teneo-$VERSION.aab" | grep -q "jar verified"
+          if unzip -p "$RUNNER_TEMP/Teneo-$VERSION.aab" base/manifest/AndroidManifest.xml | grep -aq REQUEST_INSTALL_PACKAGES; then
+            echo "::error::The Play bundle asks to install apps, which Google Play doesn't allow."
+            exit 1
+          fi
+
+      - name: Keep the Play bundle
+        if: ${{ !contains(needs.version.outputs.version, '-beta.') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Teneo-${{ needs.version.outputs.version }}-play
+          path: ${{ runner.temp }}/Teneo-${{ needs.version.outputs.version }}.aab
+          if-no-files-found: error
+          retention-days: 90
+
+      # What the maintainer signs: this APK's version, app, size and hash
+      - name: Write the Android manifest
+        run: |
+          bun apps/desktop/scripts/android-manifest.ts \
+            --version "$VERSION" \
+            --apk "$RUNNER_TEMP/Teneo-$VERSION.apk" \
+            --repository "$GITHUB_REPOSITORY" \
+            --out "$RUNNER_TEMP/android-manifest.json"
+
+      # A signed record, kept by GitHub, that this APK came from this
+      # workflow on this commit of main. release:publish checks it.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/Teneo-${{ needs.version.outputs.version }}.apk
+
+      # A draft: no phone sees it until it is signed and published from the
+      # maintainer's Mac. Never "latest": the Mac app updates from
+      # releases/latest, which must stay a Mac release
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
           MERGE_COMMIT: ${{ github.sha }}
         run: |
+          # drafts have no tag yet, and GitHub allows several with the same one
+          if gh release view "android-v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::An android-v$VERSION release already exists. Publish or delete it before building another."
+            exit 1
+          fi
           flags=()
           if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "android-v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
+            --draft \
             --target "$MERGE_COMMIT" \
             --title "Teneo for Android $VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             --latest=false \
             "${flags[@]}" \
-            "$RUNNER_TEMP/Teneo-$VERSION.apk"
+            "$RUNNER_TEMP/Teneo-$VERSION.apk" \
+            "$RUNNER_TEMP/android-manifest.json"
+          {
+            echo "### Teneo for Android $VERSION is a draft"
+            echo "Sign and publish it on your Mac: \`cd apps/desktop && bun run release:publish\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # One release for everything the PR shipped: the Mac app's, with the
       # APK beside the disk images. The Mac release is this PR's when it was

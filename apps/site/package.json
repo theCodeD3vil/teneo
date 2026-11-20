@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc -b"
   },
   "dependencies": {
+    "@sentry/vue": "11.14.0",
     "@tailwindcss/vite": "catalog:",
     "@teneo/ui": "workspace:*",
     "@vueuse/core": "catalog:",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@iconify-json/tabler": "catalog:",
+    "@sentry/vite-plugin": "^11.14.0",
     "@types/node": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "@vue/tsconfig": "catalog:",

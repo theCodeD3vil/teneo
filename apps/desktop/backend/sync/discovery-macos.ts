@@ -2,7 +2,11 @@
 // this device, -B watches for others, -L finds where one can be reached and
 // -G v4 gives its address. Teneo has no Bonjour binding, and a child per job is
 // short and easy to end: every one of them is killed on stop.
-import { isDeviceId } from "@teneo/sync";
+import {
+  type DiscoveryRecord,
+  makeDiscoveryRecord,
+  readDiscoveryRecord,
+} from "@teneo/sync";
 
 import type {
   DiscoveredDevice,
@@ -93,10 +97,17 @@ export class MacDiscovery implements Discovery {
   private begin(): void {
     const options = this.options;
     if (!options) return;
-    this.generation += 1;
+    const generation = ++this.generation;
     this.handled.clear();
-    if (options.port !== null) this.announce(options, options.port);
-    this.browse(options);
+    // a new salt for every start: on a new network the announcement is new
+    void makeDiscoveryRecord(options.tag, options.deviceId).then(
+      (record) => {
+        if (generation !== this.generation) return;
+        if (options.port !== null) this.announce(record, options.port);
+        this.browse(options, record);
+      },
+      (error: unknown) => options.onError?.(error),
+    );
   }
 
   private endChildren(): void {
@@ -105,32 +116,29 @@ export class MacDiscovery implements Discovery {
     this.children.clear();
   }
 
-  /** The instance name is made of the device id, so it is unique and says
-   *  nothing about the Mac or its owner. */
-  private instanceName(deviceId: string): string {
-    return `teneo-${deviceId.slice(0, 12)}`;
-  }
-
-  private announce(options: DiscoveryOptions, port: number): void {
+  /** The instance name and TXT are salted (discovery-record.ts): unique,
+   *  and saying nothing about the Mac, its owner or its vault. */
+  private announce(record: DiscoveryRecord, port: number): void {
     const generation = this.generation;
     const job = this.spawn(
       [
         "-R",
-        this.instanceName(options.deviceId),
+        record.instance,
         serviceType,
         "local",
         String(port),
-        `vt=${options.tag}`,
-        `dev=${options.deviceId}`,
+        `s=${record.txt.s}`,
+        `vt=${record.txt.vt}`,
+        `dev=${record.txt.dev}`,
       ],
       () => {},
     );
-    this.keepRunning(job, generation, () => this.announce(options, port));
+    this.keepRunning(job, generation, () => this.announce(record, port));
   }
 
-  private browse(options: DiscoveryOptions): void {
+  private browse(options: DiscoveryOptions, record: DiscoveryRecord): void {
     const generation = this.generation;
-    const own = this.instanceName(options.deviceId);
+    const own = record.instance;
     const splitter = new LineSplitter();
     const job = this.spawn(["-B", serviceType, "local"], (chunk) => {
       for (const line of splitter.push(chunk)) {
@@ -144,7 +152,7 @@ export class MacDiscovery implements Discovery {
         }
       }
     });
-    this.keepRunning(job, generation, () => this.browse(options));
+    this.keepRunning(job, generation, () => this.browse(options, record));
   }
 
   /** Where the instance can be reached, and its TXT: if it is a device of this
@@ -179,8 +187,8 @@ export class MacDiscovery implements Discovery {
       (line) => reader.feed(line),
     );
     if (!service) return null;
-    const { vt, dev } = service.txt;
-    if (vt !== options.tag || !isDeviceId(dev)) return "foreign";
+    const dev = await readDiscoveryRecord(options.tag, service.txt);
+    if (dev === null) return "foreign";
     if (dev === options.deviceId) return "foreign"; // this device
     const addresses = await this.readAddresses(service.host);
     return addresses.length > 0

@@ -68,6 +68,14 @@ const opened = (result: PromiseSettledResult<Session>): Session => {
 
 const isEncrypted = (message: string) => !message.startsWith("{");
 
+/** Tells the frames a side sends from its sealed proof, which is sealed too
+ *  but always comes first. */
+function framesFrom(side: "initiator" | "responder") {
+  let sealedSeen = 0;
+  return (from: string, message: string) =>
+    from === side && isEncrypted(message) && ++sealedSeen > 1;
+}
+
 test("two devices with the same key open a session and exchange frames", async () => {
   const { a, b } = await connect();
   const [sessionA, sessionB] = [opened(a), opened(b)];
@@ -107,7 +115,7 @@ test("another protocol version is refused with a message to update", async () =>
   const { a, b } = await connect({
     pair: {
       intercept: (from, message) => [
-        from === "responder" ? message.replace('"v":1', '"v":2') : message,
+        from === "responder" ? message.replace('"v":2', '"v":3') : message,
       ],
     },
   });
@@ -163,11 +171,12 @@ test("a device that meets itself closes the connection", async () => {
 });
 
 test("a frame delivered twice closes the session", async () => {
-  let encryptedSeen = 0;
+  const isFrame = framesFrom("initiator");
+  let framesSeen = 0;
   const { a, b } = await connect({
     pair: {
       intercept: (from, message) =>
-        from === "initiator" && isEncrypted(message) && ++encryptedSeen === 1
+        isFrame(from, message) && ++framesSeen === 1
           ? [message, message]
           : [message],
     },
@@ -183,10 +192,11 @@ test("a frame delivered twice closes the session", async () => {
 });
 
 test("a frame changed on the way closes the session without being read", async () => {
+  const isFrame = framesFrom("initiator");
   const { a, b } = await connect({
     pair: {
       intercept: (from, message) => [
-        from === "initiator" && isEncrypted(message)
+        isFrame(from, message)
           ? message.slice(0, 8) +
             (message[8] === "A" ? "B" : "A") +
             message.slice(9)
@@ -205,10 +215,11 @@ test("a frame changed on the way closes the session without being read", async (
 test("frames delivered out of order close the session", async () => {
   let held: string | null = null;
   let count = 0;
+  const isFrame = framesFrom("initiator");
   const { a, b } = await connect({
     pair: {
       intercept: (from, message) => {
-        if (from !== "initiator" || !isEncrypted(message)) return [message];
+        if (!isFrame(from, message)) return [message];
         count += 1;
         if (count === 1) {
           held = message;
@@ -276,4 +287,69 @@ test("a silent device is dropped after 45 seconds, an answering one is not", asy
   await until(() => ended !== undefined);
   expect(ended?.code).toBe("timeout");
   expect(time - lastAnswer).toBe(60_000); // silent for more than 45 s, not before
+});
+
+test("a device on version 1 is told to update, and learns no device's id", async () => {
+  const pair = memoryChannelPair();
+  const heard: string[] = [];
+  pair.responder.onMessage((message) => heard.push(message));
+  pair.responder.onClose(() => {});
+  const opening = Session.open(pair.initiator, {
+    deviceId: idA,
+    authKey: randomBytes(32),
+  });
+  await until(() => heard.length === 1);
+  const hello = JSON.parse(heard[0]!);
+  // what a version 1 device reads: a hello, of another version
+  expect(hello).toMatchObject({ t: "hello", v: 2 });
+  expect(hello.deviceId).toMatch(/^[0-9a-f]{32}$/);
+  expect(hello.deviceId).not.toBe(idA);
+  pair.responder.send(
+    JSON.stringify({ t: "hello", v: 1, deviceId: idB, nonce: "0".repeat(32) }),
+  );
+  await expect(opening).rejects.toMatchObject({ code: "version" });
+});
+
+test("nothing either device sends in the clear names it", async () => {
+  const sent: string[] = [];
+  const { a, b } = await connect({
+    pair: {
+      intercept: (_from, message) => {
+        sent.push(message);
+        return [message];
+      },
+    },
+  });
+  opened(a);
+  opened(b);
+  const clear = sent.filter((message) => !isEncrypted(message)).join("\n");
+  expect(clear).not.toContain(idA);
+  expect(clear).not.toContain(idB);
+  expect(opened(a).peerId).toBe(idB);
+  expect(opened(b).peerId).toBe(idA);
+});
+
+test("two connections between the same devices never share keys", async () => {
+  // the eph keys differ every time, so a recorded connection gives nothing
+  // for another, nor (once they are gone) for whoever later has the vault key
+  const key = (await deriveVaultKeys(randomBytes(32))).authKey;
+  const firstFrames: string[] = [];
+  for (let round = 0; round < 2; round++) {
+    const isFrame = framesFrom("initiator");
+    const pair = memoryChannelPair({
+      intercept: (from, message) => {
+        if (isFrame(from, message)) firstFrames.push(message);
+        return [message];
+      },
+    });
+    const [x, y] = await Promise.all([
+      Session.open(pair.initiator, { deviceId: idA, authKey: key }),
+      Session.open(pair.responder, { deviceId: idB, authKey: key }),
+    ]);
+    await x.send(state);
+    x.close();
+    y.close();
+  }
+  expect(firstFrames.length).toBe(2);
+  expect(firstFrames[0]).not.toBe(firstFrames[1]);
 });

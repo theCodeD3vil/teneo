@@ -232,6 +232,36 @@ describe("NativeClient", () => {
     ]);
   });
 
+  test("a text left out for good stops being asked past once it's gone", async () => {
+    const limits: number[] = [];
+    let waiting = [{ id: "bad", text: "plain words" }];
+    const { plugin, emit } = fakePlugin({
+      undetected: async (options) => {
+        limits.push(options.limit);
+        return { items: waiting };
+      },
+      saveDetections: async () => {
+        throw new Error("refused");
+      },
+      list: async () => ({ items: [], nextCursor: null, total: 0 }),
+    });
+    const client = new NativeClient(plugin);
+    await Promise.resolve();
+    const request = { kind: "all" as const, search: "", limit: 10 };
+    await client.listItems(request);
+    emit({ database: "teneo.sqlite" });
+    await client.listItems(request);
+    // the next round asks one further, past the text it leaves out
+    expect(limits[1]).toBe(limits[0]! + 1);
+    // deleted: the round after sees it's gone, and the one after that is as before
+    waiting = [];
+    emit({ database: "teneo.sqlite" });
+    await client.listItems(request);
+    emit({ database: "teneo.sqlite" });
+    await client.listItems(request);
+    expect(limits.at(-1)).toBe(limits[0]);
+  });
+
   test("a text nothing has looked at yet is listed with its secret found", async () => {
     // saved by the capture between the look and the list
     const captured: NativeItem = {

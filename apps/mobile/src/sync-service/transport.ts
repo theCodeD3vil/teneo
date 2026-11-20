@@ -75,6 +75,9 @@ export interface TransportOptions {
   timers?: Timers;
   /** Something unexpected, never an ordinary refusal or disconnect. */
   onError?: (error: unknown) => void;
+  /** A device refused this one outright (auth, version, protocol): trying
+   *  again won't change that */
+  onRefused?: (error: SyncError) => void;
 }
 
 export class PhoneTransport {
@@ -231,8 +234,14 @@ export class PhoneTransport {
     const failedHard =
       result.error !== null &&
       ["auth", "version", "protocol"].includes(result.error.code);
+    if (failedHard && result.error) this.options.onRefused?.(result.error);
+    // Both devices dialed at once: the engine kept the other connection and
+    // closed this one at once. That is no failure (engine.ts prefersNew)
+    const duplicate =
+      result.connected && !failedHard && this.connectedTo(deviceId);
     const healthy =
-      result.connected && result.lastedMs >= healthyMs && !failedHard;
+      duplicate ||
+      (result.connected && result.lastedMs >= healthyMs && !failedHard);
     const failures = healthy
       ? 0
       : (this.retry.get(deviceId)?.failures ?? 0) + 1;
@@ -241,6 +250,12 @@ export class PhoneTransport {
       failures,
       notBefore: this.timers.now() + wait,
     });
+  }
+
+  /** Debug builds: dial `ip:port` once, as if Bonjour had found a device
+   *  there. For emulators, which can't see each other's announcements. */
+  debugDial(address: string): void {
+    if (!this.stopped) void this.connect(address);
   }
 
   /** Dial `ip:port` and run the connection. Resolves when it ends; at once,

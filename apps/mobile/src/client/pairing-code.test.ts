@@ -7,12 +7,19 @@ import { readPairingCode } from "./pairing-code";
 const key = Uint8Array.from({ length: 32 }, (_, i) => i * 7);
 
 describe("readPairingCode", () => {
-  test("reads the Mac's QR link, with its addresses", async () => {
+  test("reads the Mac's QR link: a one-time key, with its addresses", async () => {
     const link = buildPairingLink(key, ["192.168.1.20:47823"]);
     expect(await readPairingCode(`  ${link}\n`)).toEqual({
       vaultKey: key,
       addresses: ["192.168.1.20:47823"],
+      pairing: true,
     });
+  });
+
+  test("a recovery code is the vault key itself", async () => {
+    expect(
+      (await readPairingCode(await formatRecoveryCode(key)))?.pairing,
+    ).toBe(false);
   });
 
   test("reads a recovery code however it was typed", async () => {

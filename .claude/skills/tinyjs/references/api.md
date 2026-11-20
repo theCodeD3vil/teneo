@@ -1,4 +1,4 @@
-# The tiny.* / app API — full tour (current as of tinyjs 0.66.2)
+# The tiny.* / app API — full tour (current as of tinyjs 0.70.3)
 
 The `tiny` global is injected into every page automatically (no script tag);
 TypeScript definitions ship in types/tiny.d.ts. Backend handlers receive the
@@ -132,6 +132,9 @@ tiny.win.open('settings', { page: 'settings.html', title: 'Settings',
 // parent: stays above THAT window (not other apps, unlike setLevel), hides/
 // minimizes/closes with it; no taskbar entry on Windows; macOS also moves it
 // with the parent. Open-time only.
+// show: false — built, placed (rememberWindows too) and loaded but hidden
+// until tiny.win.show() / app.window(id).show(): fill it, then reveal it.
+// Don't fake this with size '1x1' — a remembered size overrides it.
 // page: an http(s) URL or a file INSIDE the frontend dir — from a page,
 // anything else (../ walks, other absolute paths, file:) is refused;
 // backend app.win.open takes any path.
@@ -181,6 +184,9 @@ tiny.menu.set([
                                              // alone means ⌘⇧
     { id: 'mute', label: 'Mute', checked: true },
     { id: 'no', label: 'Nope', enabled: false },
+    { id: 'hi', label: 'Hi', icon: 'emoji:👋' },    // icon: png path, 'sf:<symbol>'
+                                             // (macOS) or 'emoji:<glyph>'; label
+                                             // only where it can't draw (Linux tray)
     { separator: true },
     { id: 'more', label: 'More', submenu: [{ id: 'a', label: 'Sub' }] },
   ]}]);
@@ -218,6 +224,11 @@ tiny.menu.onContext((id) => ...);       // backend: export onContextMenu
 ```
 
 ## Dialogs (native, application-modal, all three OSes)
+
+The backend has the same seven calls on `app.dialog`, with the same
+arguments and results. They work in async `init`/`onTray`/`onMenu` handlers
+and with `"mainWindow": false`, without creating a WebView. Page calls keep
+their `dialog.*` origin gate; backend calls are trusted app code.
 
 ```js
 await tiny.dialog.openFile();     // path | null       openFiles() -> paths[] | null
@@ -339,6 +350,8 @@ await app.cookies.remove({ url: "https://app.example.com" }); // -> number remov
 tiny.tray.set({ title, icon, tooltip, menu: [{ id, label }, { separator: true }] });
 // icon: png path | 'sf:<name>' (macOS SF Symbol) | 'emoji:<glyph>' (Windows,
 // drawn as mono silhouette). primaryAction: true = left-click fires onClick.
+// macOS only: titleColor '#rrggbb' | { light, dark }; titleFont
+// 'monospacedDigit' (timers/counters don't jitter) | 'monospaced'.
 tiny.tray.on((id) => ...); tiny.tray.onClick(fn); tiny.tray.remove();
 await tiny.tray.position();   // { x,y,width,height } | null (Linux: null)
 // Linux tray is AppIndicator/StatusNotifier — menu-based; a bare icon click
@@ -435,6 +448,14 @@ tiny.audioTap.on(({ pcm, sampleRate, channels, frames, t }) => {
 audio.crossOrigin = "anonymous";
 audio.src = tiny.proxyURL("https://host/stream.mp3");
 
+// ── YouTube/Vimeo in an iframe: a direct YouTube iframe in an app page fails, with
+// Error 153 on macOS and Linux and a browser error page on Windows (file:// sends
+// no Referer). embedURL frames it from a loopback page, so to postMessage the
+// player, target iframe.contentWindow.frames[0].
+// Other hosts go in tinyjs.json "embedHosts". Ask each launch; don't save the URL.
+iframe.allow = "autoplay; encrypted-media; fullscreen; picture-in-picture";
+iframe.src = await tiny.embedURL("https://www.youtube.com/embed/ID");
+
 await tiny.app.beep();
 await tiny.app.playSound("Ping");
 // playSound: system sound name, file path, or the portable meanings
@@ -450,7 +471,8 @@ const r = await tiny.fetch(url, { method, headers, body });  // backend-proxied,
 audio.src = tiny.fileURL(path);  // file:// URL for a disk path — ALWAYS this,
    // never 'file://' + path (Windows drive letter becomes the URL host).
 // file:// media loads only under the frontend dir by default — widen with
-// "readAccess": true | "/path" in tinyjs.json.
+// "readAccess": true | "/path" in tinyjs.json. macOS: a path on ANOTHER disk
+// than the page (/Volumes/…) comes back as tiny-media://file/… (0.70.2+).
 await tiny.app.paths();   // { home, data, cache, logs, temp, downloads,
                           //   desktop, documents, resources, executables } — per-OS correct; backend
                           //   twin: await app.paths() (same shape). data/cache/logs
@@ -580,6 +602,8 @@ await tiny.app.matchScreen(saved);  // saved screen -> connected one, or null
 tiny.app.onScreensChanged(fn);      // backend: onSystem('screens')
 // "rememberWindows": true in tinyjs.json restores every window's place per
 // screen layout (main shown once restored) — don't hand-roll it.
+// Changing "size" (or a win.open size) wins over a saved size next launch
+// (0.70.3+); only the saved position is kept.
 await tiny.app.mousePosition();  // { x, y, window: { x, y, inside }, screen }
 // Linux: X11 only — pure Wayland hides the global pointer (capabilities()
 // says so; "windowPlacement": true forces XWayland, or use mouseTracking):

@@ -67,7 +67,10 @@ export class NativeSync {
     let paired: SyncStatus;
     try {
       paired = toSyncStatus(
-        await this.plugin.pair({ vaultKey: toBase64(parsed.vaultKey) }),
+        await this.plugin.pair({
+          vaultKey: toBase64(parsed.vaultKey),
+          ...(parsed.pairing && { pairingAddresses: parsed.addresses }),
+        }),
       );
     } catch (error) {
       firstDevice.cancel();

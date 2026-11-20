@@ -108,6 +108,21 @@ final class SyncStoreBridge {
         return answer(() -> json(store().syncRow(id)));
     }
 
+    /** `ids`: a JSON array. The rows of those that exist, as a JSON array */
+    String rows(String ids) {
+        return answer(() -> {
+            JSONArray rows = new JSONArray();
+            for (SyncRows.Row row : store().syncRows(strings(new JSONArray(ids)))) rows.put(json(row));
+            return rows;
+        });
+    }
+
+    private static List<String> strings(JSONArray array) throws JSONException {
+        List<String> list = new ArrayList<>();
+        for (int i = 0; i < array.length(); i++) list.add(array.getString(i));
+        return list;
+    }
+
     /** `skipped`: a JSON array of the ids to leave out */
     String newestUnpinned(String skipped) {
         return answer(() -> {
@@ -304,6 +319,23 @@ final class SyncStoreBridge {
             }
             peers.put(deviceId, fields);
         }
-        return new SyncRows.Batch(number(batch, "expectedHead"), puts, peers);
+        Map<String, Long> reads = new LinkedHashMap<>();
+        JSONArray read = batch.getJSONArray("reads");
+        for (int i = 0; i < read.length(); i++) {
+            JSONObject one = read.getJSONObject(i);
+            reads.put(one.getString("id"), number(one, "syncSeq"));
+        }
+        List<String> newestSkipped = null;
+        String newestId = null;
+        Long newestSyncSeq = null;
+        if (!batch.isNull("newest")) {
+            JSONObject newest = batch.getJSONObject("newest");
+            newestSkipped = strings(newest.getJSONArray("skipped"));
+            if (!newest.isNull("row")) {
+                newestId = newest.getJSONObject("row").getString("id");
+                newestSyncSeq = number(newest.getJSONObject("row"), "syncSeq");
+            }
+        }
+        return new SyncRows.Batch(reads, newestSkipped, newestId, newestSyncSeq, puts, peers);
     }
 }

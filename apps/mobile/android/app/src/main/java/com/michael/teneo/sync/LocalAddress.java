@@ -17,6 +17,23 @@ final class LocalAddress {
 
     private LocalAddress() {}
 
+    /** This phone itself: 127.0.0.0/8 or ::1, also written as IPv6 */
+    static boolean isLoopback(String address) {
+        if (address == null) return false;
+        Matcher mapped = MAPPED.matcher(address);
+        String ip = mapped.matches() ? mapped.group(1) : address;
+        return ip.equals("::1") || (V4.matcher(ip).matches() && ip.startsWith("127."));
+    }
+
+    /**
+     * Where sync connections may come from and go to: the local network,
+     * and this phone itself only in a debug build. Any app on the phone, and
+     * any page in its browser, can connect from 127.0.0.1.
+     */
+    static boolean isPeerAddress(String address, boolean allowLoopback) {
+        return isLocalNetwork(address) && (allowLoopback || !isLoopback(address));
+    }
+
     /** A private, link-local or loopback address, IPv4 or IPv6 */
     static boolean isLocalNetwork(String address) {
         if (address == null) return false;

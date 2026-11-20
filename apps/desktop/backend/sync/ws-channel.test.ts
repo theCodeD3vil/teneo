@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 
+import { byeMessage } from "@teneo/sync";
+
 import { SocketChannel } from "./ws-channel";
 
 function make() {
@@ -68,4 +70,26 @@ test("messages are sent through to the socket", () => {
   channel.send("one");
   channel.send("two");
   expect(sent).toEqual(["one", "two"]);
+});
+
+test("a flood of messages before the handshake ends the connection", () => {
+  const { channel, closed } = make();
+  for (let i = 0; i < 100_000; i++) channel.deliver(`frame ${i}`);
+  expect(closed).toEqual(["Too many messages before the handshake"]);
+  const heard: string[] = [];
+  channel.onMessage((message) => heard.push(message));
+  expect(heard.length).toBeLessThanOrEqual(8);
+});
+
+test("a closing peer's reason, sent as a last message, ends the channel with it", () => {
+  const { channel } = make();
+  const reasons: (string | undefined)[] = [];
+  const heard: string[] = [];
+  channel.onMessage((message) => heard.push(message));
+  channel.onClose((reason) => reasons.push(reason));
+  channel.deliver("hello");
+  channel.deliver(byeMessage("auth"));
+  channel.deliver("after");
+  expect(heard).toEqual(["hello"]);
+  expect(reasons).toEqual(["auth"]);
 });

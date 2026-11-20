@@ -68,6 +68,9 @@ const codeLines = computed(() => {
   const half = Math.ceil(groups.length / 2);
   return [groups.slice(0, half).join("-"), groups.slice(half).join("-")];
 });
+// The QR code is a one-time key, good for minutes; the join code is the
+// vault's own key, for good, so it shows only when asked for
+const isCodeShown = ref(false);
 const isCodeCopied = ref(false);
 const copiedIconTimeout = 1500;
 let copiedTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -91,6 +94,7 @@ watch(isPairingOpen, (isOpen) => {
   if (isOpen) return;
   pairing.value = null;
   pairingError.value = "";
+  isCodeShown.value = false;
   clearTimeout(copiedTimeout);
   isCodeCopied.value = false;
 });
@@ -311,7 +315,19 @@ const isTurnOffWarningOpen = ref(false);
               aria-label="QR code for adding a device"
               class="size-44 overflow-hidden rounded-lg bg-white p-1 [&>svg]:block [&>svg]:size-full"
               v-html="qrCode" />
+            <p class="text-foreground/60 text-center text-xs">
+              Scan it with Teneo on your phone. It works once, for the next 10
+              minutes.
+            </p>
+            <Button
+              v-if="!isCodeShown"
+              variant="outline"
+              size="sm"
+              @click="isCodeShown = true">
+              Show join code
+            </Button>
             <div
+              v-if="isCodeShown"
               class="bg-foreground/5 flex w-full items-center justify-center gap-3 rounded-lg px-3 py-3">
               <code
                 class="text-foreground/80 font-mono text-xs leading-5 tracking-wide select-none">
@@ -328,7 +344,9 @@ const isTurnOffWarningOpen = ref(false);
                 <CopyIcon v-else />
               </Button>
             </div>
-            <Alert class="bg-warning/10 dark:bg-warning/15 w-full border-0!">
+            <Alert
+              v-if="isCodeShown"
+              class="bg-warning/10 dark:bg-warning/15 w-full border-0!">
               <AlertCircleIcon class="text-warning!" />
               <AlertTitle>Keep this code private</AlertTitle>
               <AlertDescription class="text-foreground/60 text-xs">

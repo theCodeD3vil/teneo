@@ -25,7 +25,12 @@ export interface NativeSyncStatus {
 export interface SyncPlugin {
   getStatus(): Promise<NativeSyncStatus>;
   /** Keep the vault key (base64) and start sync. Rejects with what to show. */
-  pair(options: { vaultKey: string }): Promise<NativeSyncStatus>;
+  /** With pairingAddresses, vaultKey is a pairing code's one-time key: the
+   *  vault's comes from the Mac at those host:port addresses */
+  pair(options: {
+    vaultKey: string;
+    pairingAddresses?: string[];
+  }): Promise<NativeSyncStatus>;
   /** Stop sync, forget the key and the devices */
   unpair(): Promise<NativeSyncStatus>;
   /** A setting sync reads was saved */

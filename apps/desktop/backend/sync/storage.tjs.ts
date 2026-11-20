@@ -25,6 +25,8 @@ import {
   saveClipboardItem,
   setClipboardItemPinned,
   softDeleteClipboardItem,
+  turnOffSecretEncryption,
+  turnOnSecretEncryption,
 } from "../database";
 import { clearClipboardHistory } from "../history-limits";
 import { getSettings, loadSettings, updateSettings } from "../settings";
@@ -324,7 +326,43 @@ await test("every write path stamps the row with the next syncSeq", async () => 
   await softDeleteClipboardItem(first.id, app);
   row = rowOf(first.id);
   check(row.deletedAt !== null && row.syncSeq === head(), "delete");
-  same(row.value, "one", "with sync off the text stays, as before");
+  same(row.value, null, "even with sync off, the text goes with it");
+});
+
+await test("each item's size is kept by sqlite as it is written", async () => {
+  const database = await initializeDatabase(app);
+  const saved = await saveClipboardItem(textItem("héllo"), app);
+  const sizeOf = () =>
+    all<{ bytes: number; pinned: number; hasValue: number }>(
+      database,
+      `SELECT bytes, pinned, hasValue FROM "CLIPBOARD_ITEM_SIZES" WHERE id = ?`,
+      saved.id,
+    )[0];
+  same(sizeOf()?.bytes, 6, "its text, in bytes");
+  await setClipboardItemPinned(saved.id, true, app);
+  same(sizeOf()?.pinned, 1, "a pin");
+  await softDeleteClipboardItem(saved.id, app);
+  same(sizeOf()?.bytes, 0, "nothing once the text is gone");
+  same(sizeOf()?.hasValue, 0, "and it says so");
+  run(database, `DELETE FROM "CLIPBOARD_ITEMS" WHERE id = ?`, saved.id);
+  same(sizeOf(), undefined, "a row deleted goes too");
+});
+
+await test("an item deleted with sync off before 0.4.4 loses what it held", async () => {
+  const database = await initializeDatabase(app);
+  const kept = await saveClipboardItem(textItem(`old ${secretText}`), app);
+  // as an older Teneo left it: deleted, text and all
+  run(
+    database,
+    `UPDATE "CLIPBOARD_ITEMS" SET deletedAt = ? WHERE id = ?`,
+    Date.now(),
+    kept.id,
+  );
+  await purgeOldTombstones(app);
+  const row = rowOf(kept.id);
+  check(row.deletedAt !== null, "still there to tell the other devices");
+  same(row.value, null, "its text is gone");
+  same(row.secrets, null, "and what was found in it");
 });
 
 await test("changesAfter returns texts and colours in order, with the store's head", async () => {
@@ -570,10 +608,18 @@ await test("pins and unpins carry rising stamps, and the clock starts past the s
   const record = (await store.changesAfter(0, 5)).changes[0]!.record;
   same(record.pinned?.stamp, stamps.at(-1), "in the record");
   // a stamp from a later time elsewhere: the next pin here is larger
-  const later = stampAt(Date.now() + 5 * day);
+  const later = stampAt(Date.now() + 5 * 60 * 60 * 1000);
   clock.observe(later);
   await setClipboardItemPinned(item.id, false, app);
   check(rowOf(item.id).pinnedStamp! > later, "after observing");
+  // one days ahead is a broken clock or a hostile peer: it moves nothing
+  const farAhead = stampAt(Date.now() + 5 * day);
+  clock.observe(farAhead);
+  await setClipboardItemPinned(item.id, true, app);
+  check(
+    rowOf(item.id).pinnedStamp! < farAhead,
+    "a stamp days ahead is ignored",
+  );
 });
 
 // --- tombstones, clear and trim
@@ -729,7 +775,7 @@ await test("history limits leave young tombstones alone and don't count them", a
   same(sizes.length, 0, "and they are not counted as history");
 });
 
-await test("tombstones are removed after 30 days, nothing else is", async () => {
+await test("tombstones are removed after 30 days, young ones stay", async () => {
   reset();
   const insert = `INSERT INTO "CLIPBOARD_ITEMS" (id, kind, value, dateCopied, deletedAt, syncSeq) VALUES (?, 'text', ?, 1, ?, ?)`;
   run(database, insert, "young", null, Date.now() - tombstoneLifetime + day, 1);
@@ -747,8 +793,10 @@ await test("tombstones are removed after 30 days, nothing else is", async () => 
     allRows()
       .map((r) => r.id)
       .sort(),
-    ["kept-text", "young"],
-    "old one purged",
+    // one deleted long ago that still held its text (before 0.4.4) is
+    // erased first, and is then as old a tombstone as any
+    ["young"],
+    "old ones purged",
   );
 });
 
@@ -757,7 +805,8 @@ await test("tombstones are removed after 30 days, nothing else is", async () => 
 await test("a Mac's history and a second device end up the same, through the real store", async () => {
   reset();
   await updateSettings({ syncEnabled: true }, app);
-  const network = new TestNetwork();
+  // on the real clock, as this Mac's store is
+  const network = new TestNetwork(Date.now());
   const other = network.add("b");
   let allowSecrets = false;
   let itemsChanged = 0;
@@ -916,7 +965,7 @@ await test("restampSecretItems sends the rows holding secrets again, and only th
   const gone = await saveClipboardItem(textItem("gone " + secretText), app);
   await softDeleteClipboardItem(gone.id, app);
   await updateSettings({ syncEnabled: syncWasOn }, app);
-  check(rowOf(gone.id).secrets !== null, "it still holds its secret");
+  same(rowOf(gone.id).secrets, null, "its secret went with it");
 
   const readPast = head(); // a device that has read everything so far
   const places = {
@@ -1248,6 +1297,79 @@ await test("images sync both ways through the real store, files and all", async 
   same(errors.map(String), [], "nothing went wrong on the way");
   engine.stop();
   network.stop();
+});
+
+await test("deleted rows and replaced keys are overwritten in the file (secure_delete)", async () => {
+  const database = await initializeDatabase(app);
+  same(
+    all<{ secure_delete: number }>(database, "PRAGMA secure_delete"),
+    [{ secure_delete: 1 }],
+    "secure_delete",
+  );
+});
+
+await test("encryption turns on and off in one go, and an unreadable key becomes a tombstone", async () => {
+  const database = await initializeDatabase(app);
+  check(await turnOnSecretEncryption(app), "encryption turned on");
+  const saved = await saveClipboardItem(textItem(`key ${secretText}`), app);
+  const encrypted = all<{ encrypted: number | null; value: string }>(
+    database,
+    `SELECT encrypted, value FROM "CLIPBOARD_ITEMS" WHERE id = ?`,
+    saved.id,
+  )[0]!;
+  same(encrypted.encrypted, 1, "the new key saved encrypted");
+  check(!encrypted.value.includes("pa55"), "no plain key in the row");
+  // a row encrypted with a key long gone
+  run(
+    database,
+    `INSERT INTO "CLIPBOARD_ITEMS" (id, kind, value, dateCopied, encrypted, createdAt, originDevice)
+     VALUES ('unreadable', 'text', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', ?, 1, ?, ?)`,
+    Date.now(),
+    Date.now(),
+    getSyncIdentity().deviceId,
+  );
+
+  check(await turnOffSecretEncryption(app), "encryption turned off");
+  same(
+    all(
+      database,
+      `SELECT encrypted, value FROM "CLIPBOARD_ITEMS" WHERE id = ?`,
+      saved.id,
+    ),
+    [{ encrypted: null, value: `key ${secretText}` }],
+    "the readable key, now plain",
+  );
+  const [unreadable] = all<{ deletedAt: number | null; value: string | null }>(
+    database,
+    `SELECT deletedAt, value FROM "CLIPBOARD_ITEMS" WHERE id = 'unreadable'`,
+  );
+  check(unreadable, "the unreadable row is still there, as a tombstone");
+  check(
+    unreadable.deletedAt !== null && unreadable.value === null,
+    "deleted, text gone",
+  );
+  same(getSettings().encryptSecrets, false, "the setting");
+  await softDeleteClipboardItem(saved.id, app);
+});
+
+await test("after everything above, the sizes table matches the history", async () => {
+  const database = await initializeDatabase(app);
+  const fresh = all(
+    database,
+    `
+      SELECT id, kind, CASE WHEN kind = 'image' THEN path END AS imagePath, dateCopied,
+        pinnedAt IS NOT NULL AS pinned, deletedAt, value IS NOT NULL AS hasValue,
+        path IS NOT NULL AS hasPath,
+        ifnull(length(CAST(value AS BLOB)), 0) + ifnull(length(CAST(path AS BLOB)), 0) AS bytes
+      FROM "CLIPBOARD_ITEMS" ORDER BY id
+    `,
+  );
+  const kept = all(
+    database,
+    `SELECT * FROM "CLIPBOARD_ITEM_SIZES" ORDER BY id`,
+  );
+  check(fresh.length > 0, "there is history to compare");
+  same(kept, fresh, "every row as the history has it");
 });
 
 await tjs.remove(folder).catch(() => {});

@@ -12,6 +12,7 @@ import {
   initializeDatabase,
   onHistoryChanged,
 } from "../database";
+import { isDevRun } from "../dev-run";
 import { clipboardHistoryChangedEvent } from "../types/clipboard";
 import { appIconPng } from "./app-icon-source";
 import type { Discovery } from "./discovery";
@@ -33,6 +34,10 @@ export interface SyncServiceOptions {
   discovery?: Discovery;
   onPeersChanged?: () => void;
   onError?: (error: unknown) => void;
+  /** The one-time key of the pairing code on show, or null (engine.ts). */
+  pairingKey?: () => Bytes | null;
+  /** A phone joined with it. */
+  onPaired?: () => void;
 }
 
 export interface SyncService {
@@ -75,6 +80,8 @@ export async function startSyncService(
     onItemsChanged: () => app.push(clipboardHistoryChangedEvent),
     onPeersChanged: options.onPeersChanged,
     onError: options.onError,
+    pairingKey: options.pairingKey,
+    onPaired: options.onPaired,
   });
   const discovery =
     options.discovery ??
@@ -87,6 +94,8 @@ export async function startSyncService(
     discovery,
     knownPeers: () => store.listPeers(),
     ports: options.ports,
+    // a dev run may sync with a dev peer on this Mac (bun run sync:peer)
+    allowLoopback: isDevRun(),
     onError: options.onError,
   });
   await transport.start();

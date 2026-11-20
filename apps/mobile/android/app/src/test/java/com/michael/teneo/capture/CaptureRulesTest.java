@@ -64,4 +64,36 @@ public class CaptureRulesTest {
         // a clip with a time is told apart by it, even with the same text
         assertFalse(CaptureRules.isSameUntimedClip(COPIED, true));
     }
+
+    @Test
+    public void aLargePhotoIsDrawnAgainAtMost4096Wide() {
+        assertEquals(1, CaptureRules.sampleSize(4096, 3072));
+        assertEquals(1, CaptureRules.sampleSize(100, 100));
+        assertEquals(2, CaptureRules.sampleSize(8000, 6000));
+        assertEquals(2, CaptureRules.sampleSize(6000, 8000));
+        assertEquals(4, CaptureRules.sampleSize(12000, 9000));
+        assertEquals(2, CaptureRules.sampleSize(8193, 10));
+        assertEquals(4, CaptureRules.sampleSize(8194, 10));
+    }
+
+    @Test
+    public void readsOnlyWhatAnotherAppsProviderHandsOver() {
+        String self = "com.michael.teneo";
+        assertTrue(CaptureRules.isOtherAppsContent("content", "com.google.android.apps.photos.contentprovider", self));
+        assertTrue(CaptureRules.isOtherAppsContent("content", "media", self));
+        assertTrue(CaptureRules.isOtherAppsContent("content", "10@media", self));
+        // a path Teneo would open with its own rights
+        assertFalse(CaptureRules.isOtherAppsContent("file", "", self));
+        assertFalse(CaptureRules.isOtherAppsContent("file", null, self));
+        assertFalse(CaptureRules.isOtherAppsContent("android.resource", self, self));
+        // Teneo's own providers, however written
+        assertFalse(CaptureRules.isOtherAppsContent("content", "com.michael.teneo.fileprovider", self));
+        assertFalse(CaptureRules.isOtherAppsContent("CONTENT", "COM.MICHAEL.TENEO.FileProvider", self));
+        assertFalse(CaptureRules.isOtherAppsContent("content", "0@com.michael.teneo.fileprovider", self));
+        assertFalse(CaptureRules.isOtherAppsContent("content", "com.michael.teneo", self));
+        assertFalse(CaptureRules.isOtherAppsContent("content", "com.michael.teneo.beta.fileprovider", "com.michael.teneo.beta"));
+        // a name that merely starts the same is someone else's
+        assertTrue(CaptureRules.isOtherAppsContent("content", "com.michael.teneoish.provider", self));
+        assertFalse(CaptureRules.isOtherAppsContent("content", "", self));
+    }
 }

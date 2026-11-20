@@ -86,8 +86,8 @@ jobs:
       # only the TinyJS checked here, not whatever tinyjs.app serves today.
       - name: Install tinyjs
         env:
-          TINYJS_VERSION: v0.72.1
-          TINYJS_SHA256: 986e65361276de44b36580bfc2d901bb68a81f709f8f0781512754aced84ceb0 # tinyjs-macos-arm64.tar.gz
+          TINYJS_VERSION: v0.75.1
+          TINYJS_SHA256: 4f70990877763ba3a621173e678a139cf6076eefca8b25b00e90079d0f90b37d # tinyjs-macos-arm64.tar.gz
         run: |
           archive="$RUNNER_TEMP/tinyjs.tar.gz"
           curl -fsSL -o "$archive" \
@@ -135,7 +135,11 @@ jobs:
         run: bun scripts/set-release-identity.ts
 
       # Shown on the release page and in the in-app update prompt: the title
-      # and body of the pull request this push merged
+      # and body of the pull request this push merged. Installed apps up to
+      # 0.4.3 show them as HTML, so they must be plain Markdown: HTML
+      # comments are dropped, and raw HTML, images or non-https links fail
+      # the run (scripts/release-notes.ts). release:publish shows them whole
+      # before anything is signed.
       - name: Write release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,12 +151,17 @@ jobs:
             exit 1
           fi
           printf '%s\n\n%s\n' "$(jq -r .title <<< "$pr")" "$(jq -r '.body // ""' <<< "$pr")" > "$RUNNER_TEMP/notes.md"
+          bun apps/desktop/scripts/release-notes.ts "$RUNNER_TEMP/notes.md"
 
       # One runner builds both CPUs: apps, disk images, zips and one plain
       # manifest.json pinned to this release's tag. `tinyjs build`, not
       # `publish`: publish signs the manifest, and CI never has the key.
+      # SENTRY_AUTH_TOKEN uploads the source maps that make Sentry's stack
+      # traces readable; without it the build makes none
       - name: Build and package
         working-directory: apps/desktop
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bun scripts/package-release.ts --notes-file "$RUNNER_TEMP/notes.md" --out "$RUNNER_TEMP/release"
 
       # A signed record, kept by GitHub, that these exact files came from this

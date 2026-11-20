@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { useMutation } from "@tanstack/vue-query";
+import { useMutation, useQuery } from "@tanstack/vue-query";
 import { Button } from "@teneo/ui/components/button";
 import { computed } from "vue";
 
@@ -18,6 +18,20 @@ const checkForUpdateMutation = useMutation({
   },
 });
 
+// set when Teneo removed the fake 0.4.2's backdoor from this Mac
+const { data: backdoorFoundAt } = useQuery({
+  queryKey: ["security-notice"],
+  queryFn: (): Promise<number | null> => tiny.api.call("securityNotice"),
+  staleTime: Infinity,
+});
+const foundOn = computed(() =>
+  backdoorFoundAt.value
+    ? new Date(backdoorFoundAt.value).toLocaleDateString(undefined, {
+        dateStyle: "long",
+      })
+    : null,
+);
+
 const updateStatus = computed(() => {
   if (checkForUpdateMutation.isError.value) return "Couldn't check for updates";
   const update = checkForUpdateMutation.data.value;
@@ -29,6 +43,16 @@ const updateStatus = computed(() => {
 </script>
 <template>
   <div class="mx-auto grid max-w-xl gap-y-6">
+    <SettingsSection v-if="foundOn">
+      <template #section-title>Security notice</template>
+      <p class="text-foreground/70 text-sm leading-relaxed">
+        On {{ foundOn }} Teneo found and removed harmful software that a fake
+        Teneo 0.4.2 had installed on this Mac. It could read what you copied.
+        Change the passwords and API keys you copied since 16 November 2026, and
+        sign out of other sessions where you can.
+      </p>
+    </SettingsSection>
+
     <SettingsSection>
       <template #section-title>About Teneo</template>
 

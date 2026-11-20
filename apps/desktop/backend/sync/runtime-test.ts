@@ -48,4 +48,6 @@ export function finish(): void {
     tjs.exit(1);
   }
   console.log("\nall passed");
+  // nothing left waiting on a timer (the decrypted-text cache) holds it open
+  tjs.exit(0);
 }

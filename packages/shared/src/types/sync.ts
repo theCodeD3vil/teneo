@@ -31,8 +31,10 @@ export interface SyncStatus {
 export interface PairingInfo {
   /** the vault key for typing in, in groups of four */
   recoveryCode: string;
-  /** what the QR code holds */
+  /** what the QR code holds: a one-time key, not the vault's */
   link: string;
+  /** when the QR code stops working (ms): a phone joins by then, once */
+  expiresAt: number;
 }
 
 /** Backend event pushed to every window with the full status after a change. */

@@ -102,3 +102,27 @@ export function memoryChannelPair(options: MemoryPairOptions = {}): MemoryPair {
   ends.push(makeEnd(0), makeEnd(1));
   return { initiator: ends[0]!, responder: ends[1]!, pending: () => pending };
 }
+
+// Why a connection is closing, said in a last message before it closes. A
+// WebSocket close frame carries this, but the Mac's runtime (txiki 26.11) ends
+// a server-side socket without one: the other side then saw a dropped
+// connection, and a phone with a spent pairing code went on trying it. Plain
+// JSON, which a session never sends past its hello: sealed frames are base64.
+const byeType = "bye";
+
+export function byeMessage(reason: string): string {
+  return JSON.stringify({ t: byeType, reason });
+}
+
+/** The reason a bye message gives, or null when `message` is not one. */
+export function parseBye(message: string): string | null {
+  if (!message.startsWith('{"t":"bye"')) return null;
+  try {
+    const parsed = JSON.parse(message) as { t?: unknown; reason?: unknown };
+    return parsed.t === byeType && typeof parsed.reason === "string"
+      ? parsed.reason.slice(0, 64)
+      : null;
+  } catch {
+    return null;
+  }
+}

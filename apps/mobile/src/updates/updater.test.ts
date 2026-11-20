@@ -11,6 +11,8 @@ const update: Update = {
     "https://github.com/theCodeD3vil/teneo/releases/download/android-v0.2.0/Teneo-0.2.0.apk",
   size: 9_000_000,
   sha256: "ab".repeat(32),
+  manifestUrl:
+    "https://github.com/theCodeD3vil/teneo/releases/download/android-v0.2.0/android-manifest.json",
 };
 const day = 24 * 60 * 60 * 1000;
 
@@ -33,8 +35,8 @@ function fakePlugin(
   const plugin = {
     canInstall: async () => ({ allowed: options.allowed ?? true }),
     openInstallSettings: async () => void calls.push("openInstallSettings"),
-    install: (request: { url: string }) => {
-      calls.push(`install ${request.url}`);
+    install: (request: { manifestUrl: string; version: string }) => {
+      calls.push(`install ${request.version} ${request.manifestUrl}`);
       if (options.installFails) return Promise.reject(options.installFails);
       return new Promise<void>((resolve, reject) => {
         release = resolve;
@@ -129,7 +131,9 @@ describe("Updater", () => {
     expect(instance.state.kind).toBe("installing");
 
     await instance.install(); // "Update" tapped again in About
-    expect(fake.calls).toEqual([`install ${update.apkUrl}`]);
+    expect(fake.calls).toEqual([
+      `install ${update.version} ${update.manifestUrl}`,
+    ]);
     // once Android says the install was called off, it can be started again
     fake.status({ status: "cancelled" });
     void instance.install();
@@ -198,7 +202,9 @@ describe("Updater", () => {
     await instance.check();
     const installing = instance.install();
     await flush();
-    expect(fake.calls).toEqual([`install ${update.apkUrl}`]);
+    expect(fake.calls).toEqual([
+      `install ${update.version} ${update.manifestUrl}`,
+    ]);
     fake.progress(4_500_000);
     expect(instance.state).toEqual({
       kind: "downloading",
@@ -227,6 +233,59 @@ describe("Updater", () => {
     await instance.install();
     expect(fake.calls).toEqual(["openInstallSettings"]);
     expect(instance.state).toEqual({ kind: "needs_permission", update });
+  });
+
+  test("goes on with the update once back from Android's settings with the permission", async () => {
+    let allowed = false;
+    const fake = fakePlugin();
+    (
+      fake.plugin as { canInstall: () => Promise<{ allowed: boolean }> }
+    ).canInstall = async () => ({ allowed });
+    const { instance } = updater({ plugin: fake.plugin });
+    await instance.check();
+    await instance.install();
+    expect(instance.state.kind).toBe("needs_permission");
+    // back without allowing it: still asking
+    await instance.resumed();
+    expect(instance.state.kind).toBe("needs_permission");
+    allowed = true;
+    void instance.resumed();
+    await flush();
+    expect(instance.state.kind).toBe("downloading");
+    expect(fake.calls.at(-1)).toBe(
+      `install ${update.version} ${update.manifestUrl}`,
+    );
+  });
+
+  test("an installer left without a word doesn't leave the update stuck", async () => {
+    const fake = fakePlugin();
+    const { instance } = updater({ plugin: fake.plugin });
+    await instance.check();
+    const installing = instance.install();
+    await flush();
+    fake.handedOver();
+    await installing;
+    fake.status({ status: "pending_user" });
+    expect(instance.state.kind).toBe("installing");
+    // Home, then back to Teneo: some installers say nothing
+    await instance.resumed();
+    expect(instance.state).toEqual({ kind: "available", update });
+    void instance.install();
+    await flush();
+    expect(fake.calls).toHaveLength(2);
+  });
+
+  test("an install Android has begun stays installing", async () => {
+    const fake = fakePlugin();
+    const { instance } = updater({ plugin: fake.plugin });
+    await instance.check();
+    const installing = instance.install();
+    await flush();
+    fake.handedOver();
+    await installing;
+    fake.status({ status: "installed" });
+    await instance.resumed();
+    expect(instance.state.kind).toBe("installing");
   });
 
   test("goes back to the update when the download is cancelled", async () => {
