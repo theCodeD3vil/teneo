@@ -16,17 +16,8 @@ import com.michael.teneo.Notifications;
 import com.michael.teneo.R;
 import com.michael.teneo.history.HistoryStore;
 import com.michael.teneo.history.Settings;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import org.json.JSONArray;
 import org.json.JSONException;
-import org.json.JSONObject;
 
 /**
  * Looks for a newer release about once a day without the app being open, and
@@ -129,79 +120,14 @@ public final class UpdateCheckJob extends JobService {
      * made without that key is never announced.
      */
     private static String findUpdate(String installed, String packageName, long installedCode) throws IOException, JSONException {
-        List<String> refs = new ArrayList<>();
-        String next = ReleaseRules.API + "/git/matching-refs/tags/" + ReleaseRules.TAG_PREFIX;
-        for (int page = 0; next != null && page < ReleaseRules.MAX_TAG_PAGES; page++) {
-            Response response = get(next);
-            if (response.status != HttpURLConnection.HTTP_OK) throw new IOException("GitHub answered " + response.status);
-            JSONArray entries = new JSONArray(response.body);
-            for (int i = 0; i < entries.length(); i++) {
-                JSONObject entry = entries.optJSONObject(i);
-                if (entry != null) refs.add(entry.optString("ref"));
-            }
-            next = ReleaseRules.nextPage(response.link);
-        }
-        for (String version : ReleaseRules.candidates(installed, refs)) {
-            Response response = get(ReleaseRules.API + "/releases/tags/" + ReleaseRules.TAG_PREFIX + version);
-            if (response.status == HttpURLConnection.HTTP_NOT_FOUND) continue;
-            if (response.status != HttpURLConnection.HTTP_OK) throw new IOException("GitHub answered " + response.status);
-            JSONObject release = new JSONObject(response.body);
-            if (release.optBoolean("draft")) continue;
-            JSONArray assets = release.optJSONArray("assets");
-            boolean hasApk = false;
-            String manifestUrl = null;
-            for (int i = 0; assets != null && i < assets.length(); i++) {
-                JSONObject asset = assets.optJSONObject(i);
-                if (asset == null) continue;
-                String url = asset.optString("browser_download_url");
-                if (ReleaseRules.isApk(version, asset.optString("name"), url, asset.optLong("size"))) hasApk = true;
-                if (SignedManifest.FILE.equals(asset.optString("name")) && UpdateRules.isManifestUrl(url, version)) manifestUrl = url;
-            }
-            if (!hasApk || manifestUrl == null) continue;
-            try {
-                SignedManifest.fetch(manifestUrl, version, packageName, installedCode, null);
-                return version;
-            } catch (SignedManifest.Invalid refused) {
-                Log.w(TAG, version + " isn't an update Teneo can install: " + refused.getMessage());
-            }
-        }
-        return null;
-    }
-
-    private static final class Response {
-        final int status;
-        final String body;
-        final String link;
-
-        Response(int status, String body, String link) {
-            this.status = status;
-            this.body = body;
-            this.link = link;
-        }
-    }
-
-    private static Response get(String url) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        // the signed manifest in Teneo's update channel says what the newest
+        // release is: one small download, and nothing unsigned is believed
         try {
-            connection.setConnectTimeout(TIMEOUT_MS);
-            connection.setReadTimeout(TIMEOUT_MS);
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestProperty("Accept", "application/vnd.github+json");
-            connection.setRequestProperty("User-Agent", "Teneo-Android");
-            int status = connection.getResponseCode();
-            if (status != HttpURLConnection.HTTP_OK) return new Response(status, "", null);
-            ByteArrayOutputStream body = new ByteArrayOutputStream();
-            try (InputStream in = connection.getInputStream()) {
-                byte[] buffer = new byte[16 * 1024];
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    if (body.size() + read > MAX_RESPONSE_BYTES) throw new IOException("GitHub's answer is too long");
-                    body.write(buffer, 0, read);
-                }
-            }
-            return new Response(status, new String(body.toByteArray(), StandardCharsets.UTF_8), connection.getHeaderField("Link"));
-        } finally {
-            connection.disconnect();
+            SignedManifest manifest = SignedManifest.latest(packageName, null);
+            return manifest != null && manifest.versionCode > installedCode ? manifest.version : null;
+        } catch (SignedManifest.Invalid refused) {
+            Log.w(TAG, "the update channel's manifest isn't one Teneo can install: " + refused.getMessage());
+            return null;
         }
     }
 

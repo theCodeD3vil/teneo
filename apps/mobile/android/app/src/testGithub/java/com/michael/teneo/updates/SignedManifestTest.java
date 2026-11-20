@@ -92,39 +92,24 @@ public class SignedManifestTest {
     }
 
     @Test
-    public void acceptsOnlyAnUpdateForThisAppAtTheTaggedVersion() throws Exception {
+    public void acceptsOnlyAReleaseOfThisApp() throws Exception {
         SignedManifest manifest = SignedManifest.verify(signed.toString(), testKeys);
-        assertNull(UpdateRules.manifestProblem(manifest, "0.1.4", "com.michael.teneo", 10399));
-        assertEquals(
-            "The signed update is for another version",
-            UpdateRules.manifestProblem(manifest, "0.1.5", "com.michael.teneo", 10399)
-        );
+        assertNull(UpdateRules.manifestProblem(manifest, "com.michael.teneo"));
         assertEquals(
             "The signed update is for a different app",
-            UpdateRules.manifestProblem(manifest, "0.1.4", "com.michael.teneo.beta", 10399)
-        );
-        assertEquals(
-            "This version of Teneo is already installed",
-            UpdateRules.manifestProblem(manifest, "0.1.4", "com.michael.teneo", 10499)
+            UpdateRules.manifestProblem(manifest, "com.michael.teneo.beta")
         );
     }
 
     @Test
-    public void knowsWhereAReleasesManifestIs() {
-        assertTrue(
-            UpdateRules.isManifestUrl(
-                "https://github.com/theCodeD3vil/teneo/releases/download/android-v0.1.4/android-manifest.json",
-                "0.1.4"
-            )
+    public void eachAppUpdatesFromItsOwnFileInTheChannel() {
+        assertEquals(
+            "https://github.com/theCodeD3vil/teneo/releases/download/beta-channel/android-manifest.json",
+            UpdateRules.channelUrl("com.michael.teneo")
         );
-        assertFalse(
-            UpdateRules.isManifestUrl(
-                "https://github.com/theCodeD3vil/teneo/releases/download/android-v0.1.4/android-manifest.json",
-                "0.1.5"
-            )
+        assertEquals(
+            "https://github.com/theCodeD3vil/teneo/releases/download/beta-channel/android-beta-manifest.json",
+            UpdateRules.channelUrl("com.michael.teneo.beta")
         );
-        assertFalse(UpdateRules.isManifestUrl("https://evil.example/android-v0.1.4/android-manifest.json", "0.1.4"));
-        assertFalse(UpdateRules.isManifestUrl(null, "0.1.4"));
-        assertFalse(UpdateRules.isManifestUrl(UpdateRules.RELEASE_DOWNLOADS + "x/android-manifest.json", "x"));
     }
 }

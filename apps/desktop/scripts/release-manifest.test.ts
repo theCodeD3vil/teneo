@@ -1,7 +1,10 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 
 import {
+  ANDROID_BETA_MANIFEST,
   ANDROID_MANIFEST,
+  androidChannelFile,
+  androidReleaseProblems,
   androidVersionCode,
   buildAndroidManifest,
   buildManifest,
@@ -14,6 +17,7 @@ import {
   type Release,
   type ReleaseAsset,
   signAndroidManifest,
+  UPDATE_CHANNEL_TAG,
   signManifest,
   verifyAndroidManifest,
   verifyManifest,
@@ -538,5 +542,146 @@ describe("Android manifests", () => {
     expect(
       checkAndroidDraft(draft, plain("0.1.4"), repository, "0.1.4"),
     ).toEqual(["Teneo-0.1.4.apk was uploaded by someone, not CI"]);
+  });
+});
+
+describe("one release for both apps", () => {
+  const apkHash = "e".repeat(64);
+  const mac = "0.4.4-beta.1";
+  const phone = "0.1.3-beta.1";
+  const apk = (overrides: Partial<ReleaseAsset> = {}) =>
+    asset(`Teneo-${phone}.apk`, {
+      digest: `sha256:${apkHash}`,
+      size: 9_000_000,
+      ...overrides,
+    });
+  // the APK's manifest, naming it in Teneo's release
+  const inTeneo = () =>
+    buildAndroidManifest({
+      version: phone,
+      repository,
+      size: 9_000_000,
+      sha256: apkHash,
+      tag: `v${mac}`,
+    });
+  const teneo = (overrides: Partial<Release> = {}) =>
+    macRelease(mac, {
+      ...overrides,
+      assets: [
+        ...macRelease(mac).assets,
+        apk(),
+        asset(ANDROID_MANIFEST, { uploader: { login: "theCodeD3vil" } }),
+        ...(overrides.assets ?? []),
+      ],
+    });
+
+  test("the manifest names the APK in Teneo's release", () => {
+    expect(inTeneo().apk.url).toBe(
+      `https://github.com/${repository}/releases/download/v${mac}/Teneo-${phone}.apk`,
+    );
+    expect(
+      androidReleaseProblems(teneo(), inTeneo(), repository, phone),
+    ).toEqual([]);
+    // one naming the Android app's own release isn't this one's
+    const elsewhere = buildAndroidManifest({
+      version: phone,
+      repository,
+      size: 9_000_000,
+      sha256: apkHash,
+    });
+    expect(
+      androidReleaseProblems(teneo(), elsewhere, repository, phone),
+    ).toContain(
+      `the Android manifest's APK isn't Teneo-${phone}.apk of this release`,
+    );
+  });
+
+  test("the watchdog passes Teneo's release with the APK and its signed manifest", async () => {
+    const problems = await checkPublishedRelease({
+      release: teneo(),
+      manifest: await signManifest(manifestFor(mac), key.privateKey),
+      publicKeys: [publicKey],
+      repository,
+      files: {
+        [ANDROID_MANIFEST]: await signAndroidManifest(
+          inTeneo(),
+          key.privateKey,
+        ),
+      },
+    });
+    expect(problems).toEqual([]);
+  });
+
+  test("and pulls it when the Android manifest isn't signed, or the APK isn't CI's", async () => {
+    const macSigned = await signManifest(manifestFor(mac), key.privateKey);
+    const unsigned = await checkPublishedRelease({
+      release: teneo(),
+      manifest: macSigned,
+      publicKeys: [publicKey],
+      repository,
+      files: { [ANDROID_MANIFEST]: inTeneo() },
+    });
+    expect(unsigned.join()).toContain("android-manifest.json");
+    const swapped = teneo();
+    swapped.assets = swapped.assets.map((file) =>
+      file.name.endsWith(".apk")
+        ? apk({ uploader: { login: "someone" } })
+        : file,
+    );
+    const problems = await checkPublishedRelease({
+      release: swapped,
+      manifest: macSigned,
+      publicKeys: [publicKey],
+      repository,
+      files: {
+        [ANDROID_MANIFEST]: await signAndroidManifest(
+          inTeneo(),
+          key.privateKey,
+        ),
+      },
+    });
+    expect(problems).toContain(`Teneo-${phone}.apk wasn't uploaded by CI`);
+  });
+
+  describe("the update channel", () => {
+    const channel = (name: string): Release => ({
+      id: 3,
+      tag_name: UPDATE_CHANNEL_TAG,
+      draft: false,
+      prerelease: true,
+      published_at: before,
+      author: { login: "theCodeD3vil" },
+      assets: [asset(name, { uploader: { login: "theCodeD3vil" } })],
+    });
+    const check = async (name: string, doc: unknown, releases: Release[]) =>
+      checkPublishedRelease({
+        release: channel(name),
+        manifest: null,
+        publicKeys: [publicKey],
+        repository,
+        releases,
+        files: { [name]: doc },
+      });
+
+    test("passes a beta's signed manifest naming the APK in a published release", async () => {
+      const signed = await signAndroidManifest(inTeneo(), key.privateKey);
+      expect(androidChannelFile(phone)).toBe(ANDROID_BETA_MANIFEST);
+      expect(await check(ANDROID_BETA_MANIFEST, signed, [teneo()])).toEqual([]);
+    });
+
+    test("pulls one that is unsigned, in the wrong file, or names a draft", async () => {
+      const signed = await signAndroidManifest(inTeneo(), key.privateKey);
+      expect(
+        (await check(ANDROID_BETA_MANIFEST, inTeneo(), [teneo()])).join(),
+      ).toContain(ANDROID_BETA_MANIFEST);
+      expect(
+        (await check(ANDROID_MANIFEST, signed, [teneo()])).join(),
+      ).toContain("which isn't its channel's");
+      expect(
+        (
+          await check(ANDROID_BETA_MANIFEST, signed, [teneo({ draft: true })])
+        ).join(),
+      ).toContain("which isn't released");
+    });
   });
 });

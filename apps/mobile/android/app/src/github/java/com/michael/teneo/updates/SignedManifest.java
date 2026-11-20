@@ -23,7 +23,10 @@ import org.json.JSONObject;
  */
 final class SignedManifest {
 
+    /** A release's manifest, and the channel's for Teneo */
     static final String FILE = "android-manifest.json";
+    /** The channel's for Teneo Beta */
+    static final String BETA_FILE = "android-beta-manifest.json";
     static final String FORMAT = "teneo-android-update-v1";
     /**
      * apps/desktop/tinyjs.json's update.publicKey: the one key that signs
@@ -62,18 +65,13 @@ final class SignedManifest {
     }
 
     /**
-     * Downloads the manifest of the release of `version` and returns it once
-     * it is signed and is an update for this app (`packageName`, newer than
-     * `installedVersionCode`). `opened` is handed the connection, to cancel it.
+     * The newest release of this app (`packageName`), from the signed
+     * manifest in Teneo's update channel, once its signature checks out; null
+     * when the channel has none for this app yet. `opened` is handed the
+     * connection, to cancel it.
      */
-    static SignedManifest fetch(
-        String url,
-        String version,
-        String packageName,
-        long installedVersionCode,
-        Consumer<HttpURLConnection> opened
-    ) throws IOException, Invalid {
-        if (!UpdateRules.isManifestUrl(url, version)) throw new Invalid("That isn't a Teneo release");
+    static SignedManifest latest(String packageName, Consumer<HttpURLConnection> opened) throws IOException, Invalid {
+        String url = UpdateRules.channelUrl(packageName);
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         if (opened != null) opened.accept(connection);
         String text;
@@ -84,6 +82,8 @@ final class SignedManifest {
             connection.setInstanceFollowRedirects(true);
             connection.setRequestProperty("User-Agent", "Teneo-Android");
             int status = connection.getResponseCode();
+            // no release has put this app's manifest in the channel yet
+            if (status == HttpURLConnection.HTTP_NOT_FOUND) return null;
             if (status != HttpURLConnection.HTTP_OK) throw new IOException("GitHub answered " + status);
             if (!"https".equals(connection.getURL().getProtocol())) throw new IOException("GitHub answered over an insecure connection");
             ByteArrayOutputStream body = new ByteArrayOutputStream();
@@ -100,7 +100,7 @@ final class SignedManifest {
             connection.disconnect();
         }
         SignedManifest manifest = verify(text, PUBLIC_KEYS);
-        String problem = UpdateRules.manifestProblem(manifest, version, packageName, installedVersionCode);
+        String problem = UpdateRules.manifestProblem(manifest, packageName);
         if (problem != null) throw new Invalid(problem);
         return manifest;
     }

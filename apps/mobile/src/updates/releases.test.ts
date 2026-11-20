@@ -2,229 +2,119 @@ import { describe, expect, test } from "bun:test";
 
 import { UpdateCheckError, findUpdate } from "./releases";
 
-const api = "https://api.github.com/repos/theCodeD3vil/teneo";
-const digest = "ab".repeat(32);
+const sha256 = "ab".repeat(32);
+const apk = (tag: string, version: string) =>
+  `https://github.com/theCodeD3vil/teneo/releases/download/${tag}/Teneo-${version}.apk`;
 
-function asset(version: string, extra: Record<string, unknown> = {}) {
+/** UpdatePlugin.check, answering what the channel's signed manifest says */
+function source(update: unknown) {
+  let asked = 0;
   return {
-    name: `Teneo-${version}.apk`,
-    size: 9_000_000,
-    digest: `sha256:${digest}`,
-    browser_download_url: `https://github.com/theCodeD3vil/teneo/releases/download/android-v${version}/Teneo-${version}.apk`,
-    ...extra,
+    check: async () => {
+      asked += 1;
+      return { update };
+    },
+    asked: () => asked,
   };
-}
-
-/** The release's signed android-manifest.json */
-function manifest(version: string) {
-  return {
-    name: "android-manifest.json",
-    size: 700,
-    digest: `sha256:${"cd".repeat(32)}`,
-    browser_download_url: `https://github.com/theCodeD3vil/teneo/releases/download/android-v${version}/android-manifest.json`,
-  };
-}
-
-/** GitHub with these android-v tags, and releases for some of them */
-function github(
-  tags: string[],
-  releases: Record<string, unknown>,
-  options: { refsStatus?: number } = {},
-) {
-  const requested: string[] = [];
-  const fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    requested.push(url.slice(api.length));
-    if (url === `${api}/git/matching-refs/tags/android-v`) {
-      if (options.refsStatus) {
-        return new Response("", { status: options.refsStatus });
-      }
-      return Response.json([
-        // what matching-refs also returns for a prefix
-        { ref: "refs/tags/android-vnext" },
-        ...tags.map((tag) => ({ ref: `refs/tags/android-v${tag}` })),
-      ]);
-    }
-    const prefix = `${api}/releases/tags/android-v`;
-    if (url.startsWith(prefix)) {
-      const release = releases[decodeURIComponent(url.slice(prefix.length))];
-      return release
-        ? Response.json(release)
-        : new Response("", { status: 404 });
-    }
-    return new Response("", { status: 500 });
-  }) as typeof globalThis.fetch;
-  return { fetch, requested };
 }
 
 describe("findUpdate", () => {
-  test("finds the newest full release for a full-release install", async () => {
-    const { fetch, requested } = github(["0.1.0", "0.2.0", "0.3.0-beta.1"], {
-      "0.2.0": { draft: false, assets: [manifest("0.2.0"), asset("0.2.0")] },
-    });
-    expect(await findUpdate("0.1.0", { fetch })).toEqual({
-      version: "0.2.0",
-      versionCode: 20_099,
-      apkUrl: asset("0.2.0").browser_download_url,
+  test("offers what the signed manifest names", async () => {
+    const update = {
+      version: "0.1.3-beta.1",
+      versionCode: 10301,
+      apkUrl: apk("v0.4.4-beta.1", "0.1.3-beta.1"),
       size: 9_000_000,
-      sha256: digest,
-      manifestUrl: manifest("0.2.0").browser_download_url,
-    });
-    expect(requested).toEqual([
-      "/git/matching-refs/tags/android-v",
-      "/releases/tags/android-v0.2.0",
-    ]);
-  });
-
-  test("follows GitHub's pages of tags, where the newest may be on a later one", async () => {
-    const requested: string[] = [];
-    const second = `${api}/git/matching-refs/tags/android-v?page=2`;
-    const fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      requested.push(url.slice(api.length));
-      if (url === `${api}/git/matching-refs/tags/android-v`) {
-        return Response.json([{ ref: "refs/tags/android-v0.10.0" }], {
-          headers: { link: `<${second}>; rel="next", <${second}>; rel="last"` },
-        });
-      }
-      if (url === second) {
-        // names sort as text, so 0.2.0 and 1.0.0 come after 0.10.0
-        return Response.json([
-          { ref: "refs/tags/android-v0.2.0" },
-          { ref: "refs/tags/android-v1.0.0" },
-        ]);
-      }
-      if (url === `${api}/releases/tags/android-v1.0.0`) {
-        return Response.json({ assets: [manifest("1.0.0"), asset("1.0.0")] });
-      }
-      return new Response("", { status: 404 });
-    }) as typeof globalThis.fetch;
-    expect((await findUpdate("0.10.0", { fetch }))?.version).toBe("1.0.0");
-    expect(requested).toEqual([
-      "/git/matching-refs/tags/android-v",
-      "/git/matching-refs/tags/android-v?page=2",
-      "/releases/tags/android-v1.0.0",
-    ]);
-  });
-
-  test("a next page that isn't GitHub's API is not followed", async () => {
-    const requested: string[] = [];
-    const fetch = (async (input: RequestInfo | URL) => {
-      requested.push(String(input));
-      return Response.json([], {
-        headers: { link: '<https://example.org/tags?page=2>; rel="next"' },
-      });
-    }) as typeof globalThis.fetch;
-    expect(await findUpdate("0.1.0", { fetch })).toBeNull();
-    expect(requested).toHaveLength(1);
-  });
-
-  test("offers a beta install only betas", async () => {
-    const releases = {
-      "0.2.0-beta.2": {
-        assets: [manifest("0.2.0-beta.2"), asset("0.2.0-beta.2")],
-      },
-      "0.2.0": { assets: [manifest("0.2.0"), asset("0.2.0")] },
+      sha256,
     };
-    const beta = github(["0.2.0-beta.1", "0.2.0-beta.2"], releases);
-    expect((await findUpdate("0.2.0-beta.1", beta))?.version).toBe(
-      "0.2.0-beta.2",
-    );
-    const full = github(["0.2.0-beta.2", "0.2.0"], releases);
-    expect((await findUpdate("0.2.0-beta.1", full))?.version).toBe(
-      "0.2.0-beta.2",
-    );
-    const onlyFull = github(["0.2.0"], releases);
-    expect(await findUpdate("0.2.0-beta.1", onlyFull)).toBeNull();
+    const found = source(update);
+    expect(await findUpdate("0.1.2-beta.1", found)).toEqual(update);
+    expect(found.asked()).toBe(1);
   });
 
-  test("finds nothing when this is the newest", async () => {
-    const { fetch, requested } = github(["0.1.0", "0.2.0"], {});
-    expect(await findUpdate("0.2.0", { fetch })).toBeNull();
-    expect(await findUpdate("0.3.0-beta.1", { fetch })).toBeNull();
-    expect(requested).toEqual([
-      "/git/matching-refs/tags/android-v",
-      "/git/matching-refs/tags/android-v",
-    ]);
+  test("an APK in the Android app's own release is fine too", async () => {
+    const update = {
+      version: "0.2.0",
+      versionCode: 20099,
+      apkUrl: apk("android-v0.2.0", "0.2.0"),
+      size: 9_000_000,
+      sha256,
+    };
+    expect(await findUpdate("0.1.0", source(update))).toEqual(update);
   });
 
-  test("passes over a tag with no finished release", async () => {
-    const { fetch } = github(["0.2.0", "0.3.0", "0.4.0"], {
-      "0.4.0": { draft: true, assets: [manifest("0.4.0"), asset("0.4.0")] },
-      // the workflow failed before the APK was uploaded
-      "0.3.0": { assets: [] },
-      "0.2.0": { assets: [manifest("0.2.0"), asset("0.2.0")] },
-    });
-    expect((await findUpdate("0.1.0", { fetch }))?.version).toBe("0.2.0");
+  test("nothing newer is no update", async () => {
+    expect(await findUpdate("0.1.0", source(null))).toBeNull();
   });
 
-  test("looks at three releases at most", async () => {
-    const { fetch, requested } = github(["0.2.0", "0.3.0", "0.4.0", "0.5.0"], {
-      "0.2.0": { assets: [manifest("0.2.0"), asset("0.2.0")] },
-    });
-    expect(await findUpdate("0.1.0", { fetch })).toBeNull();
-    expect(requested).toHaveLength(4);
+  test("a beta is never offered to Teneo, nor a full release to Teneo Beta", async () => {
+    const beta = {
+      version: "0.2.0-beta.1",
+      versionCode: 20001,
+      apkUrl: apk("v0.5.0-beta.1", "0.2.0-beta.1"),
+      size: 1,
+      sha256,
+    };
+    expect(await findUpdate("0.1.0", source(beta))).toBeNull();
+    const full = { ...beta, version: "0.2.0", versionCode: 20099 };
+    expect(await findUpdate("0.1.0-beta.1", source(full))).toBeNull();
   });
 
-  test("takes only an APK of that release, from GitHub", async () => {
-    const elsewhere = asset("0.2.0", {
-      browser_download_url: "https://example.com/Teneo-0.2.0.apk",
-    });
-    const otherTag = asset("0.2.0", {
-      browser_download_url: asset("0.1.0").browser_download_url,
-    });
-    const { fetch } = github(["0.2.0"], {
-      "0.2.0": {
-        assets: [
-          manifest("0.2.0"),
-          { ...asset("0.2.0"), name: "Teneo-0.2.0.zip" },
-          elsewhere,
-          otherTag,
-          asset("0.2.0", { size: 0 }),
-        ],
+  test("an older or equal version, or one whose code doesn't match it, is no update", async () => {
+    const base = { apkUrl: apk("v0.4.4", "0.1.0"), size: 1, sha256 };
+    expect(
+      await findUpdate(
+        "0.1.1",
+        source({ ...base, version: "0.1.0", versionCode: 10099 }),
+      ),
+    ).toBeNull();
+    expect(
+      await findUpdate(
+        "0.1.0",
+        source({ ...base, version: "0.1.0", versionCode: 10099 }),
+      ),
+    ).toBeNull();
+    expect(
+      await findUpdate(
+        "0.1.0",
+        source({ ...base, version: "0.2.0", versionCode: 99_999_999 }),
+      ),
+    ).toBeNull();
+  });
+
+  test("a malformed answer, or one naming a file elsewhere, is no update", async () => {
+    const good = {
+      version: "0.2.0",
+      versionCode: 20099,
+      apkUrl: apk("v0.5.0", "0.2.0"),
+      size: 1,
+      sha256,
+    };
+    for (const bad of [
+      { ...good, apkUrl: "https://evil.example/Teneo-0.2.0.apk" },
+      { ...good, sha256: "nope" },
+      { ...good, size: 0 },
+      { ...good, version: "latest" },
+      "0.2.0",
+    ]) {
+      expect(await findUpdate("0.1.0", source(bad))).toBeNull();
+    }
+  });
+
+  test("a failed check says why", async () => {
+    const failing = {
+      check: async () => {
+        throw new Error("This update isn't signed by Teneo");
       },
-    });
-    expect(await findUpdate("0.1.0", { fetch })).toBeNull();
+    };
+    const error = await findUpdate("0.1.0", failing).catch((caught) => caught);
+    expect(error).toBeInstanceOf(UpdateCheckError);
+    expect(error.message).toBe("This update isn't signed by Teneo");
   });
 
-  test("passes over a release with no signed manifest, or one from elsewhere", async () => {
-    const { fetch } = github(["0.3.0", "0.2.0"], {
-      "0.3.0": { assets: [asset("0.3.0")] },
-      "0.2.0": {
-        assets: [
-          {
-            ...manifest("0.2.0"),
-            browser_download_url: manifest("0.1.0").browser_download_url,
-          },
-          asset("0.2.0"),
-        ],
-      },
-    });
-    expect(await findUpdate("0.1.0", { fetch })).toBeNull();
-  });
-
-  test("leaves the digest out when GitHub has none", async () => {
-    const { fetch } = github(["0.2.0"], {
-      "0.2.0": {
-        assets: [manifest("0.2.0"), asset("0.2.0", { digest: null })],
-      },
-    });
-    expect((await findUpdate("0.1.0", { fetch }))?.sha256).toBeNull();
-  });
-
-  test("says why a check failed", async () => {
-    const busy = github([], {}, { refsStatus: 403 });
-    await expect(findUpdate("0.1.0", busy)).rejects.toThrow(
-      "GitHub is busy. Try again later",
-    );
-    const offline = (async () => {
-      throw new TypeError("Failed to fetch");
-    }) as unknown as typeof fetch;
-    await expect(findUpdate("0.1.0", { fetch: offline })).rejects.toThrow(
-      "Couldn't reach GitHub",
-    );
-    await expect(findUpdate("dev", busy)).rejects.toBeInstanceOf(
-      UpdateCheckError,
+  test("a build with no release version can't compare", async () => {
+    await expect(findUpdate("dev", source(null))).rejects.toThrow(
+      "no release version",
     );
   });
 });

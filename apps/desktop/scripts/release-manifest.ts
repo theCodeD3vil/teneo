@@ -42,6 +42,14 @@ export const SIGNED_FROM = "2026-11-18T00:00:00Z";
 export const ANDROID_SIGNED_FROM = "2026-11-20T00:00:00Z";
 export const ANDROID_MANIFEST = "android-manifest.json";
 export const ANDROID_TAG_PREFIX = "android-v";
+/** The release that holds what installed apps update from: Teneo Beta's Mac
+ *  manifest.json, and each Android app's signed manifest (below) */
+export const UPDATE_CHANNEL_TAG = "beta-channel";
+export const ANDROID_BETA_MANIFEST = "android-beta-manifest.json";
+/** The file in the update channel that phones with this version's app read
+ *  (UpdateRules.channelUrl in the Android app) */
+export const androidChannelFile = (version: string) =>
+  version.includes("-beta.") ? ANDROID_BETA_MANIFEST : ANDROID_MANIFEST;
 const ANDROID_FORMAT = "teneo-android-update-v1";
 
 const SIGNATURE_PREFIX = "tinyjs-update-v1\n";
@@ -324,8 +332,14 @@ export const androidPackage = (version: string) =>
 
 export const androidApkName = (version: string) => `Teneo-${version}.apk`;
 
-export function androidApkUrl(repository: string, version: string): string {
-  return `https://github.com/${repository}/releases/download/${ANDROID_TAG_PREFIX}${version}/${androidApkName(version)}`;
+/** The APK's address in the release tagged `tag`: Teneo's own (v0.4.4), or,
+ *  for a release of the Android app alone, android-v<version> */
+export function androidApkUrl(
+  repository: string,
+  version: string,
+  tag = `${ANDROID_TAG_PREFIX}${version}`,
+): string {
+  return `https://github.com/${repository}/releases/download/${tag}/${androidApkName(version)}`;
 }
 
 /** CI's plain manifest for the APK it built, which the maintainer signs. */
@@ -334,6 +348,8 @@ export function buildAndroidManifest(options: {
   repository: string;
   size: number;
   sha256: string;
+  /** the release the APK is in, when it isn't android-v<version> */
+  tag?: string;
 }): AndroidManifest {
   const versionCode = androidVersionCode(options.version);
   if (versionCode === null)
@@ -347,7 +363,7 @@ export function buildAndroidManifest(options: {
     versionCode,
     package: androidPackage(options.version),
     apk: {
-      url: androidApkUrl(options.repository, options.version),
+      url: androidApkUrl(options.repository, options.version, options.tag),
       size: options.size,
       sha256: options.sha256,
     },
@@ -409,8 +425,10 @@ export async function verifyAndroidManifest(
   return payload;
 }
 
-/** Every way an Android release and its manifest fail to describe each
- *  other: the manifest names this version's APK, and that is the file here. */
+/** Every way a release and its Android manifest fail to describe each
+ *  other: the manifest names this version's APK, and that is the file here.
+ *  The release is the Android app's own (android-v<version>), which holds
+ *  nothing else, or Teneo's, where the APK sits beside the Mac app. */
 export function androidReleaseProblems(
   release: Release,
   manifest: AndroidManifest,
@@ -430,7 +448,10 @@ export function androidReleaseProblems(
     );
   const name = androidApkName(version);
   const apk = release.assets.find((asset) => asset.name === name);
-  if (manifest.apk.url !== androidApkUrl(repository, version) || !apk) {
+  if (
+    manifest.apk.url !== androidApkUrl(repository, version, release.tag_name) ||
+    !apk
+  ) {
     problems.push(`the Android manifest's APK isn't ${name} of this release`);
   } else {
     if (digestOf(apk) !== manifest.apk.sha256)
@@ -440,7 +461,8 @@ export function androidReleaseProblems(
     if (apk.size !== manifest.apk.size)
       problems.push(`${name} isn't the size the Android manifest says`);
   }
-  for (const asset of release.assets) {
+  const isAndroidOnly = release.tag_name.startsWith(ANDROID_TAG_PREFIX);
+  for (const asset of isAndroidOnly ? release.assets : []) {
     if (asset.name !== name && asset.name !== ANDROID_MANIFEST)
       problems.push(`${asset.name} doesn't belong in an Android release`);
   }
@@ -488,11 +510,31 @@ export async function checkPublishedRelease(options: {
   repository: string;
   /** every release, for the one the beta channel points at */
   releases?: Release[];
+  /** Android manifests by name: a Teneo release's android-manifest.json, and
+   *  the update channel's android-manifest.json and android-beta-manifest.json */
+  files?: Record<string, unknown>;
 }): Promise<string[]> {
   const { release, manifest, publicKeys, repository } = options;
   const after = (time: string | null) => time !== null && time > SIGNED_FROM;
+  const afterAndroid = (time: string | null) =>
+    time !== null && time > ANDROID_SIGNED_FROM;
+  // the maintainer uploads the signed manifests; every other file is CI's
   const notFromCi = (asset: ReleaseAsset) =>
-    asset.name !== "manifest.json" && asset.uploader?.login !== CI_LOGIN;
+    asset.name !== "manifest.json" &&
+    asset.name !== ANDROID_MANIFEST &&
+    asset.uploader?.login !== CI_LOGIN;
+  const verifiedAndroid = async (
+    name: string,
+  ): Promise<AndroidManifest | string> => {
+    try {
+      const doc = options.files?.[name];
+      if (doc === undefined || doc === null)
+        throw new Error(`${name} couldn't be read`);
+      return await verifyAndroidManifest(doc, publicKeys);
+    } catch (error) {
+      return `${name}: ${(error as Error).message}`;
+    }
+  };
   const verified = async (): Promise<Manifest | string> => {
     try {
       if (manifest === null)
@@ -503,13 +545,57 @@ export async function checkPublishedRelease(options: {
     }
   };
 
-  // The beta channel holds only the newest beta's manifest, replaced on each
-  // beta. Its signature pins the downloads, which live on that beta's release.
-  if (release.tag_name === "beta-channel") {
+  // The update channel: the newest Mac beta's manifest, and each Android
+  // app's signed manifest, replaced on each release. Their signatures pin the
+  // downloads, which live on the releases they name.
+  if (release.tag_name === UPDATE_CHANNEL_TAG) {
+    const problems: string[] = [];
+    for (const name of [ANDROID_MANIFEST, ANDROID_BETA_MANIFEST]) {
+      const asset = release.assets.find((candidate) => candidate.name === name);
+      if (!asset || !afterAndroid(asset.updated_at)) continue;
+      const payload = await verifiedAndroid(name);
+      if (typeof payload === "string") {
+        problems.push(payload);
+        continue;
+      }
+      if (androidChannelFile(payload.version) !== name) {
+        problems.push(
+          `${name} offers ${payload.version}, which isn't its channel's`,
+        );
+        continue;
+      }
+      // the APK it names: a published release's, made by CI
+      const tag = /\/releases\/download\/([^/]+)\//.exec(payload.apk.url)?.[1];
+      const holder = options.releases?.find(
+        (candidate) => candidate.tag_name === tag,
+      );
+      if (!holder || holder.draft) {
+        problems.push(
+          `${name} offers ${payload.version} from ${tag ?? "nowhere"}, which isn't released`,
+        );
+        continue;
+      }
+      problems.push(
+        ...androidReleaseProblems(
+          holder,
+          payload,
+          repository,
+          payload.version,
+        ).map((problem) => `${name}: ${problem}`),
+      );
+      const apk = holder.assets.find(
+        (file) => file.name === androidApkName(payload.version),
+      );
+      if (apk && apk.uploader?.login !== CI_LOGIN)
+        problems.push(`${name}: ${apk.name} wasn't uploaded by CI`);
+    }
     const asset = release.assets.find(
       (candidate) => candidate.name === "manifest.json",
     );
-    if (!asset || !after(asset.updated_at)) return [];
+    if (!asset || !after(asset.updated_at)) return problems;
+    return [...problems, ...(await checkMacChannel())];
+  }
+  async function checkMacChannel(): Promise<string[]> {
     const payload = await verified();
     if (typeof payload === "string") return [payload];
     if (!payload.version.includes("-"))
@@ -600,5 +686,22 @@ export async function checkPublishedRelease(options: {
     );
   for (const asset of release.assets.filter(notFromCi))
     problems.push(`${asset.name} wasn't uploaded by CI`);
+  // Teneo's release holds the APK too, and the signed manifest that names it
+  const android = release.assets.find(
+    (asset) => asset.name === ANDROID_MANIFEST,
+  );
+  if (android && afterAndroid(release.published_at)) {
+    const payload = await verifiedAndroid(ANDROID_MANIFEST);
+    if (typeof payload === "string") problems.push(payload);
+    else
+      problems.push(
+        ...androidReleaseProblems(
+          release,
+          payload,
+          repository,
+          payload.version,
+        ),
+      );
+  }
   return problems;
 }

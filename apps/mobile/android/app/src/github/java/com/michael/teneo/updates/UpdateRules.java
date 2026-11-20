@@ -3,21 +3,39 @@ package com.michael.teneo.updates;
 import android.content.pm.PackageInstaller;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.regex.Pattern;
 
 /** The checks an update passes before Android's installer sees it */
 final class UpdateRules {
 
-    /** Releases of the Android app (release-android.yml): nothing else is downloaded */
-    static final String RELEASE_DOWNLOADS = "https://github.com/theCodeD3vil/teneo/releases/download/android-v";
+    /** Teneo's releases on GitHub: nothing else is downloaded */
+    static final String DOWNLOADS = "https://github.com/theCodeD3vil/teneo/releases/download/";
+    /** The Android app's own releases, from before an APK shipped in Teneo's release */
+    static final String RELEASE_DOWNLOADS = DOWNLOADS + "android-v";
+    /**
+     * Where each app looks for its update: the signed manifest of the newest
+     * release, beside the Mac's in the beta-channel release, as
+     * release:publish puts it there (apps/desktop/scripts/publish-release.ts)
+     */
+    static final String CHANNEL = DOWNLOADS + "beta-channel/";
+    /** A release's tag: Teneo's (v0.4.4-beta.1) or the Android app's own (android-v0.1.2) */
+    private static final Pattern RELEASE_TAG = Pattern.compile("^(android-)?v\\d{1,4}\\.\\d{1,2}\\.\\d{1,2}(-beta\\.[1-9]\\d?)?$");
 
     /** Far above the app's size: a listing that says more is not to be believed */
     static final long MAX_SIZE = 200L * 1024 * 1024;
 
     private UpdateRules() {}
 
-    /** An APK of an Android release on GitHub */
+    /** The signed manifest this app (its package) updates from */
+    static String channelUrl(String packageName) {
+        return CHANNEL + (packageName.endsWith(".beta") ? SignedManifest.BETA_FILE : SignedManifest.FILE);
+    }
+
+    /** An APK of one of Teneo's releases on GitHub */
     static boolean isReleaseUrl(String url) {
-        if (url == null || !url.startsWith(RELEASE_DOWNLOADS) || !url.endsWith(".apk")) return false;
+        if (url == null || !url.startsWith(DOWNLOADS) || !url.endsWith(".apk")) return false;
+        String[] path = url.substring(DOWNLOADS.length()).split("/", -1);
+        if (path.length != 2 || !RELEASE_TAG.matcher(path[0]).matches()) return false;
         try {
             URI uri = new URI(url);
             // the prefix pins the scheme and host; the rest must be a plain path
@@ -48,22 +66,16 @@ final class UpdateRules {
         return sha256 != null && sha256.matches("[0-9a-f]{64}");
     }
 
-    /** The signed manifest of the Android release of `version` on GitHub */
-    static boolean isManifestUrl(String url, String version) {
-        return ReleaseRules.versionCode(version) > 0 && (RELEASE_DOWNLOADS + version + "/" + SignedManifest.FILE).equals(url);
-    }
-
     /**
-     * What is wrong with a signed manifest, or null when it is an update for
-     * this app: the version the release is tagged with, an APK of that
-     * release with a size and hash, newer than the one installed.
+     * What is wrong with a signed manifest, or null when it describes a
+     * release of this app (`packageName`): the APK of its version in one of
+     * Teneo's releases, with a size and hash. Whether it is newer than what is
+     * installed is the caller's to ask.
      */
-    static String manifestProblem(SignedManifest manifest, String expectedVersion, String packageName, long installedVersionCode) {
-        if (!manifest.version.equals(expectedVersion)) return "The signed update is for another version";
+    static String manifestProblem(SignedManifest manifest, String packageName) {
         if (manifest.versionCode != ReleaseRules.versionCode(manifest.version)) return "The signed update is malformed";
         if (!manifest.packageName.equals(packageName)) return "The signed update is for a different app";
-        if (manifest.versionCode <= installedVersionCode) return "This version of Teneo is already installed";
-        if (!isReleaseUrl(manifest.apkUrl) || !manifest.apkUrl.startsWith(RELEASE_DOWNLOADS + manifest.version + "/")) {
+        if (!isReleaseUrl(manifest.apkUrl) || !manifest.apkUrl.endsWith("/Teneo-" + manifest.version + ".apk")) {
             return "The signed update names a file Teneo won't download";
         }
         if (manifest.size <= 0 || manifest.size > MAX_SIZE || !isDigest(manifest.sha256)) return "The signed update is malformed";

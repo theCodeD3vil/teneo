@@ -23,8 +23,10 @@ const manifest = buildAndroidManifest({
   repository: option("--repository"),
   size: apk.length,
   sha256: createHash("sha256").update(apk).digest("hex"),
+  // --tag v0.4.4: the APK is in Teneo's release, beside the Mac app
+  ...(process.argv.includes("--tag") && { tag: option("--tag") }),
 });
 writeFileSync(option("--out"), `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(
-  `android-manifest.json for ${manifest.package} ${manifest.version}`,
+  `android-manifest.json for ${manifest.package} ${manifest.version}: ${manifest.apk.url}`,
 );

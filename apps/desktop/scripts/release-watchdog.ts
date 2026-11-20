@@ -6,9 +6,11 @@
 import { readFileSync } from "node:fs";
 
 import {
+  ANDROID_BETA_MANIFEST,
   ANDROID_MANIFEST,
   ANDROID_TAG_PREFIX,
   checkPublishedRelease,
+  UPDATE_CHANNEL_TAG,
   publicKeysOf,
   type Release,
 } from "./release-manifest.ts";
@@ -71,12 +73,33 @@ for (const release of releases) {
       );
     manifest = await response.json().catch(() => "unreadable");
   }
+  // the Android manifests the maintainer signed: in Teneo's own releases, and
+  // the ones phones read in the update channel
+  const files: Record<string, unknown> = {};
+  const signedFiles =
+    release.tag_name === UPDATE_CHANNEL_TAG
+      ? [ANDROID_MANIFEST, ANDROID_BETA_MANIFEST]
+      : release.tag_name.startsWith(ANDROID_TAG_PREFIX)
+        ? []
+        : [ANDROID_MANIFEST];
+  for (const name of signedFiles) {
+    if (!release.assets.some((asset) => asset.name === name)) continue;
+    const response = await fetch(
+      `https://github.com/${repository}/releases/download/${release.tag_name}/${name}`,
+    );
+    if (!response.ok)
+      throw new Error(
+        `${release.tag_name}'s ${name} answered ${response.status}`,
+      );
+    files[name] = await response.json().catch(() => "unreadable");
+  }
   const problems = await checkPublishedRelease({
     release,
     manifest,
     publicKeys,
     repository,
     releases: all,
+    files,
   });
   if (problems.length === 0) continue;
 
