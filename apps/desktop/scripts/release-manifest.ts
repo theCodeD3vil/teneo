@@ -30,6 +30,9 @@ export const SIGNING_SECRETS = [
   // the old Android key's proof that the new one replaces it (base64)
   "ANDROID_SIGNING_LINEAGE",
 ];
+/** Copied too when the 1Password item has them; a release builds without
+ *  them. SENTRY_AUTH_TOKEN uploads the source maps of each build. */
+export const OPTIONAL_SECRETS = ["SENTRY_AUTH_TOKEN"];
 export const updateKeyReference = (vault: string) =>
   `op://${vault}/${UPDATE_KEY_TITLE}/password`;
 

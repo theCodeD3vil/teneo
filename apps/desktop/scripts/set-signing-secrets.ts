@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 
 import { ghArgs, ghCommand } from "./gh-command.ts";
 import {
+  OPTIONAL_SECRETS,
   SIGNING_ITEM_TITLE,
   SIGNING_SECRETS,
   UPDATE_KEY_VAULT,
@@ -67,7 +68,13 @@ const missing = SIGNING_SECRETS.filter((name) => !labels.includes(name));
 if (missing.length > 0)
   fail(`"${SIGNING_ITEM_TITLE}" has no ${missing.join(", ")} field.`);
 
-for (const name of SIGNING_SECRETS) {
+const optional = OPTIONAL_SECRETS.filter((name) => labels.includes(name));
+for (const name of OPTIONAL_SECRETS) {
+  if (!optional.includes(name))
+    console.log(`(no ${name} field in "${SIGNING_ITEM_TITLE}": left as it is)`);
+}
+
+for (const name of [...SIGNING_SECRETS, ...optional]) {
   const reference = `op://${UPDATE_KEY_VAULT}/${SIGNING_ITEM_TITLE}/${name}`;
   const copy = spawnSync(
     "bash",
@@ -91,7 +98,7 @@ for (const name of SIGNING_SECRETS) {
     );
 }
 console.log(
-  `\n✓ The release environment of ${repository} now holds ${SIGNING_SECRETS.join(", ")}.`,
+  `\n✓ The release environment of ${repository} now holds ${[...SIGNING_SECRETS, ...optional].join(", ")}.`,
 );
 console.log(
   "Run `bun run release:github-settings` again to remove the repository-wide copies Doppler made.",
