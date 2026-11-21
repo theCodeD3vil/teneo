@@ -55,6 +55,10 @@ export class FakeSync {
           platform: "Mac",
           lastSeen: Date.now(),
           connected: true,
+          maker: "",
+          address: "192.168.1.20",
+          firstSeen: Date.now(),
+          disconnectedUs: false,
         },
       ],
     };
@@ -65,6 +69,18 @@ export class FakeSync {
 
   async unpair(): Promise<void> {
     this.status = { state: "not_paired", devices: [] };
+    this.notify();
+  }
+
+  async removeDevice(id: string): Promise<void> {
+    if (this.status.state === "not_paired") return;
+    const devices = this.status.devices.filter((device) => device.id !== id);
+    this.status = {
+      state: devices.some((device) => device.connected)
+        ? "connected"
+        : "searching",
+      devices,
+    };
     this.notify();
   }
 }

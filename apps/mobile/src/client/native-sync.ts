@@ -90,6 +90,10 @@ export class NativeSync {
     this.publish(toSyncStatus(await this.plugin.unpair()));
   }
 
+  async removeDevice(id: string): Promise<void> {
+    this.publish(toSyncStatus(await this.plugin.removeDevice({ id })));
+  }
+
   async settingsChanged(): Promise<void> {
     await this.plugin.settingsChanged();
   }

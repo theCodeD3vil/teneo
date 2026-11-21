@@ -73,6 +73,9 @@ export interface TransportOptions {
     | "send"
   >;
   timers?: Timers;
+  /** Whether the user ended sync between this phone and that device, on
+   *  either of the two: it is not dialed, wherever it is found. */
+  isDisconnected?: (deviceId: string) => boolean;
   /** Something unexpected, never an ordinary refusal or disconnect. */
   onError?: (error: unknown) => void;
   /** A device refused this one outright (auth, version, protocol): trying
@@ -208,6 +211,7 @@ export class PhoneTransport {
   private async dial(deviceId: string): Promise<void> {
     if (this.stopped || deviceId === this.options.deviceId) return;
     if (this.dialing.has(deviceId) || this.connectedTo(deviceId)) return;
+    if (this.options.isDisconnected?.(deviceId)) return;
     const retry = this.retry.get(deviceId);
     if (retry && this.timers.now() < retry.notBefore) return;
 

@@ -241,4 +241,8 @@ export class FakeClient implements TeneoClient {
   unpair(): Promise<void> {
     return this.sync.unpair();
   }
+
+  removeDevice(id: string): Promise<void> {
+    return this.sync.removeDevice(id);
+  }
 }

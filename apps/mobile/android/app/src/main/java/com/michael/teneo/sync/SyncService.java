@@ -231,6 +231,11 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         if (command.getBooleanExtra("crashPage", false)) runtime.debugCrash();
     }
 
+    @Override
+    public void removeDevice(String deviceId) {
+        if (runtime != null) runtime.evaluate("teneoSyncPage.removeDevice(" + org.json.JSONObject.quote(deviceId) + ")");
+    }
+
     // --- what the runtime tells us
 
     @Override
@@ -271,6 +276,31 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         // after an unpair the devices are forgotten: the closing page must not bring them back
         if (destroyed) return;
         controller.peersChanged(peers);
+    }
+
+    @Override
+    public String pairingId() {
+        return controller.pairingId();
+    }
+
+    @Override
+    public String removedPairing(String deviceId) {
+        return controller.removedPairing(deviceId);
+    }
+
+    @Override
+    public boolean isDisconnected(String deviceId) {
+        return controller.isDisconnected(deviceId);
+    }
+
+    @Override
+    public void restoreDevice(String deviceId) {
+        if (!destroyed) controller.restoreDevice(deviceId);
+    }
+
+    @Override
+    public void removedBy(KnownDevices.Peer peer) {
+        if (!destroyed) controller.removedBy(peer);
     }
 
     @Override

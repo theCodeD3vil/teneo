@@ -97,6 +97,18 @@ public class SyncPlugin extends Plugin {
         call.resolve(toJs(controller.status()));
     }
 
+    /** Stop syncing with the device `id`, until it is paired again */
+    @PluginMethod
+    public void removeDevice(PluginCall call) {
+        String id = call.getString("id");
+        if (id == null || id.isEmpty()) {
+            call.reject("No device was named");
+            return;
+        }
+        controller.removeDevice(id);
+        call.resolve(toJs(controller.status()));
+    }
+
     /** A setting sync reads was saved */
     @PluginMethod
     public void settingsChanged(PluginCall call) {

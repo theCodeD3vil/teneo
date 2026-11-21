@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 
 import HistoryScreen from "./components/history/HistoryScreen.vue";
 import ItemViewScreen from "./components/preview/ItemViewScreen.vue";
+import DeviceScreen from "./components/settings/DeviceScreen.vue";
 import SettingsPageScreen from "./components/settings/SettingsPageScreen.vue";
 import SettingsScreen from "./components/settings/SettingsScreen.vue";
 import SetupScreen from "./components/setup/SetupScreen.vue";
@@ -57,6 +58,7 @@ const screenKey = computed(() =>
     currentState.value.screen,
     currentState.value.itemId,
     currentState.value.settingsPage,
+    currentState.value.deviceId,
   ].join("-"),
 );
 </script>
@@ -86,6 +88,12 @@ const screenKey = computed(() =>
             "
             :key="screenKey"
             :page="currentState.settingsPage" />
+          <DeviceScreen
+            v-else-if="
+              currentState.screen === 'device' && currentState.deviceId
+            "
+            :key="screenKey"
+            :device-id="currentState.deviceId" />
           <SetupScreen
             v-else-if="currentState.screen === 'setup'"
             key="setup" />

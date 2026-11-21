@@ -130,7 +130,7 @@ before it is decrypted.
 | `changes`      | `epoch`, `items`, `upTo`, `more`                      | A batch of records, at most 200 and about 256 KB. `upTo` is the sender's `syncSeq` that everything up to has been sent; `more` says another batch follows at once. |
 | `ping`, `pong` | none                                                  | Every 15 seconds. A connection silent for 45 seconds closes with `timeout`.                                                                                        |
 
-Two things came after the first release, without a new version:
+Some things came after the first release, without a new version:
 
 - `state` may also carry `maker` (who made the device, such as `google`, at
   most 64 characters) and `caps` (a list of what the sender understands beyond
@@ -152,6 +152,22 @@ Two things came after the first release, without a new version:
   device holds no such file. A device asks for one image at a time, and
   again on its next connection for any it still lacks. Image records and
   these frames are only sent to a device that listed the capability.
+
+- The user can disconnect one device on another, and the rest of the vault
+  carries on. Every device holds the same key, so this is an agreement
+  between two apps, not a lock: it keeps a Teneo away, not someone who took
+  the key out of one. The device that was told to (`removals` in the engine's
+  options) takes no records from the other and sends it none. To one that
+  lists the capability `removal` it sends `removed` (no fields) and waits two
+  seconds for it to close; one that doesn't list it is only closed. The
+  device that reads `removed` stops dialing the other.
+
+  Pairing again undoes it. `state` may carry `pairing`, an id (at most 64
+  characters) a device makes anew each time it is paired: when sync is turned
+  on, or a code is joined. The device that disconnected another keeps the
+  pairing it had then, and takes it back when it comes with a different one.
+  A device paired before there was such an id sends none, and stays
+  disconnected until it is paired again and sends one.
 
 A colour has no kind of its own on the wire: it travels as the text it was
 copied as, and each device finds the colour in it again.

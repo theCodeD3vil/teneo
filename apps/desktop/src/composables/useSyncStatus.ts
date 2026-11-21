@@ -63,6 +63,8 @@ export function useSyncStatus() {
     turnOff: () => change(() => tiny.api.call("syncTurnOff")),
     setSyncSecrets: (enabled: boolean) =>
       change(() => tiny.api.call("setSyncSecrets", { enabled })),
+    removeDevice: (deviceId: string) =>
+      change(() => tiny.api.call("syncRemoveDevice", { deviceId })),
     pairingInfo: (): Promise<PairingInfo> => tiny.api.call("syncPairingInfo"),
   };
 }

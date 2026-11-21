@@ -4,9 +4,11 @@ import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { computed, ref } from "vue";
 import GoIcon from "~icons/tabler/arrow-right";
+import ChevronIcon from "~icons/tabler/chevron-right";
 import DeviceIcon from "~icons/tabler/devices";
 import ScanIcon from "~icons/tabler/scan";
 
+import { useNavigation } from "../../composables/useNavigation";
 import { canScanQrCode, useQrScanner } from "../../composables/useQrScanner";
 import { useSettings } from "../../composables/useSettings";
 import { useSyncStatus } from "../../composables/useSyncStatus";
@@ -17,6 +19,7 @@ import SettingsSection from "./SettingsSection.vue";
 
 const { settings, updateSettings } = useSettings();
 const { status, isBusy, error, notice, join, turnOff } = useSyncStatus();
+const { openDevice } = useNavigation();
 
 const isOn = computed(
   () =>
@@ -63,13 +66,14 @@ const summary = computed(() => {
     : `Connected to ${count} devices`;
 });
 
-const lastSeen = (device: PairedDevice): string =>
-  device.connected
-    ? "Connected"
-    : `Last seen ${new Date(device.lastSeen).toLocaleString([], {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })}`;
+const lastSeen = (device: PairedDevice): string => {
+  if (device.connected) return "Connected";
+  if (device.disconnectedUs) return "Stopped syncing with this phone";
+  return `Last seen ${new Date(device.lastSeen).toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })}`;
+};
 
 const backgroundReceive = computed({
   get: () => settings.value.backgroundReceive,
@@ -223,10 +227,14 @@ const isTurnOffWarningOpen = ref(false);
           class="text-muted-foreground px-[1.125rem] py-4 text-sm">
           No other devices yet
         </p>
-        <div
+        <!-- a device opens its own screen: what is known of it, and
+             disconnecting it -->
+        <button
           v-for="device in status.devices"
           :key="device.id"
-          class="flex items-center gap-[0.875rem] px-[1.125rem] py-[0.875rem]">
+          type="button"
+          class="active:bg-muted flex items-center gap-[0.875rem] px-[1.125rem] py-[0.875rem] text-left first:rounded-t-[1.5rem] last:rounded-b-[1.5rem]"
+          @click="openDevice(device.id)">
           <span
             class="grid size-[2.75rem] shrink-0 place-items-center rounded-[0.875rem]"
             :class="
@@ -249,7 +257,8 @@ const isTurnOffWarningOpen = ref(false);
             class="bg-success ring-tint-mint mr-1 size-[0.625rem] rounded-full ring-[5px]"
             role="img"
             aria-label="Connected" />
-        </div>
+          <ChevronIcon class="text-muted-foreground size-[1.125rem] shrink-0" />
+        </button>
       </SettingsSection>
 
       <SettingsSection>

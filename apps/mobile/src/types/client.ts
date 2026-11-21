@@ -43,4 +43,7 @@ export interface TeneoClient {
   onSyncStatusChanged(listener: (status: SyncStatus) => void): () => void;
   pair(code: string): Promise<PairResult>;
   unpair(): Promise<void>;
+  /** Stop syncing with one device, until it is paired again. The others
+   *  carry on. */
+  removeDevice(id: string): Promise<void>;
 }

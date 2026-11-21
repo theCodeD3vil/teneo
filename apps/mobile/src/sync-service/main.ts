@@ -4,7 +4,12 @@
 //
 // This page never touches the network itself: the service serves it from the
 // app and answers every other request with a 404.
-import { SyncEngine, fromBase64, toBase64 } from "@teneo/sync";
+import {
+  type ConnectedPeer,
+  SyncEngine,
+  fromBase64,
+  toBase64,
+} from "@teneo/sync";
 
 import { takeAll } from "./inbox";
 import type { ConnectedDevice, NativeSync, SyncPage } from "./native";
@@ -32,12 +37,29 @@ let starting = false;
 let stopWanted = false;
 let allowSecrets = false;
 
+/** A device as native code keeps it (KnownDevices.java) */
+const toDevice = (peer: ConnectedPeer): ConnectedDevice => ({
+  deviceId: peer.deviceId,
+  name: peer.name,
+  platform: peer.platform,
+  maker: peer.maker,
+  address: peer.address ?? "",
+  pairing: peer.pairing,
+});
+
 /** Tell native code who is connected: the app's status and device list */
 function reportPeers(engine: SyncEngine): void {
-  const devices: ConnectedDevice[] = engine
-    .peers()
-    .map(({ deviceId, name, platform }) => ({ deviceId, name, platform }));
-  native.peersChanged(JSON.stringify(devices));
+  native.peersChanged(JSON.stringify(engine.peers().map(toDevice)));
+}
+
+/** The pairing a device had when it was disconnected on this phone, or null */
+function removedPairing(deviceId: string): string | null {
+  try {
+    const pairing: unknown = JSON.parse(native.removedPairing(deviceId));
+    return typeof pairing === "string" ? pairing : null;
+  } catch {
+    return null;
+  }
 }
 
 const page: SyncPage = {
@@ -77,6 +99,17 @@ const page: SyncPage = {
         platform: "android",
         // the Mac shows this maker's logo by the items copied here
         maker: native.deviceMaker() || undefined,
+        // the devices the user disconnected on this phone are native code's
+        // to keep: one stays away until it is paired again
+        pairing: native.pairingId() || undefined,
+        removals: {
+          removed: async (peerId) => removedPairing(peerId),
+          restore: async (peerId) => native.restoreDevice(peerId),
+        },
+        onRemovedBy: (peer) => {
+          log("a device disconnected this phone");
+          native.removedBy(JSON.stringify(toDevice(peer)));
+        },
         // images sync too: their bytes are files native code keeps
         images: opened.images,
         // a Mac's items say which app they were copied from: ask it for each
@@ -120,6 +153,7 @@ const page: SyncPage = {
         engine,
         deviceId,
         native,
+        isDisconnected: (peerId) => native.isDisconnected(peerId),
         onError: (error) => log(`transport error: ${String(error)}`),
         // a used or run-out code is refused by the Mac: nothing to retry
         ...(pairingAddresses && {
@@ -178,6 +212,12 @@ const page: SyncPage = {
       native.restampHeldBackSecrets();
       run?.engine.localChanged();
     }
+  },
+
+  removeDevice(deviceId) {
+    void run?.engine
+      .remove(deviceId)
+      .catch((error: unknown) => log(`engine error: ${String(error)}`));
   },
 
   stop() {

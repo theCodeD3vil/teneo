@@ -18,7 +18,7 @@ import { bundleForTjs, tjsBinary } from "./tjs-tools.ts";
 
 const connectTimeout = 60_000; // Bonjour can take a while to notice a new peer
 const syncTimeout = 20_000;
-const wholeRunTimeout = 480_000;
+const wholeRunTimeout = 660_000;
 
 interface Item {
   id: string;
@@ -129,6 +129,28 @@ class Peer {
         });
       }
       return line === "end list" ? items : undefined;
+    });
+  }
+
+  /** The devices an app-mode peer lists in its Sync tab. */
+  async devices() {
+    const devices: {
+      deviceId: string;
+      connected: boolean;
+      disconnectedUs: boolean;
+    }[] = [];
+    return this.ask("devices", (line) => {
+      const found = /^device (\S+) connected=(\w+) disconnectedUs=(\w+) /.exec(
+        line,
+      );
+      if (found) {
+        devices.push({
+          deviceId: found[1]!,
+          connected: found[2] === "true",
+          disconnectedUs: found[3] === "true",
+        });
+      }
+      return line === "end devices" ? devices : undefined;
     });
   }
 
@@ -628,6 +650,117 @@ try {
   pass(
     "turned off: nothing announces or listens, the history is kept, and it stays off after a restart",
   );
+
+  // --- one device disconnected from another: two apps and a third peer, all
+  // of one vault
+  const dirX = join(folder, "x");
+  const dirY = join(folder, "y");
+  const dirZ = join(folder, "z");
+  const x = await Peer.start("App X", bundle, null, dirX);
+  peers.push(x);
+  await x.command("turnon", "ok turnon");
+  const xCode = await x.ask("code", (line) => /^code (\S+)/.exec(line)?.[1]);
+  const y = await Peer.start("App Y", bundle, null, dirY);
+  peers.push(y);
+  await y.command(`join ${xCode}`, "ok join");
+  const z = await Peer.start("Peer Z", bundle, xCode, dirZ);
+  peers.push(z);
+  await eventually(
+    "X, Y and Z to connect to each other",
+    async () => x.connected >= 2 && y.connected >= 2 && z.connected >= 2,
+    connectTimeout,
+  );
+  await x.copy("x-before");
+  await eventually(
+    "Y to get x-before",
+    async () => !!find(await y.list(), "x-before"),
+  );
+
+  await x.command(`disconnect ${y.deviceId}`, "ok disconnect");
+  await eventually("X to drop Y from its devices, and keep Z", async () => {
+    const devices = await x.devices();
+    return (
+      !devices.some((device) => device.deviceId === y.deviceId) &&
+      devices.some(
+        (device) => device.deviceId === z.deviceId && device.connected,
+      )
+    );
+  });
+  await eventually("Y to say X disconnected it, and keep Z", async () => {
+    const devices = await y.devices();
+    return (
+      devices.some(
+        (device) =>
+          device.deviceId === x.deviceId &&
+          device.disconnectedUs &&
+          !device.connected,
+      ) &&
+      devices.some(
+        (device) => device.deviceId === z.deviceId && device.connected,
+      )
+    );
+  });
+  // Z still syncs with both: what X copies reaches Y that way, as the app
+  // warns before it disconnects
+  await x.copy("x-through-z");
+  await eventually(
+    "Y to get x-through-z by way of Z",
+    async () => !!find(await y.list(), "x-through-z"),
+  );
+  pass(
+    "a disconnected device left the list and was told; the third device stayed and still passed items along",
+  );
+
+  // with Z gone nothing passes between the two, however long they look
+  await z.stop();
+  await eventually(
+    "X and Y to see Z go",
+    async () => x.connected === 0 && y.connected === 0,
+    connectTimeout,
+  );
+  await x.copy("x-direct");
+  await y.copy("y-direct");
+  await pause(12_000); // two rounds of looking for devices, and more
+  if (x.connected !== 0 || y.connected !== 0) {
+    throw new Error("a disconnected device connected again");
+  }
+  if (find(await y.list(), "x-direct") || find(await x.list(), "y-direct")) {
+    throw new Error("an item passed between two disconnected devices");
+  }
+  // quit and started again, it is still disconnected
+  await x.stop("SIGTERM");
+  const xAgain = await Peer.start("App X", bundle, null, dirX);
+  peers.push(xAgain);
+  await pause(12_000);
+  if (xAgain.connected !== 0 || find(await y.list(), "x-direct")) {
+    throw new Error("a restart let a disconnected device back in");
+  }
+  pass("the two disconnected devices kept apart, across a restart too");
+
+  // paired again, Y is one of X's devices once more
+  await y.command("off", "ok off");
+  await y.command(`join ${xCode}`, "ok join");
+  await eventually(
+    "X and Y to connect once Y was paired again",
+    async () => xAgain.connected >= 1 && y.connected >= 1,
+    connectTimeout,
+  );
+  await eventually(
+    "what each copied meanwhile to arrive on the other",
+    async () =>
+      !!find(await y.list(), "x-direct") &&
+      !!find(await xAgain.list(), "y-direct"),
+  );
+  if (
+    !(await xAgain.devices()).some(
+      (device) => device.deviceId === y.deviceId && device.connected,
+    )
+  ) {
+    throw new Error("the device paired again is not in the list");
+  }
+  await y.stop("SIGTERM");
+  await xAgain.stop("SIGTERM");
+  pass("pairing the disconnected device again brought it back");
 
   console.log("\nthe peers stayed in sync");
 } catch (error) {

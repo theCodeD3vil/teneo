@@ -28,6 +28,19 @@ export function createSyncTables(database: Database): void {
       `ALTER TABLE "SYNC_PEERS" ADD COLUMN maker TEXT NOT NULL DEFAULT ''`,
     );
   }
+  // added with disconnecting a device: the pairing it last said it has, when
+  // it first connected, the pairing it had when it was disconnected here
+  // (null while it is not), and whether it disconnected this Mac
+  const added = {
+    pairing: `TEXT NOT NULL DEFAULT ''`,
+    pairedAt: `INTEGER`,
+    removedPairing: `TEXT`,
+    removedUs: `INTEGER NOT NULL DEFAULT 0`,
+  };
+  for (const [column, type] of Object.entries(added)) {
+    if (peerColumns.includes(column)) continue;
+    database.exec(`ALTER TABLE "SYNC_PEERS" ADD COLUMN ${column} ${type}`);
+  }
   // The epoch is made with the database: a peer that sees another one knows
   // its cursor into this store means nothing. The counter only ever goes up,
   // even when rows are deleted, so a number is never handed out twice.

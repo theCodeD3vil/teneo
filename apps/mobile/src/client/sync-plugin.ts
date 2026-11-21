@@ -9,6 +9,13 @@ export interface NativeDevice {
   platform: string;
   lastSeen: number;
   connected: boolean;
+  /** Who made it, in lower case ("google"), or "" */
+  maker: string;
+  /** `host` or `host:port`, or "" */
+  address: string;
+  firstSeen: number;
+  /** It said it disconnected this phone */
+  removedUs: boolean;
 }
 
 /** What SyncController.java knows */
@@ -33,6 +40,8 @@ export interface SyncPlugin {
   }): Promise<NativeSyncStatus>;
   /** Stop sync, forget the key and the devices */
   unpair(): Promise<NativeSyncStatus>;
+  /** Stop syncing with one device, until it is paired again */
+  removeDevice(options: { id: string }): Promise<NativeSyncStatus>;
   /** A setting sync reads was saved */
   settingsChanged(): Promise<void>;
   requestNotifications(): Promise<{ granted: boolean }>;
@@ -59,6 +68,13 @@ function toDevice(device: NativeDevice): PairedDevice {
     platform: platformNames[device.platform] ?? (device.platform || "Device"),
     lastSeen: device.lastSeen,
     connected: device.connected,
+    maker: device.maker
+      ? device.maker.charAt(0).toUpperCase() + device.maker.slice(1)
+      : "",
+    // the port it was reached on says nothing to the user
+    address: (device.address ?? "").replace(/:\d+$/, ""),
+    firstSeen: device.firstSeen ?? 0,
+    disconnectedUs: device.removedUs === true,
   };
 }
 

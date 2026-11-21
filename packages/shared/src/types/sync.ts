@@ -4,9 +4,18 @@ export interface SyncDevice {
   name: string;
   /** "mac", "android", ... as the device reported it */
   platform: string;
+  /** who made it, as it said ("google"); empty when it didn't */
+  maker: string;
   connected: boolean;
   /** when it was last connected, in ms since the epoch */
   lastSeenAt: number;
+  /** where it is on the network now, or was last; null when never known */
+  address: string | null;
+  /** when it first connected; null for one from before this was kept */
+  pairedAt: number | null;
+  /** it stopped syncing with this device, by its user's choice: it comes
+   *  back once this device is paired again */
+  disconnectedUs: boolean;
 }
 
 /** How sync is going on this device, as the Sync tab shows it. */

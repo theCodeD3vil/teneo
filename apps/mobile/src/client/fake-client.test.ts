@@ -383,6 +383,20 @@ describe("FakeClient", () => {
       expect(syncStatusUpdates).toBe(3);
     });
 
+    test("disconnecting a device takes it off the list and leaves sync on", async () => {
+      const client = new FakeClient([]);
+      await client.pair(await formatRecoveryCode(new Uint8Array(32).fill(7)));
+      const [device] = (await client.getSyncStatus()).devices;
+      const heard: number[] = [];
+      client.onSyncStatusChanged((status) => heard.push(status.devices.length));
+      await client.removeDevice(device!.id);
+      expect(heard).toEqual([0]);
+      expect(await client.getSyncStatus()).toEqual({
+        state: "searching",
+        devices: [],
+      });
+    });
+
     test("refuses a well-shaped code the sync core doesn't accept", async () => {
       const client = new FakeClient([]);
       for (const code of [
