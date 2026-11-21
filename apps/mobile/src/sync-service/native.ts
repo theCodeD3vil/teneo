@@ -28,6 +28,10 @@ export interface NativeSync extends NativeHistory {
   /** Dial `ip:port`. Returns the connection's number at once; `opened` or
    *  `closed` for it follows. Only local addresses are dialed. */
   connect(address: string): number;
+  /** The next of the connections' openings, messages and ends, in the order
+   *  they happened, or null (or undefined, as some web views answer) once
+   *  there are none: see inbox.ts */
+  nextEvent(): string | null | undefined;
   /** Queue a text message. False when it can't be sent. */
   send(connection: number, message: string): boolean;
   close(connection: number, reason: string): void;
@@ -67,8 +71,7 @@ export interface ConnectedDevice {
   platform: string;
 }
 
-/** What native code calls on the page: the object `teneoSyncPage`. Messages
- *  and closes of one connection arrive in order. */
+/** What native code calls on the page: the object `teneoSyncPage`. */
 export interface SyncPage {
   /** Run sync with this vault key (base64), which native code keeps. Items
    *  holding secrets travel only while `syncSecrets` is true. */
@@ -83,13 +86,12 @@ export interface SyncPage {
   setSyncSecrets(allowed: boolean): void;
   /** End sync: close every connection */
   stop(): void;
-  /** A connection is ready. `address` is `host:port` for one this phone
-   *  dialed, and the host alone for one that came in. */
-  opened(connection: number, address: string, initiator: boolean): void;
-  message(connection: number, message: string): void;
-  /** A connection ended, whichever side ended it; `reason` may be empty. For a
-   *  dial that never opened it comes alone. */
-  closed(connection: number, reason: string): void;
+  /** Connections have opened, sent messages or ended: take them all with
+   *  `nextEvent`. Said again only once the page has found none left. An
+   *  opened `address` is `host:port` for a connection this phone dialed, and
+   *  the host alone for one that came in. A close may have no reason, and
+   *  for a dial that never opened it comes alone. */
+  readInbox(): void;
   discovered(deviceId: string, addresses: string[], port: number): void;
   /** The phone's history changed (a copy, a pin, a delete, made in the app or
    *  by the share sheet): send it on */

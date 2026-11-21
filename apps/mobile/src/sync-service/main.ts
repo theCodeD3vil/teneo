@@ -6,6 +6,7 @@
 // app and answers every other request with a 404.
 import { SyncEngine, fromBase64, toBase64 } from "@teneo/sync";
 
+import { takeAll } from "./inbox";
 import type { ConnectedDevice, NativeSync, SyncPage } from "./native";
 import { openSyncStore } from "./store";
 import { loggedStore } from "./store-log";
@@ -189,10 +190,23 @@ const page: SyncPage = {
     log("sync stopped");
   },
 
-  opened: (id, address, initiator) =>
-    run?.transport.opened(id, address, initiator),
-  message: (id, message) => run?.transport.message(id, message),
-  closed: (id, reason) => run?.transport.closed(id, reason),
+  readInbox() {
+    takeAll(
+      () => native.nextEvent(),
+      (event) => {
+        if (event.kind === "opened") {
+          run?.transport.opened(
+            event.connection,
+            event.address,
+            event.initiator,
+          );
+        } else if (event.kind === "message") {
+          run?.transport.message(event.connection, event.message);
+        } else run?.transport.closed(event.connection, event.reason);
+      },
+      (error) => log(`a connection event failed: ${String(error)}`),
+    );
+  },
   discovered: (deviceId, addresses, port) =>
     run?.transport.found({ deviceId, addresses, port }),
   localChanged: () => run?.engine.localChanged(),
