@@ -349,11 +349,17 @@ const tombstoneRow = `(deletedAt IS NOT NULL AND (
 ))`;
 // ...and one still young enough that it must stay: ?  is its cutoff (ms)
 const youngTombstone = `(${tombstoneRow} AND deletedAt >= ?)`;
+// An image sync has heard of whose file has not arrived yet. It is not shown,
+// so the limits don't count it either, or a file that never comes would take
+// a shown item's place. They still delete it once it is older than the last
+// item they keep, as they would if it were shown.
+const waitingImage = `(kind = 'image' AND path IS NULL AND deletedAt IS NULL)`;
 
 // Matches unpinned items copied before ?2 (ms), or after ?3/?5 in the list:
 // the oldest item "Maximum items" keeps. Pinned items are never deleted or
 // counted, and neither are young tombstones: they are not history, they are
-// news for the other devices. Fill the five with deletionValues.
+// news for the other devices. Waiting images are deleted but not counted.
+// Fill the five with deletionValues.
 const deletionCondition = `
   pinnedAt IS NULL AND NOT ${youngTombstone} AND (
     dateCopied < ? OR dateCopied < ? OR (dateCopied = ? AND id < ?)
@@ -378,7 +384,7 @@ function deletionValues(
       database,
       `
         SELECT dateCopied, id FROM "CLIPBOARD_ITEMS"
-        WHERE pinnedAt IS NULL AND NOT ${youngTombstone}
+        WHERE pinnedAt IS NULL AND NOT ${youngTombstone} AND NOT ${waitingImage}
         ORDER BY dateCopied DESC, id DESC LIMIT 1 OFFSET ?
       `,
       cutoff,
@@ -403,7 +409,8 @@ function limitsHistory(copiedBefore: number, keepNewest: number): boolean {
 }
 
 /** How many items in the history deleteClipboardItems would delete with
- *  these limits. Already-deleted items still get removed, but aren't counted. */
+ *  these limits. Already-deleted items and waiting images still get removed,
+ *  but aren't counted: they are not shown. */
 export async function countClipboardItemsToDelete(
   app: TinyApp,
   copiedBefore: number,
@@ -415,7 +422,7 @@ export async function countClipboardItemsToDelete(
     database,
     `
       SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS"
-      WHERE deletedAt IS NULL AND (${deletionCondition})
+      WHERE deletedAt IS NULL AND NOT ${waitingImage} AND (${deletionCondition})
     `,
     ...deletionValues(database, copiedBefore, keepNewest),
   );
@@ -659,11 +666,13 @@ export async function setClipboardItemPinned(
 let imageSizes = new Map<string, number>();
 
 /** Bytes each history item takes, newest first: its text, color or file
- *  list, plus its saved image. The storage limit counts the unpinned ones. */
+ *  list, plus its saved image. The storage limit counts the unpinned ones.
+ *  Young tombstones and waiting images are left out, as "Maximum items"
+ *  leaves them out: the storage limit becomes a count of the newest items. */
 export async function listClipboardItemSizes(
   app: TinyApp,
 ): Promise<Array<{ kind: string; bytes: number; pinned: boolean }>> {
-  // youngTombstone, on the sizes table's columns
+  // youngTombstone and waitingImage, on the sizes table's columns
   const rows = all<
     Pick<ClipboardItemRow, "kind" | "path"> & {
       pinned: number;
@@ -677,6 +686,7 @@ export async function listClipboardItemSizes(
       WHERE NOT (deletedAt IS NOT NULL AND deletedAt >= ? AND (
         (${textKinds} AND NOT hasValue) OR (kind = 'image' AND NOT hasPath)
       ))
+      AND NOT (kind = 'image' AND NOT hasPath AND deletedAt IS NULL)
       ORDER BY dateCopied DESC, id DESC
     `,
     Date.now() - tombstoneLifetime,
@@ -733,7 +743,8 @@ export async function countClipboardMedia(
     await initializeDatabase(app),
     `
       SELECT
-        COUNT(*) FILTER (WHERE kind = 'image') AS imageCount,
+        -- only images with a file: not a waiting one, nor an image's tombstone
+        COUNT(*) FILTER (WHERE kind = 'image' AND path IS NOT NULL) AS imageCount,
         SUM(CASE WHEN kind = 'files' THEN json_array_length(path) END) AS fileCount
       FROM "CLIPBOARD_ITEMS"
     `,
@@ -900,12 +911,8 @@ function listConditions(
   search: string,
   cursor?: ClipboardListCursor,
 ): { where: string; values: unknown[] } {
-  // an image that sync has heard of and whose file has not arrived yet is not
-  // shown until it has
-  const conditions = [
-    `deletedAt IS NULL`,
-    `NOT (kind = 'image' AND path IS NULL)`,
-  ];
+  // a waiting image is not shown until its file has arrived
+  const conditions = [`deletedAt IS NULL`, `NOT ${waitingImage}`];
   const values: unknown[] = [];
   if (kind !== "all") {
     conditions.push(`kind = ?`);

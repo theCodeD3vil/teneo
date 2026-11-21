@@ -81,6 +81,16 @@ public class HistoryQueriesTest {
     }
 
     @Test
+    public void maximumItemsCountsOnlyWhatIsShownButDeletesWaitingImagesPastIt() {
+        // an image whose file never arrived takes no shown item's place...
+        assertTrue(HistoryQueries.LAST_KEPT_QUERY.contains("AND NOT " + HistoryQueries.WAITING_IMAGE + " ORDER BY"));
+        // ...and the list leaves it out by the same rule
+        assertTrue(HistoryQueries.listConditions("all", "", null).sql.contains("NOT " + HistoryQueries.WAITING_IMAGE));
+        // but one older than the last item kept is deleted like any other
+        assertFalse(HistoryQueries.DELETION_CONDITION.contains("NOT " + HistoryQueries.WAITING_IMAGE));
+    }
+
+    @Test
     public void maximumItemsCutsAfterTheLastItemItKeeps() {
         long now = 100 * HistoryQueries.DAY_MS;
         // fewer items than the limit, or no limit: nothing is after the last one kept

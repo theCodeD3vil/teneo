@@ -28,6 +28,7 @@ import {
   softDeleteClipboardItem,
 } from "../database";
 import { clearClipboardHistory } from "../history-limits";
+import { appPaths } from "../paths";
 import { loadSettings, updateSettings } from "../settings";
 import { clipboardHistoryChangedEvent } from "../types/clipboard";
 import { createSyncManager, stopSyncWhenTold } from "./app-sync";
@@ -229,11 +230,13 @@ async function handle(line: string): Promise<void> {
       break;
     }
     case "image": {
-      // a png file, copied in as the clipboard would hand one over
+      // a png file, copied in as the clipboard would hand one over, into
+      // the app's data folder (data/dev in a dev run)
       const bytes = await tjs.readFile(argument);
       const size = new DataView(bytes.buffer, bytes.byteOffset + 16, 8);
-      const saved = `${folder}/data/images/${crypto.randomUUID()}.png`;
-      await tjs.makeDir(`${folder}/data/images`, { recursive: true });
+      const { data } = await appPaths(app);
+      const saved = `${data}/images/${crypto.randomUUID()}.png`;
+      await tjs.makeDir(`${data}/images`, { recursive: true });
       await tjs.writeFile(saved, bytes);
       const item = await saveClipboardItem(
         {

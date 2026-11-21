@@ -79,10 +79,7 @@ final class SyncRuntime {
     /** The core is told to stop, and this long later the web view is destroyed,
      *  which leaves time for the close frames to leave */
     private static final long STOP_GRACE_MS = 300;
-    /** Message text handed to the page and not yet run by it. Past this, the
-     *  thread reading a socket waits, so a device that sends faster than the
-     *  page takes is slowed by its own connection instead of filling memory.
-     *  One message always gets through, whatever its size. */
+    /** Message text queued for the page and not yet taken: see PageInbox */
     private static final long MAX_WAITING_CHARS = 2L * 1024 * 1024;
 
     private final Context context;
@@ -102,9 +99,8 @@ final class SyncRuntime {
     private volatile boolean closed;
     private long startedAt;
 
-    // messages on their way to the page: guarded by `waiting`
-    private final Object waiting = new Object();
-    private long waitingChars;
+    // connections opening, their messages and their ends, for the page to take
+    private final PageInbox inbox = new PageInbox(MAX_WAITING_CHARS);
 
     private volatile SyncNetwork network;
 
@@ -176,45 +172,9 @@ final class SyncRuntime {
         });
     }
 
-    /**
-     * Runs a message's script in the page, and counts its text as waiting
-     * until the page has run it. Called on a socket's reading thread, which
-     * waits here while too much is waiting already.
-     */
-    private void deliver(String script, int chars) {
-        synchronized (waiting) {
-            while (waitingChars > MAX_WAITING_CHARS && !closed) {
-                try {
-                    waiting.wait(1_000);
-                } catch (InterruptedException stopping) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-            if (closed) return;
-            waitingChars += chars;
-        }
-        main.post(() -> {
-            if (closed || page == null) {
-                delivered(chars);
-                return;
-            }
-            page.evaluateJavascript(script, done -> delivered(chars));
-        });
-    }
-
-    private void delivered(int chars) {
-        synchronized (waiting) {
-            waitingChars -= chars;
-            waiting.notifyAll();
-        }
-    }
-
-    /** Lets go of every thread waiting to hand the page a message */
-    private void releaseWaiting() {
-        synchronized (waiting) {
-            waiting.notifyAll();
-        }
+    /** Tells the page there is something in its inbox. Any thread. */
+    private void tellPage(boolean needed) {
+        if (needed) evaluate("teneoSyncPage.readInbox()");
     }
 
     /** Ends sync politely: the page closes its connections, then everything is torn down. Main thread. */
@@ -229,7 +189,7 @@ final class SyncRuntime {
     void abandon() {
         if (closed) return;
         closed = true;
-        releaseWaiting();
+        inbox.close();
         history.close();
         if (discovery != null) discovery.stop();
         SyncNetwork current = network;
@@ -240,7 +200,7 @@ final class SyncRuntime {
     private void dispose() {
         if (closed) return;
         closed = true;
-        releaseWaiting();
+        inbox.close();
         history.close();
         SyncNetwork current = network;
         if (current != null) current.stop();
@@ -284,18 +244,19 @@ final class SyncRuntime {
         @Override
         public void opened(int id, String address, boolean initiator) {
             Log.i(TAG, "connection " + id + (initiator ? " dialed " : " from ") + address);
-            evaluate("teneoSyncPage.opened(" + id + "," + JSONObject.quote(address) + "," + initiator + ")");
+            tellPage(inbox.add(PageInbox.opened(id, address, initiator)));
         }
 
         @Override
         public void message(int id, String text) {
-            deliver("teneoSyncPage.message(" + id + "," + JSONObject.quote(text) + ")", text.length());
+            // waits here while the page is too far behind
+            tellPage(inbox.put(PageInbox.message(id, text)));
         }
 
         @Override
         public void closed(int id, String reason) {
             Log.i(TAG, "connection " + id + " closed" + (reason.isEmpty() ? "" : ": " + reason));
-            evaluate("teneoSyncPage.closed(" + id + "," + JSONObject.quote(reason) + ")");
+            tellPage(inbox.add(PageInbox.closed(id, reason)));
         }
 
         @Override
@@ -427,6 +388,12 @@ final class SyncRuntime {
         public int connect(String address) {
             SyncNetwork current = network;
             return current == null ? -1 : current.connect(address);
+        }
+
+        /** The next connection event for the page, or null when it has taken them all: see PageInbox */
+        @JavascriptInterface
+        public String nextEvent() {
+            return inbox.take();
         }
 
         @JavascriptInterface

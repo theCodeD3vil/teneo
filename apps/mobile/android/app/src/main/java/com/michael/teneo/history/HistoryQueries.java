@@ -26,15 +26,21 @@ public final class HistoryQueries {
     public static final String TOMBSTONE_ROW =
         "(deletedAt IS NOT NULL AND ((kind = 'text' AND value IS NULL) OR (kind = 'image' AND path IS NULL)))";
 
-    /** An image sync has heard of whose file has not arrived yet: not shown until it has */
+    /**
+     * An image sync has heard of whose file has not arrived yet: not shown until
+     * it has, so "Maximum items" doesn't count it either, or a file that never
+     * comes would take a shown item's place. The limits still delete it once it
+     * is older than the last item they keep. (A deleted image matches too: it
+     * is a tombstone, kept out of both anyway.)
+     */
     public static final String WAITING_IMAGE = "(kind = 'image' AND path IS NULL)";
     private static final String YOUNG_TOMBSTONE = "(" + TOMBSTONE_ROW + " AND deletedAt >= ?)";
 
     /**
      * Unpinned items copied before the second value, or after the third and
      * fifth in the list: the oldest item "Maximum items" keeps. Pinned items
-     * are never deleted or counted, and neither are young tombstones. Fill the
-     * five with deletionValues.
+     * are never deleted or counted, and neither are young tombstones. Waiting
+     * images are deleted but not counted. Fill the five with deletionValues.
      */
     public static final String DELETION_CONDITION =
         "pinnedAt IS NULL AND NOT " +
@@ -49,6 +55,8 @@ public final class HistoryQueries {
     public static final String LAST_KEPT_QUERY =
         "SELECT dateCopied, id FROM CLIPBOARD_ITEMS WHERE pinnedAt IS NULL AND NOT " +
         YOUNG_TOMBSTONE +
+        " AND NOT " +
+        WAITING_IMAGE +
         " ORDER BY dateCopied DESC, id DESC LIMIT 1 OFFSET ?";
 
     public static Object[] lastKeptValues(long now, long keepNewest) {

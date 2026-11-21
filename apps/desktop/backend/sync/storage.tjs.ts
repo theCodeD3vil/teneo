@@ -13,6 +13,7 @@ import { Database } from "tjs:sqlite";
 
 import {
   countClipboardItemsToDelete,
+  countClipboardMedia,
   getClipboardItem,
   deleteClipboardItems,
   getSyncIdentity,
@@ -48,6 +49,14 @@ async function until(condition: () => boolean, what: string): Promise<void> {
     quiet = condition() ? quiet + 1 : 0;
   }
   check(quiet >= 5, `timed out: ${what}`);
+}
+
+/** Wait until Date.now() has moved on, so the next copy is the later one. A
+ *  delay alone can end early: libuv times it from the clock it read at the
+ *  start of the loop's turn, and a save runs within one turn. */
+async function nextMillisecond(): Promise<void> {
+  const start = Date.now();
+  while (Date.now() <= start) await delay(1);
 }
 
 // --- a stub app on a temp folder
@@ -297,7 +306,7 @@ await test("every write path stamps the row with the next syncSeq", async () => 
     "created here",
   );
 
-  await delay(2);
+  await nextMillisecond();
   await saveClipboardItem(
     textItem("one", { name: "Safari", bundleId: "s" }),
     app,
@@ -577,7 +586,7 @@ await test("a change to an id that is not a text is left alone", async () => {
 await test("newestUnpinned is the newest unpinned text, and none when an image is newer", async () => {
   reset();
   await saveClipboardItem(textItem("older"), app);
-  await delay(2);
+  await nextMillisecond();
   const newer = await saveClipboardItem(textItem("newer"), app);
   const pinned = await saveClipboardItem(textItem("pinned"), app);
   await setClipboardItemPinned(pinned.id, true, app);
@@ -586,7 +595,7 @@ await test("newestUnpinned is the newest unpinned text, and none when an image i
     newer.id,
     "skips the pinned",
   );
-  await delay(2);
+  await nextMillisecond();
   await saveClipboardItem(await imageItem("i3"), app);
   same(
     await store.transaction((tx) => tx.newestUnpinned()),
@@ -733,18 +742,18 @@ await test("history limits leave young tombstones alone and don't count them", a
     Date.now(),
     old.id,
   );
-  await delay(2);
+  await nextMillisecond();
   const live: string[] = [];
   for (const text of ["l1", "l2", "l3"]) {
     live.push((await saveClipboardItem(textItem(text), app)).id);
-    await delay(2);
+    await nextMillisecond();
   }
   const doomed: string[] = [];
   for (const text of ["d1", "d2", "d3"]) {
     const id = (await saveClipboardItem(textItem(text), app)).id;
     await softDeleteClipboardItem(id, app);
     doomed.push(id);
-    await delay(2);
+    await nextMillisecond();
   }
 
   // the newest 2 are l3 and l2: l1 is over the limit, as is the older pre-sync row
@@ -773,6 +782,54 @@ await test("history limits leave young tombstones alone and don't count them", a
   );
   const sizes = await listClipboardItemSizes(app);
   same(sizes.length, 0, "and they are not counted as history");
+});
+
+await test("history limits don't count waiting images, and delete the old ones", async () => {
+  reset();
+  const live: string[] = [];
+  for (const text of ["l1", "l2", "l3"]) {
+    live.push((await saveClipboardItem(textItem(text), app)).id);
+    await nextMillisecond();
+  }
+  // records whose files never came: the newest of all, and the oldest
+  const waiting = (id: string, dateCopied: number) =>
+    record(id, null, {
+      kind: "image",
+      dateCopied,
+      image: {
+        hash: id.padEnd(64, "0"),
+        bytes: 10,
+        width: 1,
+        height: 1,
+        type: "image/png",
+      },
+    });
+  await store.transaction(async (tx) => {
+    await tx.put(waiting("aa", Date.now() + day));
+    await tx.put(waiting("bb", 1000));
+  });
+  check(rowOf("aa").path === null, "the newest is waiting for its file");
+
+  // the newest 2 shown are l3 and l2: only l1 is over the limit
+  same(
+    await countClipboardItemsToDelete(app, 0, 2),
+    1,
+    "a waiting image takes no shown item's place",
+  );
+  same(
+    (await listClipboardItemSizes(app)).length,
+    3,
+    "nor does the storage limit count it",
+  );
+  same((await countClipboardMedia(app)).imageCount, 0, "nor the images shown");
+  await deleteClipboardItems(app, 0, 2);
+  same(
+    allRows()
+      .map((r) => r.id)
+      .sort(),
+    ["aa", ...live.slice(1)].sort(),
+    "l1 and the older waiting image went, the newer one waits on",
+  );
 });
 
 await test("tombstones are removed after 30 days, young ones stay", async () => {
