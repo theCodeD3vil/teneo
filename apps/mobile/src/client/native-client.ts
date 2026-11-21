@@ -382,6 +382,10 @@ export class NativeClient implements TeneoClient {
     await this.sync?.unpair();
   }
 
+  async removeDevice(id: string): Promise<void> {
+    await this.sync?.removeDevice(id);
+  }
+
   /** Sync in the background shows a notification: ask for it once sync is
    *  on in the background, when the user can see why */
   private async askForNotifications(): Promise<void> {

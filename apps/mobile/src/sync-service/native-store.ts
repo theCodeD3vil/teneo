@@ -332,8 +332,14 @@ class NativeTransaction implements SyncTransaction {
   }
 
   async updatePeer(deviceId: string, patch: PeerPatch): Promise<void> {
+    // The device's pairing is not the table's to keep: native code has it
+    // from the list of connected devices, with the rest of what the app
+    // shows of a device (KnownDevices.java), and refuses a field it doesn't
+    // know (SyncQueries.peerFields)
     const changes = Object.fromEntries(
-      Object.entries(patch).filter(([, value]) => value !== undefined),
+      Object.entries(patch).filter(
+        ([field, value]) => value !== undefined && field !== "pairing",
+      ),
     );
     this.peers.set(deviceId, { ...this.peers.get(deviceId), ...changes });
   }

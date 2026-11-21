@@ -113,6 +113,8 @@ function setup() {
   };
 
   const peers: { deviceId: string }[] = [];
+  /** The devices sync was ended with, on either side */
+  const disconnected = new Set<string>();
   const attached: {
     channel: Channel;
     end(error: SyncError | null): void;
@@ -132,12 +134,14 @@ function setup() {
     deviceId: phoneId,
     native,
     timers,
+    isDisconnected: (deviceId) => disconnected.has(deviceId),
     onError: (error) => log.errors.push(error),
   });
   return {
     timers,
     log,
     peers,
+    disconnected,
     attached,
     transport,
     refuseConnects: (value: boolean) => (refuseConnects = value),
@@ -226,6 +230,19 @@ describe("dialing what Bonjour finds", () => {
       port: 47823,
     });
     expect(harness.log.connects).toEqual([]);
+  });
+
+  test("a device sync was ended with is not dialed, until it is taken back", async () => {
+    const harness = setup();
+    await harness.transport.start();
+    harness.disconnected.add(macId);
+    harness.transport.found(mac());
+    harness.timers.advance(60_000);
+    expect(harness.log.connects).toEqual([]);
+
+    harness.disconnected.delete(macId);
+    harness.timers.advance(5000);
+    expect(harness.log.connects).toEqual(["10.0.0.2:47823"]);
   });
 
   test("when native code cannot start a dial, that is a failed dial", async () => {

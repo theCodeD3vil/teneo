@@ -16,6 +16,7 @@ export function createSyncManager(app: TinyApp): SyncManager {
     start: startSyncService,
     restampSecretItems,
     forgetPeers: (forApp) => new SqliteSyncStore(forApp).forgetPeers(),
+    newPairing: (forApp) => new SqliteSyncStore(forApp).newPairing(),
     computerName: () =>
       runCommand(["/usr/sbin/scutil", "--get", "ComputerName"]),
     networkAddresses: () => tjs.system.networkInterfaces,

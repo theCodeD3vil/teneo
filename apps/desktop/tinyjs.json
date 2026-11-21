@@ -65,6 +65,7 @@
     "syncJoin",
     "syncTurnOff",
     "syncPairingInfo",
+    "syncRemoveDevice",
     "setSyncSecrets"
   ],
   "chrome": {

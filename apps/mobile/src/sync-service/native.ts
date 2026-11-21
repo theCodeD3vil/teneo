@@ -22,6 +22,19 @@ export interface NativeSync extends NativeHistory {
   restampHeldBackSecrets(): void;
   /** The devices connected now, as a JSON array of `ConnectedDevice` */
   peersChanged(devices: string): void;
+  /** The id of this phone's pairing, made anew each time it is paired; ""
+   *  for a phone paired before there was one */
+  pairingId(): string;
+  /** The pairing a device had when the user disconnected it on this phone,
+   *  as a JSON string; `null` when it isn't disconnected (KnownDevices.java) */
+  removedPairing(deviceId: string): string;
+  /** A device disconnected here was paired again: it syncs once more */
+  restoreDevice(deviceId: string): void;
+  /** A device said it disconnected this phone: a `ConnectedDevice` in JSON */
+  removedBy(device: string): void;
+  /** Whether sync with a device was ended, by it or on this phone: it is
+   *  not dialed */
+  isDisconnected(deviceId: string): boolean;
   /** The core has its keys: listen, announce this device and look for the
    *  others, all with the vault's tag */
   ready(tag: string, deviceId: string): void;
@@ -65,6 +78,12 @@ export interface ConnectedDevice {
   deviceId: string;
   name: string;
   platform: string;
+  /** Who made it, as it said; "" when it didn't */
+  maker: string;
+  /** Where it is on the network; "" when that isn't known */
+  address: string;
+  /** The id of its pairing; "" when it said none */
+  pairing: string;
 }
 
 /** What native code calls on the page: the object `teneoSyncPage`. Messages
@@ -81,6 +100,9 @@ export interface SyncPage {
   ): Promise<void>;
   /** The user changed whether items holding secrets travel */
   setSyncSecrets(allowed: boolean): void;
+  /** The user disconnected this device, and native code keeps that it is:
+   *  tell it, and end the connection to it */
+  removeDevice(deviceId: string): void;
   /** End sync: close every connection */
   stop(): void;
   /** A connection is ready. `address` is `host:port` for one this phone

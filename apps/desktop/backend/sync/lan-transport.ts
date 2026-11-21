@@ -57,6 +57,9 @@ export interface LanTransportOptions {
   discovery: Discovery;
   /** The devices paired before, whose last address is tried. */
   knownPeers: () => Promise<PeerRecord[]>;
+  /** Whether the user ended sync between this device and that one: it is
+   *  not dialed, wherever it is found. */
+  isDisconnected?: (deviceId: string) => Promise<boolean>;
   ports?: number[];
   /** Which addresses may connect to us and be dialed: local networks only,
    *  unless a test needs another rule. */
@@ -294,6 +297,7 @@ export class LanTransport {
 
     this.dialing.add(key);
     try {
+      if (await this.options.isDisconnected?.(key)) return;
       const targets = (await addresses()).filter((address) =>
         this.isLocal(address.slice(0, address.lastIndexOf(":"))),
       );

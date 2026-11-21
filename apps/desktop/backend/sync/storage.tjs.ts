@@ -1014,6 +1014,47 @@ await test("forgetPeers forgets the paired devices and nothing else", async () =
   same(rowOf("t-forget").value, "kept", "the history stays");
 });
 
+await test("a disconnected device is kept as one until it is paired again", async () => {
+  reset();
+  await store.forgetPeers();
+  same(await store.pairing(), null, "a Mac paired before has no pairing id");
+  await store.newPairing();
+  const pairing = await store.pairing();
+  check(/^[0-9a-f]{16}$/.test(pairing ?? ""), "pairing makes one");
+  await store.newPairing();
+  check((await store.pairing()) !== pairing, "and pairing again another");
+
+  await store.transaction((tx) =>
+    tx.updatePeer(peerId, {
+      name: "Peer",
+      platform: "mac",
+      pairing: "p1",
+      epoch: "e1",
+      receivedSeq: 3,
+    }),
+  );
+  const fresh = await store.getPeer(peerId);
+  check(typeof fresh?.pairedAt === "number", "when it first connected is kept");
+  same(await store.removed(peerId), null, "it is not disconnected");
+
+  await store.removePeer(peerId);
+  same(await store.removed(peerId), "p1", "disconnected, with its pairing");
+  same((await store.getPeer(peerId))?.receivedSeq, 3, "its cursor stays");
+
+  await store.restore(peerId);
+  same(await store.removed(peerId), null, "paired again: taken back");
+
+  await store.removedBy(peerId);
+  same((await store.getPeer(peerId))?.removedUs, 1, "it disconnected this Mac");
+  await store.transaction((tx) =>
+    tx.updatePeer(peerId, { name: "Peer", pairing: "p2" }),
+  );
+  same((await store.getPeer(peerId))?.removedUs, 0, "until it takes it again");
+
+  await store.forgetPeers();
+  same(await store.pairing(), null, "turning sync off forgets the pairing");
+});
+
 await test("a change made here tells the history listeners, until they are removed", async () => {
   reset();
   let heard = 0;

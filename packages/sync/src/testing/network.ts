@@ -15,6 +15,8 @@ import {
 export interface DeviceOptions {
   name?: string;
   maker?: string;
+  /** The id of the device's pairing; none, as an older Teneo, when left out */
+  pairing?: string;
   iconSource?: AppIconSource;
   iconSink?: AppIconSink;
   /** False for a device that keeps no images, as an older Teneo */
@@ -32,6 +34,10 @@ export class TestDevice {
   itemsChanged = 0;
   /** How many times an icon arrived that this device had none for. */
   iconsChanged = 0;
+  /** The devices disconnected here, and the pairing each had then. */
+  readonly removed = new Map<string, string>();
+  /** The ids of the devices that said they disconnected this one. */
+  readonly removedBy: string[] = [];
   private syncSecrets = false;
 
   constructor(network: TestNetwork, id: string, options: DeviceOptions = {}) {
@@ -44,6 +50,14 @@ export class TestDevice {
       name: options.name ?? `Device ${id.slice(0, 1)}`,
       platform: "test",
       maker: options.maker,
+      pairing: options.pairing,
+      removals: {
+        removed: async (deviceId) => this.removed.get(deviceId) ?? null,
+        restore: async (deviceId) => {
+          this.removed.delete(deviceId);
+        },
+      },
+      onRemovedBy: (peer) => this.removedBy.push(peer.deviceId),
       iconSource: options.iconSource,
       iconSink: options.iconSink,
       images: options.images === false ? undefined : this.store.images,
@@ -84,6 +98,13 @@ export class TestDevice {
   remove(id: string): void {
     this.store.remove(id);
     this.engine.localChanged();
+  }
+
+  /** Disconnect a device, as the app does: keep that it is, then tell it. */
+  async disconnect(peer: TestDevice): Promise<void> {
+    const known = await this.store.getPeer(peer.id);
+    this.removed.set(peer.id, known?.pairing ?? "");
+    await this.engine.remove(peer.id);
   }
 
   allowSecrets(allowed: boolean): void {

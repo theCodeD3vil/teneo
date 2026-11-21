@@ -79,3 +79,11 @@ test("an icons frame holds a few small icons", () => {
 test("a frame of a kind this version doesn't know is refused", () => {
   expect(parse({ t: "icons-offer", names: [] })).toBeNull();
 });
+
+test("a state frame's pairing is read, and a removed frame is one", () => {
+  expect(parse({ ...state, pairing: "0f".repeat(8) })).toMatchObject({
+    pairing: "0f".repeat(8),
+  });
+  expect(parse({ ...state, pairing: 7 })).not.toHaveProperty("pairing");
+  expect(parse({ t: "removed" })).toEqual({ t: "removed" });
+});

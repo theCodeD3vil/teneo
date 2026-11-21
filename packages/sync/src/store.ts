@@ -19,6 +19,9 @@ export interface PeerRecord {
   /** Who made the device, as it said ("google"); empty or absent when it
    *  didn't. A store that has no use for it need not keep it. */
   maker?: string;
+  /** The id of the pairing the device last said it has; empty or absent
+   *  when it said none (`pairing` in protocol.ts). */
+  pairing?: string;
   /** The other store's epoch when `receivedSeq` was read. */
   epoch: string | null;
   /** How far this device has read the other's changes. */

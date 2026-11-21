@@ -132,6 +132,8 @@ export const api: Record<string, TinyApiHandler> = {
     sync(app).join(typeof code === "string" ? code : ""),
   syncTurnOff: (_parameters, app) => sync(app).turnOff(),
   syncPairingInfo: (_parameters, app) => sync(app).pairingInfo(),
+  syncRemoveDevice: ({ deviceId }, app) =>
+    sync(app).removeDevice(typeof deviceId === "string" ? deviceId : ""),
   setSyncSecrets: ({ enabled }, app) =>
     sync(app).setSyncSecrets(enabled === true),
 };

@@ -22,6 +22,10 @@ const connected: NativeSyncStatus = {
       platform: "mac",
       lastSeen: 5,
       connected: true,
+      maker: "google",
+      address: "192.168.1.20:47823",
+      firstSeen: 2,
+      removedUs: false,
     },
   ],
 };
@@ -45,6 +49,14 @@ function fakePlugin(options: { pairFails?: string } = {}) {
       calls.push("unpair");
       kept.length = 0;
       status = notPaired;
+      return status;
+    },
+    removeDevice: async ({ id }) => {
+      calls.push(`removeDevice ${id}`);
+      status = {
+        ...status,
+        devices: status.devices.filter((device) => device.id !== id),
+      };
       return status;
     },
     settingsChanged: async () => void calls.push("settingsChanged"),
@@ -133,6 +145,10 @@ describe("NativeSync", () => {
             platform: "Mac",
             lastSeen: 5,
             connected: true,
+            maker: "Google",
+            address: "192.168.1.20",
+            firstSeen: 2,
+            disconnectedUs: false,
           },
         ],
       },
@@ -149,6 +165,29 @@ describe("NativeSync", () => {
     expect(calls).toEqual(["pair", "unpair"]);
     expect(kept).toEqual([]);
     expect(heard).toEqual(["not_paired"]);
+  });
+
+  test("disconnecting a device tells native code and says who is left", async () => {
+    const { plugin, calls, emit } = fakePlugin();
+    const sync = new NativeSync(plugin, { waitForDeviceMs: 0 });
+    await sync.pair(await formatRecoveryCode(key));
+    const device = {
+      id: "mac-1",
+      name: "Studio",
+      platform: "mac",
+      lastSeen: 1,
+      connected: true,
+      maker: "",
+      address: "",
+      firstSeen: 1,
+      removedUs: false,
+    };
+    emit("statusChanged", { ...looking, devices: [device] });
+    const heard: number[] = [];
+    sync.onSyncStatusChanged((status) => heard.push(status.devices.length));
+    await sync.removeDevice("mac-1");
+    expect(calls).toEqual(["pair", "removeDevice mac-1"]);
+    expect(heard).toEqual([0]);
   });
 
   test("a code from adb goes to the debug handler; close stops listening", async () => {

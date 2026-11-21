@@ -1,11 +1,6 @@
 // The sync engine, its store, and the transport that carries it, put together:
 // what the app and the dev peer both start. Nothing runs until this is called.
-import {
-  type Bytes,
-  type ConnectedPeer,
-  type PeerRecord,
-  SyncEngine,
-} from "@teneo/sync";
+import { type Bytes, type ConnectedPeer, SyncEngine } from "@teneo/sync";
 
 import {
   getSyncIdentity,
@@ -20,7 +15,7 @@ import { MacDiscovery } from "./discovery-macos";
 import { ChildRegistry } from "./dns-sd-registry";
 import { clearPartialImages, SqliteImageStore } from "./image-store";
 import { LanTransport } from "./lan-transport";
-import { SqliteSyncStore } from "./sync-store";
+import { isDisconnected, SqliteSyncStore, type StoredPeer } from "./sync-store";
 
 export interface SyncServiceOptions {
   vaultKey: Bytes;
@@ -45,8 +40,10 @@ export interface SyncService {
   /** The port listened on, or null when none was free. */
   readonly port: number | null;
   peers(): ConnectedPeer[];
-  /** Every device paired before, connected or not. */
-  knownPeers(): Promise<PeerRecord[]>;
+  /** Every device paired before, connected or not, the disconnected too. */
+  knownPeers(): Promise<StoredPeer[]>;
+  /** Disconnect a device: tell it, and refuse it until it is paired again. */
+  remove(deviceId: string): Promise<void>;
   /** The history was changed here: send it on. */
   localChanged(): void;
   stop(): Promise<void>;
@@ -67,6 +64,16 @@ export async function startSyncService(
     deviceId,
     name: options.name,
     platform: options.platform ?? "mac",
+    pairing: (await store.pairing()) ?? undefined,
+    removals: {
+      removed: (peerId) => store.removed(peerId),
+      restore: (peerId) => store.restore(peerId),
+    },
+    onRemovedBy: (peer) =>
+      void store
+        .removedBy(peer.deviceId)
+        .then(() => options.onPeersChanged?.())
+        .catch((error: unknown) => options.onError?.(error)),
     vaultKey: options.vaultKey,
     store,
     syncSecrets: options.syncSecrets,
@@ -92,7 +99,13 @@ export async function startSyncService(
     engine,
     deviceId,
     discovery,
-    knownPeers: () => store.listPeers(),
+    // a device this Mac disconnected, or that disconnected it, is not dialed
+    knownPeers: async () =>
+      (await store.listPeers()).filter((peer) => !isDisconnected(peer)),
+    isDisconnected: async (peerId) => {
+      const peer = await store.getPeer(peerId);
+      return peer !== null && isDisconnected(peer);
+    },
     ports: options.ports,
     // a dev run may sync with a dev peer on this Mac (bun run sync:peer)
     allowLoopback: isDevRun(),
@@ -107,6 +120,10 @@ export async function startSyncService(
     port: transport.port,
     peers: () => engine.peers(),
     knownPeers: () => store.listPeers(),
+    async remove(peerId) {
+      await store.removePeer(peerId);
+      await engine.remove(peerId);
+    },
     localChanged: () => engine.localChanged(),
     async stop() {
       stopListening();

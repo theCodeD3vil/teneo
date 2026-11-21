@@ -6,7 +6,6 @@ import {
 } from "@teneo/shared/types/sync";
 import {
   type ConnectedPeer,
-  type PeerRecord,
   formatRecoveryCode,
   fromBase64,
   parsePairingLink,
@@ -18,6 +17,7 @@ import {
 import { getSettings, loadSettings, updateSettings } from "../settings";
 import type { SyncService, SyncServiceOptions } from "./service";
 import { SyncManager, type SyncManagerDeps } from "./sync-manager";
+import type { StoredPeer } from "./sync-store";
 
 const keyName = "sync-vault-key";
 
@@ -58,7 +58,7 @@ async function setup(options: Options = {}) {
   await loadSettings(app); // starts from the defaults: the settings are module state
 
   const connected: ConnectedPeer[] = [];
-  const known: PeerRecord[] = [];
+  const known: StoredPeer[] = [];
   const calls = {
     started: [] as SyncServiceOptions[],
     stopped: 0,
@@ -66,6 +66,8 @@ async function setup(options: Options = {}) {
     changed: 0,
     restamped: 0,
     forgotten: 0,
+    pairings: 0,
+    removed: [] as string[],
   };
   const logged: string[] = [];
   const service = {
@@ -73,6 +75,11 @@ async function setup(options: Options = {}) {
     port: options.port === undefined ? 47823 : options.port,
     peers: () => connected,
     knownPeers: async () => known,
+    remove: async (deviceId) => {
+      calls.removed.push(deviceId);
+      const peer = known.find((one) => one.deviceId === deviceId);
+      if (peer) peer.removedPairing = peer.pairing;
+    },
     localChanged: () => {
       calls.changed += 1;
     },
@@ -98,6 +105,9 @@ async function setup(options: Options = {}) {
     },
     forgetPeers: async () => {
       calls.forgotten += 1;
+    },
+    newPairing: async () => {
+      calls.pairings += 1;
     },
     computerName: async () => "Test Mac",
     networkAddresses: () => [
@@ -386,11 +396,66 @@ test("a hold shows the reason to the windows, when sync is on", async () => {
   );
 });
 
+test("a disconnected device leaves the list, and the others stay", async () => {
+  const { manager, known, calls, pushed } = await setup();
+  await manager.turnOn();
+  known.push(record("a", "Anna's phone", 200), record("c", "Mac mini", 300));
+  const { devices } = await manager.removeDevice("a");
+  expect(calls.removed).toEqual(["a"]);
+  expect(devices.map((d) => d.name)).toEqual(["Mac mini"]);
+  expect(pushed.at(-1)?.data.devices.map((d) => d.name)).toEqual(["Mac mini"]);
+});
+
+test("a device can only be disconnected while sync runs", async () => {
+  const { manager, calls } = await setup();
+  await expect(manager.removeDevice("a")).rejects.toThrow("Turn sync on first");
+  expect(calls.removed).toEqual([]);
+});
+
+test("a device that disconnected this Mac is listed as such, with what is known of it", async () => {
+  const { manager, known } = await setup();
+  await manager.turnOn();
+  known.push({
+    ...record("a", "Pixel", 200),
+    platform: "android",
+    maker: "google",
+    lastAddress: "192.168.1.7",
+    pairedAt: 50,
+    removedUs: 1,
+  });
+  expect((await manager.status()).devices).toEqual([
+    {
+      deviceId: "a",
+      name: "Pixel",
+      platform: "android",
+      maker: "google",
+      connected: false,
+      lastSeenAt: 200,
+      address: "192.168.1.7",
+      pairedAt: 50,
+      disconnectedUs: true,
+    },
+  ]);
+});
+
+test("each pairing of this Mac gets a new id, and turning sync off forgets it", async () => {
+  const { manager, calls } = await setup();
+  await manager.turnOn();
+  expect(calls.pairings).toBe(1);
+  await manager.stop();
+  await manager.startIfEnabled(); // a launch is the same pairing
+  expect(calls.pairings).toBe(1);
+  await manager.turnOff();
+  expect(calls.forgotten).toBe(1);
+  await manager.turnOn();
+  expect(calls.pairings).toBe(2);
+});
+
 function record(
   deviceId: string,
   name: string,
   lastSeenAt: number,
-): PeerRecord {
+): StoredPeer {
   return {
     deviceId,
     name,
@@ -399,9 +464,20 @@ function record(
     receivedSeq: 0,
     lastAddress: null,
     lastSeenAt,
+    pairing: "",
+    pairedAt: null,
+    removedPairing: null,
+    removedUs: 0,
   };
 }
 
 function peer(deviceId: string, name: string): ConnectedPeer {
-  return { deviceId, name, platform: "mac", address: undefined };
+  return {
+    deviceId,
+    name,
+    platform: "mac",
+    maker: "",
+    pairing: "",
+    address: undefined,
+  };
 }

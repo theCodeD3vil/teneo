@@ -20,6 +20,9 @@ export const heartbeat = { everyMs: 15_000, silentMs: 45_000 };
 /** How long a connection has to finish the handshake, so a device that opens
  *  one and says nothing cannot hold it forever. */
 export const handshakeMs = 10_000;
+/** How long a device that was sent a `removed` frame has to close the
+ *  connection itself, before it is closed for it. */
+export const removedWaitMs = 2000;
 
 /** The largest message a device accepts, before decrypting it. */
 export const maxMessageLength = 8 * 1024 * 1024;
@@ -63,6 +66,10 @@ export interface StateFrame {
   maker?: string;
   /** What the sender understands beyond the first release (see `capabilities`). */
   caps?: string[];
+  /** Made anew each time the sender is paired (sync turned on, a code
+   *  joined). A device that disconnected the sender takes it back once this
+   *  has changed. Absent from a device paired before there was one. */
+  pairing?: string;
   /** How far the sender has read the receiver's changes. */
   cursor: Cursor;
 }
@@ -72,7 +79,16 @@ export const capabilities = {
   appIcons: "app-icons",
   /** Takes image records, and sends and asks for their bytes in blob frames */
   images: "images",
+  /** Reads a `removed` frame */
+  removal: "removal",
 } as const;
+
+/** The sender was told to disconnect the receiver: it takes no connection
+ *  from it until the receiver is paired again, and closes this one. Sent
+ *  only to a device with the removal capability; another is just closed. */
+export interface RemovedFrame {
+  t: "removed";
+}
 
 /** The bytes of one piece of an image. Small enough that a frame, in base64
  *  and encrypted, stays well under what one message may hold. */
@@ -160,6 +176,7 @@ export type Frame =
   | BlobWantFrame
   | BlobFrame
   | BlobNoneFrame
+  | RemovedFrame
   | PingFrame
   | PongFrame;
 
@@ -242,6 +259,7 @@ export function parseFrame(text: string): Frame | null {
         platform: m.platform,
         ...(isShortText(m.maker, 64) ? { maker: m.maker } : {}),
         ...(caps.length > 0 ? { caps } : {}),
+        ...(isShortText(m.pairing, 64) ? { pairing: m.pairing } : {}),
         cursor: { epoch: cursor.epoch, seq: cursor.seq },
       };
     }
@@ -284,6 +302,8 @@ export function parseFrame(text: string): Frame | null {
     case "blob-want":
     case "blob-none":
       return isHash(m.hash) ? { t: m.t, hash: m.hash } : null;
+    case "removed":
+      return { t: "removed" };
     case "vault":
       return typeof m.key === "string" && /^[A-Za-z0-9+/]{43}=$/.test(m.key)
         ? { t: "vault", key: m.key }

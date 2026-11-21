@@ -5,6 +5,7 @@ export type ScreenName =
   | "item-view"
   | "settings"
   | "settings-page"
+  | "device"
   | "setup";
 
 export type SettingsPageName = "general" | "sync" | "storage" | "about";
@@ -13,6 +14,8 @@ export interface NavigationState {
   screen: ScreenName;
   itemId?: string;
   settingsPage?: SettingsPageName;
+  /** the paired device the device screen is about */
+  deviceId?: string;
   /** how deep this entry is in the app's history, to tell back from forward */
   index: number;
 }
@@ -101,7 +104,7 @@ export function initNavigation(screen: ScreenName): void {
 export function useNavigation() {
   function pushScreen(
     screen: ScreenName,
-    details: Pick<NavigationState, "itemId" | "settingsPage"> = {},
+    details: Pick<NavigationState, "itemId" | "settingsPage" | "deviceId"> = {},
   ): void {
     const state = { screen, ...details, index: currentState.value.index + 1 };
     closeOverlays();
@@ -127,6 +130,7 @@ export function useNavigation() {
     openSettings: () => pushScreen("settings"),
     openSettingsPage: (settingsPage: SettingsPageName) =>
       pushScreen("settings-page", { settingsPage }),
+    openDevice: (deviceId: string) => pushScreen("device", { deviceId }),
     openSetup: () => pushScreen("setup"),
     replaceScreen,
     goBack,

@@ -9,7 +9,6 @@ import {
 } from "@teneo/shared/types/sync";
 import {
   type Bytes,
-  type PeerRecord,
   buildPairingLink,
   formatRecoveryCode,
   fromBase64,
@@ -29,8 +28,10 @@ export interface SyncManagerDeps {
   start(app: TinyApp, options: SyncServiceOptions): Promise<SyncService>;
   /** Send the items holding secrets again; how many there were. */
   restampSecretItems(app: TinyApp): Promise<number>;
-  /** Forget the devices paired before. History stays. */
+  /** Forget the devices paired before, and this Mac's pairing. History stays. */
   forgetPeers(app: TinyApp): Promise<void>;
+  /** This Mac is being paired: give the pairing a new id. */
+  newPairing(app: TinyApp): Promise<void>;
   /** How this Mac is named; "" when that can't be read. */
   computerName(): Promise<string>;
   networkAddresses(): NetworkAddress[];
@@ -158,6 +159,18 @@ export class SyncManager {
     });
   }
 
+  /** Stop syncing with one device, until it is paired again. The others
+   *  carry on, and may still pass its items along. */
+  removeDevice(deviceId: string): Promise<SyncStatus> {
+    return this.serial(async () => {
+      this.requireAvailable();
+      if (!this.service) throw new Error("Turn sync on first.");
+      await this.service.remove(deviceId);
+      await this.publish();
+      return this.status();
+    });
+  }
+
   /** What another device needs to join this one. */
   async pairingInfo(): Promise<PairingInfo> {
     this.requireAvailable();
@@ -222,6 +235,7 @@ export class SyncManager {
     // from here a delete leaves a tombstone for the other devices
     await updateSettings({ syncEnabled: true }, this.app);
     try {
+      await this.deps.newPairing(this.app);
       await this.run(key);
     } catch (error) {
       this.deps.log("starting sync failed:", error);
@@ -289,14 +303,22 @@ export class SyncManager {
     const connected = new Map(
       service.peers().map((peer) => [peer.deviceId, peer]),
     );
-    const known: PeerRecord[] = await service.knownPeers();
-    const devices: SyncDevice[] = known.map((peer) => ({
-      deviceId: peer.deviceId,
-      name: connected.get(peer.deviceId)?.name ?? peer.name,
-      platform: peer.platform,
-      connected: connected.has(peer.deviceId),
-      lastSeenAt: peer.lastSeenAt,
-    }));
+    const known = await service.knownPeers();
+    const devices: SyncDevice[] = known
+      // one disconnected here is gone from the list until it is paired again
+      .filter((peer) => peer.removedPairing === null)
+      .map((peer) => ({
+        deviceId: peer.deviceId,
+        name: connected.get(peer.deviceId)?.name ?? peer.name,
+        platform: peer.platform,
+        maker: peer.maker ?? "",
+        connected: connected.has(peer.deviceId),
+        lastSeenAt: peer.lastSeenAt,
+        address:
+          connected.get(peer.deviceId)?.address ?? peer.lastAddress ?? null,
+        pairedAt: peer.pairedAt,
+        disconnectedUs: peer.removedUs === 1 && !connected.has(peer.deviceId),
+      }));
     // one that has just connected may not be in the table yet
     for (const peer of connected.values()) {
       if (known.some((record) => record.deviceId === peer.deviceId)) continue;
@@ -304,8 +326,12 @@ export class SyncManager {
         deviceId: peer.deviceId,
         name: peer.name,
         platform: peer.platform,
+        maker: peer.maker,
         connected: true,
         lastSeenAt: Date.now(),
+        address: peer.address ?? null,
+        pairedAt: Date.now(),
+        disconnectedUs: false,
       });
     }
     return devices.sort(

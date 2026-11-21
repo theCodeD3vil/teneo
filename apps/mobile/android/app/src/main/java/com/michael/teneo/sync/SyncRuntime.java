@@ -56,6 +56,23 @@ final class SyncRuntime {
 
         /** Joining with a pairing code: the Mac sent the vault's key */
         void paired(byte[] vaultKey);
+
+        // --- disconnected devices (KnownDevices). Called on a web view thread.
+
+        /** The id of this phone's pairing; empty when it has none */
+        String pairingId();
+
+        /** The pairing a device had when it was disconnected here; null when it isn't */
+        String removedPairing(String deviceId);
+
+        /** Whether sync with a device was ended, by it or here */
+        boolean isDisconnected(String deviceId);
+
+        /** A device disconnected here was paired again */
+        void restoreDevice(String deviceId);
+
+        /** A device said it disconnected this phone */
+        void removedBy(KnownDevices.Peer peer);
     }
 
     private static final String TAG = "TeneoSync";
@@ -287,6 +304,18 @@ final class SyncRuntime {
         }
     };
 
+    /** A device as the page describes one: {deviceId, name, platform, maker, address, pairing} */
+    private static KnownDevices.Peer readPeer(JSONObject peer) throws JSONException {
+        return new KnownDevices.Peer(
+            peer.getString("deviceId"),
+            peer.optString("name", ""),
+            peer.optString("platform", ""),
+            peer.optString("maker", ""),
+            peer.optString("address", ""),
+            peer.optString("pairing", "")
+        );
+    }
+
     // --- what the page may ask of native code. Called on a web view thread.
 
     private final class Bridge {
@@ -312,7 +341,7 @@ final class SyncRuntime {
                 JSONArray list = new JSONArray(json);
                 for (int i = 0; i < list.length(); i++) {
                     JSONObject peer = list.getJSONObject(i);
-                    peers.add(new KnownDevices.Peer(peer.getString("deviceId"), peer.optString("name", ""), peer.optString("platform", "")));
+                    peers.add(readPeer(peer));
                 }
             } catch (JSONException malformed) {
                 Log.w(TAG, "the page reported its devices in a way native code can't read");
@@ -321,6 +350,41 @@ final class SyncRuntime {
             main.post(() -> {
                 if (!closed) host.peersChanged(peers);
             });
+        }
+
+        /** The id of this phone's pairing, for the other devices; empty when it has none */
+        @JavascriptInterface
+        public String pairingId() {
+            return host.pairingId();
+        }
+
+        /** The pairing a device had when it was disconnected here, as a JSON string; `null` when it isn't */
+        @JavascriptInterface
+        public String removedPairing(String deviceId) {
+            String pairing = host.removedPairing(deviceId);
+            return pairing == null ? "null" : JSONObject.quote(pairing);
+        }
+
+        /** Whether sync with a device was ended, by it or here: it is not dialed */
+        @JavascriptInterface
+        public boolean isDisconnected(String deviceId) {
+            return host.isDisconnected(deviceId);
+        }
+
+        /** A device disconnected here was paired again */
+        @JavascriptInterface
+        public void restoreDevice(String deviceId) {
+            host.restoreDevice(deviceId);
+        }
+
+        /** A device said it disconnected this phone: {deviceId, name, platform, ...} */
+        @JavascriptInterface
+        public void removedBy(String json) {
+            try {
+                host.removedBy(readPeer(new JSONObject(json)));
+            } catch (JSONException malformed) {
+                Log.w(TAG, "the page named the device that disconnected this phone in a way native code can't read");
+            }
         }
 
         /** The core has its keys: start listening, announcing and browsing */

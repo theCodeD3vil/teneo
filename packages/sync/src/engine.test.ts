@@ -927,3 +927,118 @@ test("a vault key sent on an ordinary connection ends it, and changes nothing", 
   ).toBe(true);
   net.stop();
 });
+
+// --- disconnecting a device
+
+test("a disconnected device is told, and nothing more passes between the two", async () => {
+  const net = new TestNetwork();
+  const [a, b] = [
+    net.add("a", { pairing: "a1" }),
+    net.add("b", { pairing: "b1" }),
+  ];
+  a.copy("before");
+  net.connect(a, b);
+  await net.settle();
+  expect(live(b)).toEqual(["before"]);
+
+  await a.disconnect(b);
+  await net.settle();
+  expect(a.engine.peers()).toEqual([]);
+  expect(b.engine.peers()).toEqual([]);
+  expect(b.removedBy).toEqual([a.id]);
+
+  // b comes back with the same pairing: refused, whoever opens the connection
+  a.copy("after");
+  b.copy("from b");
+  net.connect(b, a);
+  await net.settle();
+  net.connect(a, b);
+  await net.settle();
+  expect(live(b)).toEqual(["before", "from b"]);
+  expect(live(a)).toEqual(["after", "before"]);
+  expect(a.engine.peers()).toEqual([]);
+  expect(b.removedBy).toEqual([a.id, a.id, a.id]);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});
+
+test("a disconnected device that was paired again is taken back", async () => {
+  const net = new TestNetwork();
+  const [a, b] = [net.add("a"), net.add("b", { pairing: "b1" })];
+  net.connect(a, b);
+  await net.settle();
+  await a.disconnect(b);
+  await net.settle();
+  a.copy("while away");
+
+  // the same device, paired again: a new pairing, the same id
+  const again = net.wipe("b", { pairing: "b2" });
+  net.connect(again, a);
+  await net.settle();
+  expect(a.removed.size).toBe(0);
+  expect(live(again)).toEqual(["while away"]);
+  expect(a.engine.peers()).toMatchObject([
+    { deviceId: again.id, pairing: "b2" },
+  ]);
+  net.stop();
+});
+
+test("a device that never said a pairing stays disconnected until it says one", async () => {
+  const net = new TestNetwork();
+  const [a, b] = [net.add("a"), net.add("b")];
+  net.connect(a, b);
+  await net.settle();
+  await a.disconnect(b);
+  await net.settle();
+  expect(a.removed.get(b.id)).toBe("");
+
+  a.copy("kept here");
+  net.connect(b, a);
+  await net.settle();
+  expect(live(b)).toEqual([]);
+
+  const again = net.wipe("b", { pairing: "b1" });
+  net.connect(again, a);
+  await net.settle();
+  expect(live(again)).toEqual(["kept here"]);
+  net.stop();
+});
+
+test("disconnecting one device leaves the others syncing", async () => {
+  const net = new TestNetwork();
+  const [a, b, c] = [net.add("a"), net.add("b"), net.add("c")];
+  net.connect(a, b);
+  net.connect(a, c);
+  await net.settle();
+  await a.disconnect(b);
+  await net.settle();
+
+  a.copy("for c");
+  await net.settle();
+  expect(live(c)).toEqual(["for c"]);
+  expect(live(b)).toEqual([]);
+  expect(a.engine.peers()).toMatchObject([{ deviceId: c.id }]);
+  expect(c.removedBy).toEqual([]);
+  net.stop();
+});
+
+test("an older Teneo is disconnected without being told", async () => {
+  const net = new TestNetwork();
+  const a = net.add("a");
+  // a device from before this existed closes over a frame it can't read,
+  // which it would log as an error: it lists no removal capability, so it
+  // is never sent one
+  const old = net.add("b");
+  const caps = old.engine as unknown as { ownCaps(): string[] };
+  const ownCaps = caps.ownCaps.bind(old.engine);
+  caps.ownCaps = () => ownCaps().filter((cap) => cap !== "removal");
+  net.connect(a, old);
+  await net.settle();
+  await a.disconnect(old);
+  await net.settle();
+  expect(a.engine.peers()).toEqual([]);
+  expect(old.removedBy).toEqual([]);
+  expect(old.engine.peers()).toEqual([]);
+  expect(net.errors).toEqual([]);
+  net.stop();
+});

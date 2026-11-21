@@ -8,8 +8,10 @@ import android.os.Looper;
 import android.util.Log;
 import com.michael.teneo.history.HistoryStore;
 import com.michael.teneo.history.Settings;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.json.JSONArray;
@@ -36,6 +38,9 @@ public final class SyncController {
         void settingsChanged();
 
         void debugCommand(Intent command);
+
+        /** The user disconnected this device: the page tells it and ends the connection */
+        void removeDevice(String deviceId);
     }
 
     static final String TAG = "TeneoSync";
@@ -51,6 +56,10 @@ public final class SyncController {
      *  sync core's engine.ts). Gone once the Mac has sent the vault key. */
     private static final String PAIRING_ADDRESSES = "pairingAddresses";
     private static final String DEVICES = "devices";
+    /** Made anew each time this phone is paired: a device that disconnected
+     *  it takes it back when it sees another one (`pairing` in the sync
+     *  core's protocol.ts). None for a phone paired before there was one. */
+    private static final String PAIRING_ID = "pairingId";
     /** Items with secrets may sync now, and the running page still has to
      *  restamp the ones held back (restampHeldBackSecrets) */
     private static final String SECRETS_TO_SEND = "secretsToSend";
@@ -150,6 +159,11 @@ public final class SyncController {
             }
             if (pairingAddresses == null) preferences.edit().remove(PAIRING_ADDRESSES).apply();
             else preferences.edit().putString(PAIRING_ADDRESSES, pairingAddresses).apply();
+            byte[] pairing = new byte[8];
+            new SecureRandom().nextBytes(pairing);
+            StringBuilder pairingId = new StringBuilder();
+            for (byte part : pairing) pairingId.append(String.format(Locale.ROOT, "%02x", part));
+            preferences.edit().putString(PAIRING_ID, pairingId.toString()).apply();
             devices.clear();
             saveDevices();
             problem = null;
@@ -190,7 +204,7 @@ public final class SyncController {
 
     public void unpair() {
         synchronized (this) {
-            preferences.edit().remove(PAIRING_ADDRESSES).apply();
+            preferences.edit().remove(PAIRING_ADDRESSES).remove(PAIRING_ID).apply();
             keys.forget();
             devices.clear();
             saveDevices();
@@ -199,6 +213,58 @@ public final class SyncController {
         Log.i(TAG, "unpaired: the key and the known devices are forgotten");
         context.stopService(new Intent(context, SyncService.class));
         notifyStatus();
+    }
+
+    // --- disconnecting one device: the others carry on
+
+    /**
+     * Stop syncing with one device until it is paired again. It is told when
+     * it is connected, and when it next connects otherwise.
+     */
+    public void removeDevice(String deviceId) {
+        Running current;
+        synchronized (this) {
+            if (!devices.remove(deviceId, System.currentTimeMillis())) return;
+            saveDevices();
+            current = service;
+        }
+        Log.i(TAG, "a device was disconnected");
+        if (current != null) main.post(() -> current.removeDevice(deviceId));
+        notifyStatus();
+    }
+
+    /** The id of this phone's pairing; empty for one paired before there was one */
+    synchronized String pairingId() {
+        return preferences.getString(PAIRING_ID, "");
+    }
+
+    /** The pairing a device had when it was disconnected here; null when it isn't. Any thread. */
+    synchronized String removedPairing(String deviceId) {
+        return devices.removedPairing(deviceId);
+    }
+
+    /** Whether sync with a device was ended, by it or here: the page doesn't dial it. Any thread. */
+    synchronized boolean isDisconnected(String deviceId) {
+        return devices.isDisconnected(deviceId);
+    }
+
+    /** A device disconnected here was paired again. Any thread. */
+    void restoreDevice(String deviceId) {
+        synchronized (this) {
+            if (!devices.restore(deviceId, System.currentTimeMillis())) return;
+            saveDevices();
+        }
+        main.post(this::notifyStatus);
+    }
+
+    /** A device said it disconnected this phone. Any thread. */
+    void removedBy(KnownDevices.Peer peer) {
+        synchronized (this) {
+            if (!devices.removedBy(peer, System.currentTimeMillis())) return;
+            saveDevices();
+        }
+        Log.i(TAG, "a device disconnected this phone");
+        main.post(this::notifyStatus);
     }
 
     /** A setting that sync reads changed: start, stop or tell the service */
@@ -434,8 +500,14 @@ public final class SyncController {
                         device.getString("id"),
                         device.optString("name", ""),
                         device.optString("platform", ""),
+                        device.optString("maker", ""),
+                        device.optString("address", ""),
+                        device.optString("pairing", ""),
+                        device.optLong("firstSeen", 0),
                         device.optLong("lastSeen", 0),
-                        false
+                        false,
+                        device.isNull("removedPairing") ? null : device.getString("removedPairing"),
+                        device.optBoolean("removedUs", false)
                     )
                 );
             }
@@ -449,20 +521,30 @@ public final class SyncController {
     private void saveDevices() {
         JSONArray list = new JSONArray();
         try {
-            for (KnownDevices.Device device : devices.list()) list.put(toJson(device, false));
+            for (KnownDevices.Device device : devices.all()) list.put(toJson(device, false));
         } catch (JSONException impossible) {
             throw new IllegalStateException(impossible);
         }
         preferences.edit().putString(DEVICES, list.toString()).apply();
     }
 
-    private static JSONObject toJson(KnownDevices.Device device, boolean withConnected) throws JSONException {
+    /** A device for the app (`forApp`), or as it is stored */
+    private static JSONObject toJson(KnownDevices.Device device, boolean forApp) throws JSONException {
         JSONObject json = new JSONObject();
         json.put("id", device.id);
         json.put("name", device.name);
         json.put("platform", device.platform);
+        json.put("maker", device.maker);
+        json.put("address", device.address);
+        json.put("firstSeen", device.firstSeen);
         json.put("lastSeen", device.lastSeen);
-        if (withConnected) json.put("connected", device.connected);
+        json.put("removedUs", device.removedUs);
+        if (forApp) {
+            json.put("connected", device.connected);
+        } else {
+            json.put("pairing", device.pairing);
+            json.put("removedPairing", device.removedPairing == null ? JSONObject.NULL : device.removedPairing);
+        }
         return json;
     }
 

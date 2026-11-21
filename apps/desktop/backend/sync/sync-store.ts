@@ -12,6 +12,7 @@ import type {
   SyncStore,
   SyncTransaction,
 } from "@teneo/sync";
+import { randomBytes, toHex } from "@teneo/sync";
 import type { Database } from "tjs:sqlite";
 
 import {
@@ -52,10 +53,29 @@ const newestUnpinnedQuery = `
   ORDER BY dateCopied DESC, id DESC LIMIT 1
 `;
 
+/** A device as this Mac keeps it: what the engine needs, and what the Sync
+ *  tab shows. */
+export interface StoredPeer extends PeerRecord {
+  pairing: string;
+  /** When it first connected, or was taken back; null for one from before
+   *  this was kept. */
+  pairedAt: number | null;
+  /** The pairing it had when it was disconnected here; null while it isn't. */
+  removedPairing: string | null;
+  /** 1 when it said it disconnected this Mac. */
+  removedUs: number;
+}
+
+/** Whether this Mac and the device have stopped syncing, whichever of the
+ *  two ended it: such a device is not looked for. */
+export const isDisconnected = (peer: StoredPeer): boolean =>
+  peer.removedPairing !== null || peer.removedUs === 1;
+
 const peerFields = [
   "name",
   "platform",
   "maker",
+  "pairing",
   "epoch",
   "receivedSeq",
   "lastAddress",
@@ -128,8 +148,8 @@ export class SqliteSyncStore implements SyncStore {
     return measured ? { ...row, ...measured } : row;
   }
 
-  async getPeer(deviceId: string): Promise<PeerRecord | null> {
-    const [peer] = all<PeerRecord>(
+  async getPeer(deviceId: string): Promise<StoredPeer | null> {
+    const [peer] = all<StoredPeer>(
       await initializeDatabase(this.app),
       `SELECT * FROM "SYNC_PEERS" WHERE deviceId = ?`,
       deviceId,
@@ -137,19 +157,87 @@ export class SqliteSyncStore implements SyncStore {
     return peer ?? null;
   }
 
-  /** Every device paired before, for the transport to look for again. */
-  async listPeers(): Promise<PeerRecord[]> {
-    return all<PeerRecord>(
+  /** Every device paired before, the disconnected ones too. */
+  async listPeers(): Promise<StoredPeer[]> {
+    return all<StoredPeer>(
       await initializeDatabase(this.app),
       `SELECT * FROM "SYNC_PEERS"`,
     );
   }
 
-  /** Forget every device paired before: what turning sync off does. */
+  /** Forget every device paired before, and this Mac's pairing: what turning
+   *  sync off does. */
   async forgetPeers(): Promise<void> {
     const database = await initializeDatabase(this.app);
     await exclusive(async () => {
       run(database, `DELETE FROM "SYNC_PEERS"`);
+      run(database, `DELETE FROM "SYNC_META" WHERE key = 'pairing'`);
+    });
+  }
+
+  // --- disconnecting a device (`removals` in the engine)
+
+  /** The id of this Mac's pairing, or null for one paired before there was
+   *  one. */
+  async pairing(): Promise<string | null> {
+    const [row] = all<{ value: string }>(
+      await initializeDatabase(this.app),
+      `SELECT value FROM "SYNC_META" WHERE key = 'pairing'`,
+    );
+    return row?.value ?? null;
+  }
+
+  /** This Mac was paired just now: the devices that disconnected it take it
+   *  back when they see the new id. */
+  async newPairing(): Promise<void> {
+    const database = await initializeDatabase(this.app);
+    await exclusive(async () => {
+      run(
+        database,
+        `INSERT OR REPLACE INTO "SYNC_META" (key, value) VALUES ('pairing', ?)`,
+        toHex(randomBytes(8)),
+      );
+    });
+  }
+
+  /** Disconnect a device: it is refused until it is paired again. What was
+   *  read from it stays, so it carries on from there if it comes back. */
+  async removePeer(deviceId: string): Promise<void> {
+    const database = await initializeDatabase(this.app);
+    await exclusive(async () => {
+      run(
+        database,
+        `UPDATE "SYNC_PEERS" SET removedPairing = pairing, removedUs = 0 WHERE deviceId = ?`,
+        deviceId,
+      );
+    });
+  }
+
+  async removed(deviceId: string): Promise<string | null> {
+    return (await this.getPeer(deviceId))?.removedPairing ?? null;
+  }
+
+  async restore(deviceId: string): Promise<void> {
+    const database = await initializeDatabase(this.app);
+    await exclusive(async () => {
+      run(
+        database,
+        `UPDATE "SYNC_PEERS" SET removedPairing = NULL, pairedAt = ? WHERE deviceId = ?`,
+        Date.now(),
+        deviceId,
+      );
+    });
+  }
+
+  /** The device said it disconnected this Mac. */
+  async removedBy(deviceId: string): Promise<void> {
+    const database = await initializeDatabase(this.app);
+    await exclusive(async () => {
+      run(
+        database,
+        `UPDATE "SYNC_PEERS" SET removedUs = 1 WHERE deviceId = ?`,
+        deviceId,
+      );
     });
   }
 
@@ -398,16 +486,21 @@ class SqliteTransaction implements SyncTransaction {
   async updatePeer(deviceId: string, patch: PeerPatch): Promise<void> {
     run(
       this.database,
-      `INSERT INTO "SYNC_PEERS" (deviceId) VALUES (?) ON CONFLICT (deviceId) DO NOTHING`,
+      `INSERT INTO "SYNC_PEERS" (deviceId, pairedAt) VALUES (?, ?) ON CONFLICT (deviceId) DO NOTHING`,
       deviceId,
+      Date.now(),
     );
     const fields = peerFields.filter((field) => patch[field] !== undefined);
     if (fields.length === 0) return;
+    // its state arrived (the engine's handleState): it took this Mac's
+    // connection, so it no longer keeps this Mac away. One that still does
+    // says so right after, which sets this again (removedBy).
+    const tookUs = patch.pairing !== undefined ? ", removedUs = 0" : "";
     run(
       this.database,
       `UPDATE "SYNC_PEERS" SET ${fields
         .map((field) => `${field} = ?`)
-        .join(", ")} WHERE deviceId = ?`,
+        .join(", ")}${tookUs} WHERE deviceId = ?`,
       ...fields.map((field) => patch[field]),
       deviceId,
     );

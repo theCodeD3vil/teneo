@@ -66,5 +66,16 @@ export function useSyncStatus() {
     }
   }
 
-  return { status, isBusy, error, notice, join, turnOff };
+  /** Stop syncing with one device. Whether it worked; the reason is in
+   *  `error` when it didn't. */
+  async function disconnect(deviceId: string): Promise<boolean> {
+    if (isBusy.value) return false;
+    const done = await run(async () => {
+      await client.removeDevice(deviceId);
+      return true;
+    });
+    return done === true;
+  }
+
+  return { status, isBusy, error, notice, join, turnOff, disconnect };
 }

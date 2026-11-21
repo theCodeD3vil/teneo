@@ -11,6 +11,7 @@
 // SyncManager, feature switch and signal handling, and sync starts off: it takes
 // these commands as well, and the vault is a throwaway one of its own.
 //   turnon   join <recovery code>   code   secrets on|off   off   status
+//   devices  disconnect <device id>
 /* oxlint-disable no-console -- the peer talks on the console */
 import {
   type SyncStatus,
@@ -310,6 +311,20 @@ async function handle(line: string): Promise<void> {
         console.log(`code ${info.recoveryCode}`);
         console.log(`link ${info.link}`);
       }
+      break;
+    case "devices": {
+      // the Sync tab's list of devices
+      for (const device of (await needManager().status()).devices) {
+        console.log(
+          `device ${device.deviceId} connected=${device.connected} disconnectedUs=${device.disconnectedUs} ${device.name}`,
+        );
+      }
+      console.log("end devices");
+      break;
+    }
+    case "disconnect":
+      await needManager().removeDevice(argument);
+      console.log("ok disconnect");
       break;
     case "status": {
       const status = await needManager().status();

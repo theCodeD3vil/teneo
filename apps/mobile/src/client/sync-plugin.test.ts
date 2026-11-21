@@ -8,6 +8,10 @@ const mac = {
   platform: "mac",
   lastSeen: 1000,
   connected: false,
+  maker: "",
+  address: "192.168.1.20:47823",
+  firstSeen: 500,
+  removedUs: false,
 };
 const paired: NativeSyncStatus = {
   paired: true,
@@ -34,6 +38,10 @@ describe("toSyncStatus", () => {
           platform: "Mac",
           lastSeen: 1000,
           connected: false,
+          maker: "",
+          address: "192.168.1.20",
+          firstSeen: 500,
+          disconnectedUs: false,
         },
       ],
     });

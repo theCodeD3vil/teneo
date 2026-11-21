@@ -29,6 +29,7 @@ import {
   iconLimits,
   type IconsFrame,
   type IconsWantFrame,
+  removedWaitMs,
   type StateFrame,
 } from "./protocol";
 import {
@@ -103,6 +104,16 @@ export function isIconPng(bytes: Bytes): boolean {
   );
 }
 
+/** The devices the user disconnected on this device. The app keeps them, so
+ *  one stays disconnected across restarts. */
+export interface Removals {
+  /** The pairing the device had when it was disconnected here ("" when it
+   *  had said none), or null when it is not disconnected. */
+  removed(deviceId: string): Promise<string | null>;
+  /** The device was paired again: it is no longer disconnected. */
+  restore(deviceId: string): Promise<void>;
+}
+
 export interface EngineOptions {
   /** 32 hex digits, made once per device. */
   deviceId: string;
@@ -111,6 +122,13 @@ export interface EngineOptions {
   platform: string;
   /** Who made this device ("google"), for the others to show its logo. */
   maker?: string;
+  /** The id of this device's pairing: made anew whenever it is paired, so a
+   *  device that disconnected it can tell it was paired again. */
+  pairing?: string;
+  /** The devices disconnected here: none of them is synced with. */
+  removals?: Removals;
+  /** Another device said it disconnected this one. */
+  onRemovedBy?: (peer: ConnectedPeer) => void;
   /** This device hands out app icons to the devices that ask. */
   iconSource?: AppIconSource;
   /** This device asks for the icons of the apps in the items it receives. */
@@ -149,6 +167,8 @@ export interface ConnectedPeer {
   platform: string;
   /** Empty when the device didn't say. */
   maker: string;
+  /** Empty when the device said none. */
+  pairing: string;
   address: string | undefined;
 }
 
@@ -164,6 +184,9 @@ interface Link {
   name: string;
   platform: string;
   maker: string;
+  pairing: string;
+  /** The peer is disconnected here: nothing more is read from it or sent. */
+  refused: boolean;
   /** What the peer said it understands. */
   caps: string[];
   /** App names this device has asked the peer's icon for, on this connection:
@@ -272,14 +295,61 @@ export class SyncEngine {
 
   peers(): ConnectedPeer[] {
     return [...this.links.values()]
-      .filter((link) => link.epoch !== null)
-      .map((link) => ({
-        deviceId: link.peerId,
-        name: link.name,
-        platform: link.platform,
-        maker: link.maker,
-        address: link.session.remoteAddress,
-      }));
+      .filter((link) => link.epoch !== null && !link.refused)
+      .map((link) => this.peerOf(link));
+  }
+
+  private peerOf(link: Link): ConnectedPeer {
+    return {
+      deviceId: link.peerId,
+      name: link.name,
+      platform: link.platform,
+      maker: link.maker,
+      pairing: link.pairing,
+      address: link.session.remoteAddress,
+    };
+  }
+
+  /** The user disconnected this device, and the app has it in `removals`:
+   *  tell it, and end the connection to it if there is one. */
+  async remove(deviceId: string): Promise<void> {
+    const link = this.links.get(deviceId);
+    if (link) await this.refuse(link);
+  }
+
+  /** End the connection to a device disconnected here. One that reads the
+   *  removed frame closes on reading it: closing first could drop it. */
+  private async refuse(link: Link): Promise<void> {
+    if (link.refused) return;
+    link.refused = true;
+    this.options.onPeersChanged?.();
+    if (link.caps.includes(capabilities.removal)) {
+      try {
+        await this.sendOrClosed(link, { t: "removed" });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          link.session.closed,
+          new Promise(
+            (resolve) => (timer = setTimeout(resolve, removedWaitMs)),
+          ),
+        ]);
+        clearTimeout(timer);
+      } catch (error) {
+        this.options.onError?.(error);
+      }
+    }
+    link.session.close();
+  }
+
+  /** Whether the device is disconnected here. One that was, and has been
+   *  paired again since, no longer is. */
+  private async isRemoved(deviceId: string, pairing: string): Promise<boolean> {
+    const { removals } = this.options;
+    const removedWith = (await removals?.removed(deviceId)) ?? null;
+    if (!removals || removedWith === null) return false;
+    if (pairing === "" || pairing === removedWith) return true;
+    await removals.restore(deviceId);
+    return false;
   }
 
   stop(): void {
@@ -340,6 +410,8 @@ export class SyncEngine {
       name: "",
       platform: "",
       maker: "",
+      pairing: "",
+      refused: false,
       caps: [],
       askedIcons: new Set(),
       askedBlobs: new Set(),
@@ -362,7 +434,8 @@ export class SyncEngine {
       name: this.options.name,
       platform: this.options.platform,
       ...(this.options.maker ? { maker: this.options.maker } : {}),
-      ...(this.ownCaps().length > 0 ? { caps: this.ownCaps() } : {}),
+      caps: this.ownCaps(),
+      ...(this.options.pairing ? { pairing: this.options.pairing } : {}),
       cursor: { epoch: known?.epoch ?? null, seq: known?.receivedSeq ?? 0 },
     });
     return link;
@@ -374,7 +447,10 @@ export class SyncEngine {
     link: Link,
     frame: Parameters<FrameHandler>[0],
   ): Promise<void> {
+    // a device disconnected here, on its way out: whatever it still sends
+    if (link.refused) return;
     if (frame.t === "vault") return this.handleVault(link, frame.key);
+    if (frame.t === "removed") return this.handleRemoved(link);
     if (frame.t === "state") await this.handleState(link, frame);
     else if (frame.t === "changes") await this.handleChanges(link, frame);
     else if (frame.t === "icons-want") await this.handleIconsWant(link, frame);
@@ -388,11 +464,17 @@ export class SyncEngine {
     if (link.epoch !== null) {
       throw new SyncError("protocol", "The other device sent its state twice");
     }
-    link.epoch = frame.epoch;
     link.name = frame.name;
     link.platform = frame.platform;
     link.maker = frame.maker ?? "";
+    link.pairing = frame.pairing ?? "";
     link.caps = frame.caps ?? [];
+    if (await this.isRemoved(link.peerId, link.pairing)) {
+      // not awaited: it waits for the device to close, which this would block
+      void this.refuse(link);
+      return;
+    }
+    link.epoch = frame.epoch;
     // a cursor into another store, or into one this device has since replaced,
     // means nothing: start from the beginning
     link.sentUpTo =
@@ -404,6 +486,7 @@ export class SyncEngine {
         name: frame.name,
         platform: frame.platform,
         maker: frame.maker ?? "",
+        pairing: link.pairing,
         lastSeenAt: this.now(),
         ...(address ? { lastAddress: address } : {}),
       }),
@@ -566,6 +649,7 @@ export class SyncEngine {
 
   private ownCaps(): string[] {
     return [
+      capabilities.removal,
       ...(this.options.iconSource ? [capabilities.appIcons] : []),
       ...(this.options.images ? [capabilities.images] : []),
     ];
@@ -597,6 +681,13 @@ export class SyncEngine {
     if (hash === undefined) return;
     link.fetching = hash;
     await this.sendOrClosed(link, { t: "blob-want", hash });
+  }
+
+  /** The peer disconnected this device: it takes no more connections from
+   *  it, so the app stops making them. */
+  private handleRemoved(link: Link): void {
+    this.options.onRemovedBy?.(this.peerOf(link));
+    link.session.close();
   }
 
   /** The vault key, from the Mac whose pairing code this phone scanned. Any
@@ -706,7 +797,7 @@ export class SyncEngine {
 
   private pump(link: Link): void {
     link.dirty = true;
-    if (link.pumping || link.sentUpTo === null) return;
+    if (link.pumping || link.sentUpTo === null || link.refused) return;
     link.pumping = true;
     void (async () => {
       try {
@@ -754,7 +845,7 @@ export class SyncEngine {
     const epoch = await this.epoch();
     const allowSecrets = this.options.syncSecrets?.() ?? false;
 
-    while (link.sentUpTo !== null) {
+    while (link.sentUpTo !== null && !link.refused) {
       const items: ItemRecord[] = [];
       let bytes = 0;
       let scanned = link.sentUpTo;
