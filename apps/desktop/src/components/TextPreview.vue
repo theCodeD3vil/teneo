@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/vue-virtual";
 import { ButtonGroup } from "@teneo/ui/components/button-group";
 import Button from "@teneo/ui/components/button/Button.vue";
 import ScrollArea from "@teneo/ui/components/scroll-area/ScrollArea.vue";
+import SecretIndicators from "@teneo/ui/components/SecretIndicators.vue";
 import {
   Tooltip,
   TooltipContent,
@@ -21,6 +22,7 @@ import { renderSVG } from "uqr";
 import { type ComponentPublicInstance, computed, onMounted, ref } from "vue";
 import ResetIcon from "~icons/tabler/arrow-back-up";
 import FormatIcon from "~icons/tabler/braces";
+import ErrorLineIcon from "~icons/tabler/bug";
 import TickIcon from "~icons/tabler/check";
 import CopyIcon from "~icons/tabler/copy";
 import RevealIcon from "~icons/tabler/eye";
@@ -30,10 +32,17 @@ import PhoneIcon from "~icons/tabler/phone";
 import QrIcon from "~icons/tabler/qrcode";
 import TidyIcon from "~icons/tabler/wand";
 
+import { useLocalAi } from "@/composables/useLocalAi";
 import { usePreviewCopy } from "@/composables/usePreviewCopy";
 import { useSettings } from "@/composables/useSettings";
-import type { ClipboardHistoryItem } from "@/types/clipboard";
+import {
+  ClipboardItemAction,
+  ClipboardItemActionsVersion,
+  type ClipboardHistoryItem,
+  hasClipboardAction,
+} from "@/types/clipboard";
 import { getClipboardData } from "@/utils/clipboard-items";
+import { findErrorLine } from "@/utils/error-line";
 
 const props = defineProps<{
   item: ClipboardHistoryItem;
@@ -49,27 +58,48 @@ const hasSecrets = computed(() => props.item.secrets.length > 0);
 const isMasked = computed(
   () => hasSecrets.value && settings.value.maskSecrets && !isRevealed.value,
 );
-const secretLabels = computed(() =>
-  [...new Set(props.item.secrets.map(({ label }) => label))].join(", "),
-);
+const secretLabels = computed(() => [
+  ...new Set(props.item.secrets.map(({ label }) => label)),
+]);
 
-// The actions on offer depend on the text: each shows only when it has
-// something to do. Items with secrets get none, so they always copy as copied.
+// Precomputed backend action flags avoid re-parsing JSON, tidying, or scanning
+// text on every preview open; transforms still run lazily when toggled.
+const precomputedActions = computed(() =>
+  typeof props.item.actions === "number" ? props.item.actions : null,
+);
 const tidied = computed(() => tidyText(text.value));
 const formatted = computed(() => formatJson(text.value));
-const canTidy = computed(
-  () => !hasSecrets.value && tidied.value !== text.value,
+const canTidy = computed(() =>
+  hasSecrets.value
+    ? false
+    : precomputedActions.value !== null
+      ? hasClipboardAction(precomputedActions.value, ClipboardItemAction.tidy)
+      : tidied.value !== text.value,
 );
-const canFormat = computed(
-  () =>
-    !hasSecrets.value &&
-    formatted.value !== null &&
-    formatted.value !== text.value,
+const canFormat = computed(() =>
+  hasSecrets.value
+    ? false
+    : precomputedActions.value !== null
+      ? hasClipboardAction(
+          precomputedActions.value,
+          ClipboardItemAction.formatJson,
+        )
+      : formatted.value !== null && formatted.value !== text.value,
 );
 // a phone number or an email address in the text, to call or write to
-const contact = computed(() =>
-  hasSecrets.value ? null : findContact(text.value),
-);
+const contact = computed(() => {
+  if (hasSecrets.value) return null;
+  if (
+    precomputedActions.value !== null &&
+    !hasClipboardAction(
+      precomputedActions.value,
+      ClipboardItemAction.contactEmail | ClipboardItemAction.contactPhone,
+    )
+  ) {
+    return null;
+  }
+  return findContact(text.value);
+});
 
 // Tidying and formatting only change what's shown here; copying takes what's
 // shown
@@ -97,12 +127,13 @@ function openContact(): void {
 // A long text makes a code too dense for a camera to read.
 const qrTextLimit = 500;
 const isQrShown = ref(false);
-const canShowQr = computed(
-  () =>
-    !hasSecrets.value &&
-    shownText.value.length > 0 &&
-    shownText.value.length <= qrTextLimit,
-);
+const canShowQr = computed(() => {
+  if (hasSecrets.value) return false;
+  if (transform.value === null && precomputedActions.value !== null) {
+    return hasClipboardAction(precomputedActions.value, ClipboardItemAction.qr);
+  }
+  return shownText.value.length > 0 && shownText.value.length <= qrTextLimit;
+});
 const qrCode = computed(() =>
   isQrShown.value && canShowQr.value
     ? renderSVG(shownText.value, { border: 2 })
@@ -175,9 +206,50 @@ const highlightedHtml = computedAsync(
   null,
 );
 
-const { isCopied, copy } = usePreviewCopy(() =>
+const { isCopied, copiedKey, copy } = usePreviewCopy(() =>
   transform.value ? { text: shownText.value } : getClipboardData(props.item),
 );
+
+const localAi = useLocalAi();
+const aiPrecomputed = computed(
+  () =>
+    precomputedActions.value !== null &&
+    typeof props.item.actionsVersion === "number" &&
+    props.item.actionsVersion >= ClipboardItemActionsVersion.localAi,
+);
+const precomputedErrorLine = computed(
+  () =>
+    aiPrecomputed.value &&
+    hasClipboardAction(
+      precomputedActions.value,
+      ClipboardItemAction.copyErrorLine,
+    ),
+);
+const errorLine = computed(() => {
+  if (!localAi.value?.enabled || hasSecrets.value) return null;
+  if (aiPrecomputed.value && !precomputedErrorLine.value) return null;
+  return findErrorLine(text.value);
+});
+const suggestedFor = computedAsync(async () => {
+  const id = props.item.id;
+  if (!errorLine.value || aiPrecomputed.value) return null;
+  try {
+    const action = await tiny.api.call("localAiPreviewAction", { id });
+    return action === "copy-error-line" ? id : null;
+  } catch {
+    return null;
+  }
+}, null);
+const canCopyErrorLine = computed(
+  () =>
+    Boolean(errorLine.value) &&
+    (precomputedErrorLine.value || suggestedFor.value === props.item.id),
+);
+
+function copyErrorLine(): void {
+  if (errorLine.value && canCopyErrorLine.value)
+    void copy(false, { text: errorLine.value }, "error-line");
+}
 </script>
 
 <template>
@@ -225,6 +297,16 @@ const { isCopied, copy } = usePreviewCopy(() =>
             <EmailIcon v-else />
             {{ contact.kind === "phone" ? "Call" : "Email" }}
           </Button>
+          <Button
+            v-if="canCopyErrorLine"
+            variant="outline"
+            size="sm"
+            class="text-xs"
+            @click="copyErrorLine">
+            <TickIcon v-if="copiedKey === 'error-line'" class="text-success" />
+            <ErrorLineIcon v-else />
+            Copy error line
+          </Button>
         </ButtonGroup>
         <template v-else-if="settings.maskSecrets">
           <Button
@@ -236,9 +318,10 @@ const { isCopied, copy } = usePreviewCopy(() =>
             <RevealIcon v-else />
             {{ isRevealed ? "Hide" : "Reveal" }}
           </Button>
-          <span class="text-foreground/50 truncate text-xs">
-            {{ secretLabels }}
-          </span>
+          <SecretIndicators
+            :labels="secretLabels"
+            :show-mask-credit="isMasked"
+            class="text-foreground/50 text-xs" />
         </template>
         <Tooltip v-if="transform">
           <TooltipTrigger as-child>

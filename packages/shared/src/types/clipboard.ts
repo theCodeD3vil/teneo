@@ -21,6 +21,32 @@ export interface SecretSpan {
   label: string;
 }
 
+/** A contextual hit, which may be a short password or an unfamiliar key. */
+export const possibleCredentialLabel = "Possible credential";
+
+/** Precomputed text preview actions stored in `ClipboardHistoryItem.actions`. */
+export const ClipboardItemAction = {
+  tidy: 1 << 0,
+  formatJson: 1 << 1,
+  qr: 1 << 2,
+  contactEmail: 1 << 3,
+  contactPhone: 1 << 4,
+  copyErrorLine: 1 << 5,
+} as const;
+
+/** Stage at which `ClipboardHistoryItem.actions` was computed. */
+export const ClipboardItemActionsVersion = {
+  deterministic: 1,
+  localAi: 2,
+} as const;
+
+export function hasClipboardAction(
+  actions: number | null | undefined,
+  flag: number,
+): boolean {
+  return typeof actions === "number" && (actions & flag) !== 0;
+}
+
 /** What the filePreview API returns for a copied file or saved image. */
 export interface FilePreview {
   /** data: URL of its Quick Look thumbnail, or null when there's none */
@@ -76,6 +102,11 @@ export interface ClipboardHistoryItem {
   secrets: SecretSpan[];
   /** set when the text is a link, found when it's copied and stored with it */
   link: ClipboardLink | null;
+  /** precomputed text preview actions bitmask (ClipboardItemAction), or null
+   *  for non-text items and rows saved before action caching */
+  actions?: number | null;
+  /** stage that computed `actions` (ClipboardItemActionsVersion) */
+  actionsVersion?: number | null;
   /** the history list carries only the start of a long text (see
    *  textPreviewLength); the whole of it comes from the clipboardItem api */
   isTruncated: boolean;

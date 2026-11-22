@@ -153,8 +153,9 @@ jobs:
           printf '%s\n\n%s\n' "$(jq -r .title <<< "$pr")" "$(jq -r '.body // ""' <<< "$pr")" > "$RUNNER_TEMP/notes.md"
           bun apps/desktop/scripts/release-notes.ts "$RUNNER_TEMP/notes.md"
 
-      # One runner builds both CPUs: apps, disk images, zips and one plain
-      # manifest.json pinned to this release's tag. `tinyjs build`, not
+      # One runner builds both CPUs: apps (with the sandboxed Local AI XPC
+      # service compiled and signed inside-out), disk images, zips and one
+      # plain manifest.json pinned to this release's tag. `tinyjs build`, not
       # `publish`: publish signs the manifest, and CI never has the key.
       # SENTRY_AUTH_TOKEN uploads the source maps that make Sentry's stack
       # traces readable; without it the build makes none
@@ -162,7 +163,9 @@ jobs:
         working-directory: apps/desktop
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: bun scripts/package-release.ts --notes-file "$RUNNER_TEMP/notes.md" --out "$RUNNER_TEMP/release"
+        run: |
+          cmake --version
+          bun scripts/package-release.ts --notes-file "$RUNNER_TEMP/notes.md" --out "$RUNNER_TEMP/release"
 
       # A signed record, kept by GitHub, that these exact files came from this
       # workflow on this commit of main. release:publish checks it.

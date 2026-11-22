@@ -15,7 +15,6 @@ import { getPreviewHotkeyProgress } from "@/constants/hotkeys";
 import type { ClipboardHistoryItem } from "@/types/clipboard";
 import { isInMenu } from "@/utils/keyboard";
 
-import BetaBadge from "./BetaBadge.vue";
 import HotkeyPreview from "./HotkeyPreview.vue";
 import LinkPreview from "./LinkPreview.vue";
 import MediaPreview from "./MediaPreview.vue";
@@ -65,17 +64,14 @@ function deleteItem(): void {
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3">
     <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="text-foreground/70"
-          aria-label="Back to clipboard history"
-          @click="emit('back')">
-          <BackIcon />
-        </Button>
-        <BetaBadge />
-      </div>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        class="text-foreground/70"
+        aria-label="Back to clipboard history"
+        @click="emit('back')">
+        <BackIcon />
+      </Button>
       <div class="flex items-center gap-1">
         <Button
           variant="ghost"

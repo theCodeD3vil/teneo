@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import Button from "@teneo/ui/components/button/Button.vue";
-import { useRelativeTimeAgo } from "@teneo/ui/composables/useRelativeTimeAgo";
+import ClipboardTimestamp from "@teneo/ui/components/ClipboardTimestamp.vue";
+import SecretIndicators from "@teneo/ui/components/SecretIndicators.vue";
 import { cn } from "@teneo/ui/lib/utils";
 import { makerIcon } from "@teneo/ui/utils/device-makers";
 import { formatFileSize } from "@teneo/ui/utils/file-size";
@@ -16,7 +17,6 @@ import PinIcon from "~icons/tabler/pin";
 import PinOffIcon from "~icons/tabler/pinned-off";
 import DeleteIcon from "~icons/tabler/trash";
 
-import BetaBadge from "@/components/BetaBadge.vue";
 import { getPreviewPath } from "@/composables/useItemPreviews";
 import { useSettings } from "@/composables/useSettings";
 import type { ClipboardHistoryItem, FilePreview } from "@/types/clipboard";
@@ -104,8 +104,6 @@ const fileSize = computed(() =>
     : formatFileSize(props.itemDetails.fileSize),
 );
 
-const dateCopied = useRelativeTimeAgo(props.itemDetails.dateCopied);
-
 // Secrets in the text show as asterisks unless masking is off in Settings; copying
 // and pasting always give the real text
 const maskedTextParts = computed(() => {
@@ -128,13 +126,13 @@ const textParts = computed(() => {
   }
   return parts;
 });
-const secretLabels = computed(() =>
-  [
-    ...new Set(
-      maskedTextParts.value.map((part) => part.secretLabel).filter(Boolean),
+const secretLabels = computed(() => [
+  ...new Set(
+    maskedTextParts.value.flatMap(({ secretLabel }) =>
+      secretLabel ? [secretLabel] : [],
     ),
-  ].join(", "),
-);
+  ),
+]);
 
 const imageName = getImageName(props.itemDetails);
 
@@ -235,10 +233,8 @@ onUnmounted(() => {
           class="font-foreground line-clamp-2 text-sm wrap-break-word"
           v-if="itemDetails.kind === 'text' && itemDetails.text">
           <template v-for="(part, index) in textParts" :key="index">
-            <!-- a masked key and its badge wrap as one -->
-            <span v-if="part.secretLabel" class="whitespace-nowrap">
-              <span class="font-mono">{{ part.text }}</span>
-              <BetaBadge class="ml-1" />
+            <span v-if="part.secretLabel" class="font-mono whitespace-nowrap">
+              {{ part.text }}
             </span>
             <template v-else>{{ part.text }}</template>
           </template>
@@ -331,15 +327,16 @@ onUnmounted(() => {
           </template> -->
           <template v-if="itemDetails.dateCopied">
             <span class="text-foreground/50">·</span>
-            <span class="text-foreground/50 text-[0.6875rem]">{{
-              dateCopied
-            }}</span>
+            <ClipboardTimestamp
+              :timestamp="itemDetails.dateCopied"
+              class="text-foreground/50 text-[0.6875rem]" />
           </template>
-          <template v-if="secretLabels">
+          <template v-if="secretLabels.length">
             <span class="text-foreground/50">·</span>
-            <span class="text-foreground/50 min-w-0 flex-1 truncate text-xs">
-              {{ secretLabels }}</span
-            >
+            <SecretIndicators
+              :labels="secretLabels"
+              mask-tooltip="Masked with AI"
+              class="text-foreground/50 text-xs" />
           </template>
           <template v-if="isFiles && firstPath">
             <span class="text-foreground/50">·</span>
