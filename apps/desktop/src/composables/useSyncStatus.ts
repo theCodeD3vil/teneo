@@ -59,6 +59,7 @@ export function useSyncStatus() {
     isBusy: readonly(isBusy),
     error: readonly(error),
     turnOn: () => change(() => tiny.api.call("syncTurnOn")),
+    resume: () => change(() => tiny.api.call("syncResume")),
     join: (code: string) => change(() => tiny.api.call("syncJoin", { code })),
     turnOff: () => change(() => tiny.api.call("syncTurnOff")),
     setSyncSecrets: (enabled: boolean) =>
@@ -66,5 +67,15 @@ export function useSyncStatus() {
     removeDevice: (deviceId: string) =>
       change(() => tiny.api.call("syncRemoveDevice", { deviceId })),
     pairingInfo: (): Promise<PairingInfo> => tiny.api.call("syncPairingInfo"),
+    upgradeTrusted: () => change(() => tiny.api.call("syncUpgradeTrusted")),
+    rotateTrusted: (deviceId?: string) =>
+      change(() => tiny.api.call("syncRotateTrusted", { deviceId })),
+    answerEnrollment: (
+      deviceId: string,
+      fingerprint: string,
+      accept: boolean,
+    ) =>
+      tiny.api.call("syncAnswerEnrollment", { deviceId, fingerprint, accept }),
+    cancelEnrollment: () => tiny.api.call("syncCancelEnrollment"),
   };
 }

@@ -5,12 +5,30 @@ detected secret, so that a copy of the database file gives nothing away.
 Written on 2026-11-18, after the trojaned 0.4.2 release showed that malware
 running as the user could read the history file directly.
 
+## Hardware protection for encrypted secrets
+
+This upgrade protects detected secrets, not the whole history. On a Mac with
+Secure Enclave, go to **Settings → Security**, enable **Encrypt secrets**,
+then choose **Hardware-backed encryption → Set up**. The upgrade re-encrypts
+the entries with a fresh key and removes the old Keychain copy only after
+the new data is saved. It does not alter existing backups.
+
+You can require authentication to unlock saved secrets. Unlocking lasts five
+minutes, or until you choose **Lock now**. While locked, Teneo cannot read or
+send those entries and does not save newly copied secrets. This setting is
+local; it does not revoke copies other devices have already received.
+
+The protected entries cannot be restored from a history backup to a
+replacement Mac. Keep important secrets in a password manager. Do not open a
+protected database with an older build that doesn't support this mode.
+
 ## Where things stand
 
 - With "Encrypt API keys" on, text that holds a detected secret (private keys,
   GitHub/GitLab/AWS/Google/Slack/Stripe/Anthropic/OpenAI/npm tokens, JWTs,
   passwords in URLs) is saved with AES-GCM. The key is 32 random bytes kept in
-  the macOS Keychain (`backend/secret-encryption.ts`). The setting is off by
+  the macOS Keychain by default (`backend/secret-encryption.ts`). On compatible
+  Macs, the user can opt into Secure Enclave protection. The setting is off by
   default (`packages/shared/src/types/settings.ts`), except for people who
   upgrade from a version that always encrypted.
 - Everything else is plain text in `teneo.sqlite`: ordinary text, links,

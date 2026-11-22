@@ -17,10 +17,13 @@ import {
   getClipboardItem,
   deleteClipboardItems,
   getSyncIdentity,
+  historyProtectionStatus,
   initializeDatabase,
   listClipboardItemSizes,
   listClipboardItems,
   onHistoryChanged,
+  protectHistorySecrets,
+  restoreSecretHistoryAccess,
   purgeOldTombstones,
   restampSecretItems,
   saveClipboardItem,
@@ -29,7 +32,12 @@ import {
   turnOffSecretEncryption,
   turnOnSecretEncryption,
 } from "../database";
+import { getFilePreview, getFileSize } from "../file-previews";
 import { clearClipboardHistory } from "../history-limits";
+import {
+  prepareEncryptionKey,
+  setHistoryKeyEnvelope,
+} from "../secret-encryption";
 import { getSettings, loadSettings, updateSettings } from "../settings";
 import { all, run } from "../sqlite";
 import type { ClipboardItemToSave } from "../types/clipboard";
@@ -68,8 +76,13 @@ await tjs.makeDir(`${folder}/cache`, { recursive: true });
 
 const stored = new Map<string, unknown>();
 const secrets = new Map<string, string>();
+let keychainReads = 0;
 const app = {
-  paths: async () => ({ data: dataFolder, cache: `${folder}/cache` }),
+  paths: async () => ({
+    data: dataFolder,
+    cache: `${folder}/cache`,
+    executables: tjs.env.TENEO_TEST_ENCLAVE || null,
+  }),
   store: {
     get: async (key: string) => stored.get(key) ?? null,
     set: async (key: string, value: unknown) => {
@@ -78,7 +91,10 @@ const app = {
     },
   },
   secrets: {
-    get: async (key: string) => secrets.get(key) ?? null,
+    get: async (key: string) => {
+      keychainReads += 1;
+      return secrets.get(key) ?? null;
+    },
     set: async (key: string, value: string) => {
       secrets.set(key, value);
       return true;
@@ -511,6 +527,7 @@ await test("a copy made while a batch is open waits, and survives its rollback",
 
 await test("put keeps what it can: a pin change leaves the text, its encryption and its app id", async () => {
   reset();
+  await prepareEncryptionKey(app);
   await updateSettings({ encryptSecrets: true }, app);
   const item = await saveClipboardItem(
     textItem(secretText, { name: "Xcode", bundleId: "x" }),
@@ -545,6 +562,7 @@ await test("a received text is searched for secrets and links, and encrypted whe
     "a secret, saved plain",
   );
 
+  await prepareEncryptionKey(app);
   await updateSettings({ encryptSecrets: true }, app);
   await store.transaction((tx) => tx.put(record("t-6", secretText)));
   const row = rowOf("t-6");
@@ -1006,6 +1024,7 @@ await test("restampSecretItems sends the rows holding secrets again, and only th
     textItem("a secret " + secretText),
     app,
   );
+  await prepareEncryptionKey(app);
   await updateSettings({ encryptSecrets: true }, app);
   const sealed = await saveClipboardItem(textItem("sealed " + secretText), app);
   await updateSettings({ encryptSecrets: false }, app);
@@ -1450,6 +1469,60 @@ await test("encryption turns on and off in one go, and an unreadable key becomes
   await softDeleteClipboardItem(saved.id, app);
 });
 
+await test("relaunch: listing and copying cannot read Keychain before explicit restore", async () => {
+  check(await turnOnSecretEncryption(app), "encryption turned on");
+  const saved = await saveClipboardItem(
+    textItem(`existing ${secretText}`),
+    app,
+  );
+  const originalKey = secrets.get("history-encryption-key");
+  check(originalKey, "there is an original key");
+  setHistoryKeyEnvelope(null, () => {});
+  const reads = keychainReads;
+  same(
+    await getClipboardItem(saved.id, app),
+    null,
+    "secret hidden before consent",
+  );
+  await listClipboardItems(app, { kind: "all", search: "", limit: 50 });
+  await rejects(
+    saveClipboardItem(textItem(`new ${secretText}`), app),
+    "no plaintext fallback",
+  );
+  same(keychainReads, reads, "no background keychain read");
+  secrets.delete("history-encryption-key");
+  await rejects(restoreSecretHistoryAccess(app), "missing original key");
+  same(
+    secrets.has("history-encryption-key"),
+    false,
+    "no replacement for persisted history",
+  );
+  secrets.set("history-encryption-key", originalKey);
+  await restoreSecretHistoryAccess(app);
+  same(
+    (await getClipboardItem(saved.id, app))?.text,
+    `existing ${secretText}`,
+    "access restored",
+  );
+  check(await turnOffSecretEncryption(app), "settings reset");
+  await softDeleteClipboardItem(saved.id, app);
+});
+
+await test("unknown paths have no automatic file metadata or missing-file result", async () => {
+  const unapproved = "/unapproved-location/a-file";
+  same(
+    await getFilePreview(unapproved, 64, app),
+    { url: null, isMissing: false },
+    "no external probe",
+  );
+  same(await getFileSize(unapproved, app), null, "no external size probe");
+  same(
+    await getFilePreview(`${dataFolder}/missing`, 64, app),
+    { url: null, isMissing: true },
+    "app-owned path can be checked",
+  );
+});
+
 await test("after everything above, the sizes table matches the history", async () => {
   const database = await initializeDatabase(app);
   const fresh = all(
@@ -1469,6 +1542,90 @@ await test("after everything above, the sizes table matches the history", async 
   check(fresh.length > 0, "there is history to compare");
   same(kept, fresh, "every row as the history has it");
 });
+
+if (tjs.env.TENEO_TEST_ENCLAVE) {
+  await test("Secure Enclave setup preserves the old key on failure and rotates all encrypted rows on success", async () => {
+    check(
+      (await historyProtectionStatus(app)).available,
+      "the helper has hardware",
+    );
+    const database = await initializeDatabase(app);
+    check(await turnOnSecretEncryption(app), "encryption turned on");
+    const saved = await saveClipboardItem(textItem(secretText), app);
+    const getRow = () =>
+      all<{ value: string; syncSeq: number; linkUrl: string | null }>(
+        database,
+        `SELECT value, syncSeq, linkUrl FROM "CLIPBOARD_ITEMS" WHERE id = ?`,
+        saved.id,
+      )[0]!;
+    const old = getRow();
+    const oldKey = secrets.get("history-encryption-key");
+    check(oldKey, "legacy key exists");
+    run(
+      database,
+      `UPDATE "CLIPBOARD_ITEMS" SET value = 'invalid' WHERE id = ?`,
+      saved.id,
+    );
+    await rejects(
+      protectHistorySecrets(app, false),
+      "unreadable row blocks migration",
+    );
+    same(secrets.get("history-encryption-key"), oldKey, "original key kept");
+    same(
+      (await historyProtectionStatus(app)).protected,
+      false,
+      "protection not installed",
+    );
+    same(getRow().value, "invalid", "failed migration didn't write rows");
+    run(
+      database,
+      `UPDATE "CLIPBOARD_ITEMS" SET value = ? WHERE id = ?`,
+      old.value,
+      saved.id,
+    );
+
+    await protectHistorySecrets(app, false);
+    const updated = getRow();
+    check(updated.value !== old.value, "the ciphertext changed");
+    same(
+      updated.linkUrl,
+      null,
+      "the raw secret URL wasn't preserved as metadata",
+    );
+    same(updated.syncSeq, old.syncSeq, "sync progress wasn't reset");
+    same(secrets.has("history-encryption-key"), false, "old key is gone");
+    const oldAes = await crypto.subtle.importKey(
+      "raw",
+      Uint8Array.fromBase64(oldKey),
+      "AES-GCM",
+      false,
+      ["decrypt"],
+    );
+    const cipher = Uint8Array.fromBase64(updated.value);
+    await rejects(
+      crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: cipher.slice(0, 12) },
+        oldAes,
+        cipher.slice(12),
+      ),
+      "old key must not open the rotated data",
+    );
+    same(
+      (await getClipboardItem(saved.id, app))?.text,
+      secretText,
+      "new key opens the data",
+    );
+    check(
+      await turnOffSecretEncryption(app),
+      "encryption turned off without deleting protected history",
+    );
+    same(
+      (await historyProtectionStatus(app)).protected,
+      false,
+      "the envelope was removed",
+    );
+  });
+}
 
 await tjs.remove(folder).catch(() => {});
 finish();

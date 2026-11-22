@@ -92,6 +92,13 @@ public class SyncPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void pairTrusted(PluginCall call) {
+        String error = controller.pairTrusted(call.getString("link"));
+        if (error != null) call.reject(error);
+        else call.resolve(toJs(controller.status()));
+    }
+
+    @PluginMethod
     public void unpair(PluginCall call) {
         controller.unpair();
         call.resolve(toJs(controller.status()));

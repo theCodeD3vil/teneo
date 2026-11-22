@@ -69,6 +69,7 @@ public final class SyncController {
     private final Context context;
     private final SharedPreferences preferences;
     private final VaultKeyStore keys;
+    private final TrustedSyncStore trusted;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final Handler main = new Handler(Looper.getMainLooper());
 
@@ -79,6 +80,8 @@ public final class SyncController {
     private String problem;
     private Running service;
     private String pendingDebugCode;
+    private String enrollmentFingerprint;
+    private String trustedRunToken;
 
     // The two settings sync goes by, read from the database when the app
     // starts and when it says they changed, never on the way to deciding
@@ -95,6 +98,7 @@ public final class SyncController {
         this.context = context;
         preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
         keys = new VaultKeyStore(new PreferenceStorage(preferences), new KeystoreCipher());
+        trusted = new TrustedSyncStore(context);
         devices = new KnownDevices(readDevices());
         migrate();
         readSettings();
@@ -143,7 +147,7 @@ public final class SyncController {
     // --- what the app asks
 
     public synchronized boolean isPaired() {
-        return keys.has();
+        return trusted.has() || keys.has();
     }
 
     /**
@@ -153,7 +157,7 @@ public final class SyncController {
      */
     public String pair(byte[] vaultKey, String pairingAddresses) {
         synchronized (this) {
-            if (keys.has()) return "This phone already syncs. Turn sync off before joining again.";
+            if (isPaired()) return "This phone already syncs. Turn sync off before joining again.";
             if (!keys.save(vaultKey)) {
                 return "Teneo couldn't keep the sync key safely on this phone.";
             }
@@ -172,6 +176,52 @@ public final class SyncController {
         apply();
         notifyStatus();
         return null;
+    }
+
+    public String pairTrusted(String link) {
+        synchronized (this) {
+            if (isPaired()) return "This phone already syncs. Turn sync off before joining again.";
+            if (link == null || link.length() > 2_048 || !link.startsWith("teneo://pair?")) return "Invalid sync invitation.";
+            try {
+                if (!trusted.write(new JSONObject().put("invite", link))) return "Teneo couldn't keep the sync invitation.";
+            } catch (JSONException impossible) {
+                return "Invalid sync invitation.";
+            }
+            preferences.edit().putString(PAIRING_ID, java.util.UUID.randomUUID().toString()).apply();
+            problem = null;
+        }
+        apply();
+        notifyStatus();
+        return null;
+    }
+
+    synchronized boolean hasTrusted() {
+        return trusted.has();
+    }
+
+    synchronized boolean installTrust(String snapshot, String expectedToken) {
+        // The runtime token is checked before delivering this callback as well;
+        // don't recreate sync after the user turned it off.
+        if (!trusted.has() || expectedToken == null || !expectedToken.equals(trustedRunToken)) return false;
+        try {
+            return trusted.write(new JSONObject(snapshot));
+        } catch (Exception invalid) {
+            return false;
+        }
+    }
+
+    synchronized JSONObject openTrustedRun() throws Exception {
+        JSONObject state = trusted.read();
+        trustedRunToken = java.util.UUID.randomUUID().toString();
+        state.put("token", trustedRunToken);
+        return state;
+    }
+
+    void enrollmentFingerprint(String fingerprint) {
+        synchronized (this) {
+            enrollmentFingerprint = fingerprint;
+        }
+        main.post(this::notifyStatus);
     }
 
     /** The Mac addresses to get the vault key from, while joining with a pairing code; else null */
@@ -206,6 +256,9 @@ public final class SyncController {
         synchronized (this) {
             preferences.edit().remove(PAIRING_ADDRESSES).remove(PAIRING_ID).apply();
             keys.forget();
+            trusted.clear();
+            trustedRunToken = null;
+            enrollmentFingerprint = null;
             devices.clear();
             saveDevices();
             problem = null;
@@ -324,11 +377,12 @@ public final class SyncController {
     public synchronized JSONObject status() {
         JSONObject status = new JSONObject();
         try {
-            status.put("paired", keys.has());
+            status.put("paired", isPaired());
             status.put("running", running);
             status.put("problem", problem == null ? JSONObject.NULL : problem);
             JSONArray list = new JSONArray();
-            if (keys.has()) {
+            if (enrollmentFingerprint != null) status.put("enrollmentFingerprint", enrollmentFingerprint);
+            if (isPaired()) {
                 for (KnownDevices.Device device : devices.list()) list.put(toJson(device, true));
             }
             status.put("devices", list);
@@ -355,7 +409,7 @@ public final class SyncController {
     // --- whether the service runs
 
     synchronized SyncRules.Mode mode() {
-        return SyncRules.mode(keys.has(), backgroundReceive(), appVisible);
+        return SyncRules.mode(isPaired(), backgroundReceive(), appVisible);
     }
 
     /** Start or stop the service to match the rules */

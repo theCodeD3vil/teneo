@@ -26,6 +26,7 @@ export interface NativeSyncStatus {
   /** What went wrong, worded for the user; null when nothing did */
   problem: string | null;
   devices: NativeDevice[];
+  enrollmentFingerprint?: string;
 }
 
 /** SyncPlugin.java in the Android app */
@@ -38,6 +39,7 @@ export interface SyncPlugin {
     vaultKey: string;
     pairingAddresses?: string[];
   }): Promise<NativeSyncStatus>;
+  pairTrusted?(options: { link: string }): Promise<NativeSyncStatus>;
   /** Stop sync, forget the key and the devices */
   unpair(): Promise<NativeSyncStatus>;
   /** Stop syncing with one device, until it is paired again */
@@ -80,7 +82,12 @@ function toDevice(device: NativeDevice): PairedDevice {
 
 /** What the screens say for what native code knows */
 export function toSyncStatus(native: NativeSyncStatus): SyncStatus {
-  if (!native.paired) return { state: "not_paired", devices: [] };
+  if (!native.paired)
+    return {
+      state: "not_paired",
+      devices: [],
+      ...(native.problem && { errorMessage: native.problem }),
+    };
   const devices = native.devices.map(toDevice);
   const problem = native.problem || undefined;
   const state =
@@ -89,5 +96,12 @@ export function toSyncStatus(native: NativeSyncStatus): SyncStatus {
       : devices.some((device) => device.connected)
         ? "connected"
         : "searching";
-  return { state, devices, ...(problem && { errorMessage: problem }) };
+  return {
+    state,
+    devices,
+    ...(problem && { errorMessage: problem }),
+    ...(native.enrollmentFingerprint && {
+      enrollmentFingerprint: native.enrollmentFingerprint,
+    }),
+  };
 }

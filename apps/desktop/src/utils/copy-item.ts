@@ -36,8 +36,9 @@ export async function copyItemToClipboard(
   return true;
 }
 
-// Posting ⌘V needs the Accessibility permission; ask for it when it is missing.
+// Posting ⌘V needs Accessibility. Without it the item stays copied for a
+// manual paste; setup and Settings are the only places that request access.
 async function pasteIntoFrontmostApp(): Promise<void> {
-  const { trusted } = await tiny.app.paste();
-  if (!trusted) await tiny.app.permissions.request("accessibility");
+  if ((await tiny.app.permissions.check("accessibility")) === "granted")
+    await tiny.app.paste();
 }

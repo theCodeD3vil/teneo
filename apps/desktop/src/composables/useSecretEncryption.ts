@@ -18,6 +18,10 @@ export function useSecretEncryption() {
           ? "Teneo couldn't use your Keychain, so keys aren't encrypted."
           : "Teneo couldn't read its key from your Keychain, so keys stay encrypted.";
       }
+    } catch {
+      error.value = enabled
+        ? "Teneo couldn’t set up encryption. Check Keychain access and try again."
+        : "Teneo couldn’t finish turning encryption off.";
     } finally {
       isChanging.value = false;
     }

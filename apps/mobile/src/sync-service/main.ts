@@ -6,9 +6,20 @@
 // app and answers every other request with a 404.
 import {
   type ConnectedPeer,
-  SyncEngine,
+  type DeviceIdentity,
+  deviceFingerprint,
   fromBase64,
+  joinTrustedVault,
+  parseDeviceIdentity,
+  parseEnrollmentLink,
+  randomBytes,
+  SyncEngine,
+  SyncError,
   toBase64,
+  toHex,
+  type VaultPin,
+  VaultTrust,
+  VaultTrustManager,
 } from "@teneo/sync";
 
 import { takeAll } from "./inbox";
@@ -27,7 +38,7 @@ const log = (line: string) => native.log(line);
 const debuggable = native.isDebuggable();
 
 interface Run {
-  engine: SyncEngine;
+  engine: SyncEngine | null;
   transport: PhoneTransport;
   stopStatus: number | undefined;
 }
@@ -62,14 +73,100 @@ function removedPairing(deviceId: string): string | null {
   }
 }
 
+type TrustedConfiguration = {
+  invite?: string;
+  pin?: VaultPin;
+  update?: unknown;
+};
+
+function identityOnPhone(deviceId: string, create: boolean): DeviceIdentity {
+  const identity = parseDeviceIdentity({
+    deviceId,
+    publicKey: native.syncIdentityPublicKey(create),
+  });
+  if (!identity) throw new Error("Hardware-backed sync identity unavailable");
+  return {
+    ...identity,
+    async sign(message) {
+      const signed = native.signSyncIdentity(toBase64(message));
+      const bytes = signed && fromBase64(signed);
+      if (!bytes || bytes.length !== 64)
+        throw new Error("Couldn't sign a sync proof");
+      return bytes;
+    },
+  };
+}
+
+async function persist(trust: VaultTrust): Promise<void> {
+  if (
+    !native.saveTrustedSnapshot(
+      JSON.stringify({ pin: trust.pin, update: trust.snapshot() }),
+    )
+  )
+    throw new Error("Couldn't save the trusted device list");
+}
+
+async function joinFromPhone(
+  identity: DeviceIdentity,
+  invite: NonNullable<ReturnType<typeof parseEnrollmentLink>>,
+): Promise<void> {
+  native.enrollmentFingerprint(await deviceFingerprint(identity));
+  const transport = new PhoneTransport({
+    engine: {
+      attach: async (channel) => {
+        channel.close();
+        return new SyncError("closed", "Enrollment is outbound only");
+      },
+      discoveryTag: async () => toHex(randomBytes(32)),
+      peers: () => [],
+    },
+    deviceId: identity.deviceId,
+    native,
+  });
+  run = { engine: null, transport, stopStatus: undefined };
+  await transport.start();
+  for (let i = 0; i < 40 && !native.syncNetworkReady(); i++) {
+    if (stopWanted || !run) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+  }
+  if (!native.syncNetworkReady())
+    throw new Error("Local network is unavailable");
+  for (const address of invite.addresses) {
+    if (stopWanted || !run) return;
+    const connected = await transport.connectEnrollment(
+      address,
+      async (channel) => {
+        try {
+          await joinTrustedVault(channel, identity, invite, persist);
+          return null;
+        } catch {
+          return new SyncError("auth", "Trusted enrollment failed");
+        }
+      },
+    );
+    if (connected) {
+      native.trustedJoined();
+      return;
+    }
+  }
+  throw new Error("The primary Mac couldn't be reached");
+}
+
 const page: SyncPage = {
-  async start(encodedKey, syncSecrets, pairingAddresses) {
+  async startTrusted(syncSecrets) {
+    const config = native.takeTrustedConfiguration();
+    if (!config) return;
+    return page.start("", syncSecrets, null, config);
+  },
+
+  async start(encodedKey, syncSecrets, pairingAddresses, trustedConfiguration) {
     if (run || starting) return;
     starting = true;
     stopWanted = false;
     allowSecrets = syncSecrets;
     // allowed while the page wasn't running: the held-back items go out first
     if (syncSecrets) native.restampHeldBackSecrets();
+    let enrolling = false;
     try {
       if (!isSecureContext || typeof crypto?.subtle !== "object") {
         native.failed(
@@ -79,8 +176,8 @@ const page: SyncPage = {
       }
       // checked by the app's parsers when it was paired; this only guards
       // against storage handing back something else
-      const vaultKey = fromBase64(encodedKey);
-      if (vaultKey?.length !== 32) {
+      const vaultKey = trustedConfiguration ? null : fromBase64(encodedKey);
+      if (!trustedConfiguration && vaultKey?.length !== 32) {
         native.failed("the stored key is not a vault key");
         return;
       }
@@ -93,6 +190,36 @@ const page: SyncPage = {
       const opened = openSyncStore(native);
       const { deviceId } = opened;
       const store = debuggable ? loggedStore(opened.store, log) : opened.store;
+      let trust: VaultTrustManager | null = null;
+      if (trustedConfiguration) {
+        const config = JSON.parse(trustedConfiguration) as TrustedConfiguration;
+        enrolling = typeof config.invite === "string";
+        let identity: DeviceIdentity;
+        try {
+          identity = identityOnPhone(deviceId, enrolling);
+        } catch {
+          native.failed(
+            enrolling
+              ? "trusted enrollment failed: hardware not available"
+              : "trusted sync identity unavailable",
+          );
+          return;
+        }
+        if (config.invite) {
+          const invite = parseEnrollmentLink(config.invite);
+          if (!invite) throw new Error("Invalid trusted sync invitation");
+          await joinFromPhone(identity, invite);
+          return;
+        }
+        if (!config.pin) throw new Error("The vault has no primary identity");
+        const snapshot = await VaultTrust.load(
+          config.pin,
+          identity,
+          config.update,
+        );
+        trust = new VaultTrustManager(identity, snapshot, persist);
+      }
+      if (stopWanted) return;
       const engine = new SyncEngine({
         deviceId,
         name: native.deviceName(),
@@ -129,7 +256,6 @@ const page: SyncPage = {
             }
           },
         },
-        vaultKey,
         store,
         syncSecrets: () => allowSecrets,
         onItemsChanged: () => {
@@ -142,18 +268,24 @@ const page: SyncPage = {
         onError: (error) => log(`engine error: ${String(error)}`),
         // joining with a pairing code: the key is its one-time key, and the
         // Mac sends the vault's, which native code keeps and restarts on
-        ...(pairingAddresses && {
-          onVaultKey: (key: Uint8Array) => {
-            log("joined: the Mac sent the vault key");
-            native.paired(toBase64(key));
-          },
-        }),
+        ...(trust
+          ? { trust }
+          : {
+              vaultKey: vaultKey!,
+              ...(pairingAddresses && {
+                onVaultKey: (key: Uint8Array) => {
+                  log("joined: the Mac sent the vault key");
+                  native.paired(toBase64(key));
+                },
+              }),
+            }),
       });
       const transport = new PhoneTransport({
         engine,
         deviceId,
         native,
-        isDisconnected: (peerId) => native.isDisconnected(peerId),
+        isDisconnected: (peerId) =>
+          trust ? !trust.current.member(peerId) : native.isDisconnected(peerId),
         onError: (error) => log(`transport error: ${String(error)}`),
         // a used or run-out code is refused by the Mac: nothing to retry
         ...(pairingAddresses && {
@@ -197,7 +329,13 @@ const page: SyncPage = {
       // Nothing is listening for this promise, so say it: otherwise the
       // service's notification stays up over a sync that never started
       if (run) page.stop();
-      native.failed(`sync could not start: ${String(error)}`);
+      native.failed(
+        enrolling
+          ? "trusted enrollment failed"
+          : trustedConfiguration
+            ? "trusted sync could not start"
+            : `sync could not start: ${String(error)}`,
+      );
     } finally {
       starting = false;
     }
@@ -210,13 +348,13 @@ const page: SyncPage = {
       // Restamped only now that the setting is set here: a send already under
       // way that read them before would have passed over them for good
       native.restampHeldBackSecrets();
-      run?.engine.localChanged();
+      run?.engine?.localChanged();
     }
   },
 
   removeDevice(deviceId) {
     void run?.engine
-      .remove(deviceId)
+      ?.remove(deviceId)
       .catch((error: unknown) => log(`engine error: ${String(error)}`));
   },
 
@@ -225,7 +363,7 @@ const page: SyncPage = {
     if (!run) return;
     window.clearInterval(run.stopStatus);
     run.transport.stop();
-    run.engine.stop();
+    run.engine?.stop();
     run = null;
     log("sync stopped");
   },
@@ -249,7 +387,7 @@ const page: SyncPage = {
   },
   discovered: (deviceId, addresses, port) =>
     run?.transport.found({ deviceId, addresses, port }),
-  localChanged: () => run?.engine.localChanged(),
+  localChanged: () => run?.engine?.localChanged(),
 
   debug: {
     /** Dial `ip:port` once (DebugSyncReceiver --es dial-address) */
@@ -293,7 +431,7 @@ function describePeers(engine: SyncEngine): string {
 
 function status(current: Run | null): string {
   if (!current) return "status: not running";
-  return `status: peers=${current.engine.peers().length}`;
+  return `status: peers=${current.engine?.peers().length ?? 0}`;
 }
 
 (globalThis as unknown as { teneoSyncPage: SyncPage }).teneoSyncPage = page;

@@ -1,14 +1,14 @@
 # @teneo/sync
 
-The sync core: what two devices that hold the same vault key say to each other
-so their clipboard history ends up the same. It is plain TypeScript on top of
+The sync core: what paired devices say to each other so their clipboard
+history ends up the same. It is plain TypeScript on top of
 WebCrypto, timers and a few interfaces the app provides, with no `tjs`, no Node
 APIs and no dependencies. That is so the Mac app (txiki), a mobile web view and
 `bun test` can all run it. Nothing in here touches the network or a database.
 
-Protocol version: **1**. Sync is on in beta builds of the Mac app and otherwise behind `TENEO_SYNC=1`;
-shipping it freezes this version, so read the rules at the end before changing
-anything on the wire.
+Shared-key sync uses protocol **2**. Hardware-backed device identity and key
+rotation use **3** in the [trusted sync preview](#trusted-sync-preview-v3).
+Read the compatibility rules before changing anything on the wire.
 
 ## What is in it
 
@@ -82,7 +82,10 @@ is local, and the limit is per device. A user's delete does leave one.
 Whoever has the key can read the history. Neither the key nor the recovery code
 is ever logged.
 
-## The connection protocol (version 1)
+## The original connection protocol (version 1)
+
+This section is historical. Version 2 added ephemeral P-256 ECDH and encrypted
+peer proofs; see `src/session.ts` for the current implementation.
 
 A `Channel` is an ordered, reliable pipe of string messages (a WebSocket on the
 Mac). Either device may open it; both listen when they can. The side that
@@ -256,3 +259,45 @@ updated at the same moment as a newer one. So:
 - Anything older devices cannot understand needs a new `protocolVersion`, so
   they fail with a clear message instead of a protocol error.
 - Keep new code free of `tjs`, Node and DOM APIs, and run `bun test` here.
+
+## Trusted sync preview (v3)
+
+Trusted sync is opt-in in Teneo Beta. Install the matching Mac and Android
+beta builds. For development, run `TENEO_TRUSTED_SYNC=1 bun run desktop` on
+both Macs to compile the Secure Enclave helper for the debug app, and
+`bun run --cwd apps/mobile android:build` for the Android APK. The
+preview needs hardware-backed signing: a Mac needs Secure Enclave and a phone
+needs a hardware-backed Android Keystore. It does not fall back to software
+keys. Use test app data rather than switching a daily-use vault over.
+
+1. On the Mac that will manage the vault, open **Settings → Sync → Trusted
+   sync → Set up**. This preserves local history and creates a new trust domain.
+   Update and re-pair legacy devices; the old recovery code cannot join the
+   new vault.
+2. On the primary, choose **Add a device**. Scan the invitation on Android or
+   copy it to the joining Mac's Sync tab. Confirm that both devices show the
+   same fingerprint before approving. The invitation expires and can be used
+   only once. If legacy sync is on in Android, turn it off before scanning.
+3. **Rotate key** replaces the shared vault key without changing membership.
+   **Revoke and rotate** removes a device from the trusted list and replaces
+   the shared key. **Disconnect** is still local to the pair of devices.
+   Retained devices that missed a change must reach the primary to catch up.
+   If the primary is lost, turn off sync and set up a fresh vault on a trusted
+   Mac, then re-pair. Turning off sync keeps clipboard history.
+
+The pinned primary signs each membership generation and the hash of its vault
+key. Device signatures authenticate fresh P-256 ECDH session keys. If peers
+disagree on the generation, only an authenticated primary may send a trust
+update, and the recipient persists it before acknowledging. Clipboard frames
+are allowed only after reconnecting on the same generation. LAN discovery
+stays stable across rotations so offline devices can find the primary again;
+discovery is not authorization. Revocation does not erase previously received
+items, and offline devices may still communicate with each other using their
+old trusted list until they receive the update.
+
+Before enabling the preview by default, verify with two Macs and one Android
+device: migrate existing history, approve both joins, rotate with the phone
+offline, restart the primary, confirm catch-up and background sync with the
+phone locked, and verify that a revoked device cannot reconnect to updated
+peers. Verify the helper in an actual signed Mac bundle, not only in a debug
+run.

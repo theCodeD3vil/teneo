@@ -157,9 +157,10 @@ const isTurnOffWarningOpen = ref(false);
               <form class="flex gap-2" @submit.prevent="joinWithCode">
                 <Input
                   :model-value="recoveryCode"
-                  placeholder="Join code"
+                  placeholder="Code or invitation link"
+                  aria-label="Join code or invitation link"
                   autocomplete="off"
-                  autocapitalize="characters"
+                  autocapitalize="none"
                   spellcheck="false"
                   enterkeyhint="go"
                   class="bg-well border-input h-[2.75rem] min-w-0 rounded-full px-[1.125rem] font-mono text-[1rem]"
@@ -208,6 +209,20 @@ const isTurnOffWarningOpen = ref(false);
           Turn off
         </button>
       </div>
+
+      <SettingsSection v-if="status.enrollmentFingerprint">
+        <SettingsField>
+          <template #label>Waiting for approval</template>
+          <template #description>
+            On the primary Mac, approve this phone only if this fingerprint
+            matches.
+            <code class="mt-1 block font-semibold" role="status">{{
+              status.enrollmentFingerprint
+            }}</code>
+          </template>
+          <Spinner />
+        </SettingsField>
+      </SettingsSection>
 
       <SettingsSection>
         <SettingsField>
@@ -273,6 +288,12 @@ const isTurnOffWarningOpen = ref(false);
 
     <p v-if="scanError || error" class="text-destructive px-2 text-sm">
       {{ scanError || error }}
+    </p>
+    <p
+      v-else-if="!isOn && status.errorMessage"
+      class="text-destructive px-2 text-sm"
+      role="alert">
+      {{ status.errorMessage }}
     </p>
     <p v-else-if="notice && !isOn" class="text-muted-foreground px-2 text-sm">
       {{ notice }}

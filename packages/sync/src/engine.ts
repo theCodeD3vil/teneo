@@ -13,8 +13,12 @@ import {
   deriveVaultKeys,
   type Bytes,
   fromBase64,
+  sha256,
   toBase64,
+  toHex,
+  utf8,
 } from "./crypto";
+import { enrollmentApprovalMs, type EnrollmentInvites } from "./enrollment";
 import { type Hlc, isFutureStamp } from "./hlc";
 import {
   batchLimits,
@@ -48,11 +52,17 @@ import {
 } from "./record";
 import {
   type FrameHandler,
+  type EnrollmentInvite,
   type Scheduler,
   Session,
   SyncError,
 } from "./session";
 import type { StoredChange, SyncStore, SyncTransaction } from "./store";
+import type {
+  DevicePublicIdentity,
+  VaultTrust,
+  VaultTrustManager,
+} from "./vault-trust";
 
 /** A device that has the icons of the apps items were copied from: a Mac. */
 export interface AppIconSource {
@@ -114,7 +124,7 @@ export interface Removals {
   restore(deviceId: string): Promise<void>;
 }
 
-export interface EngineOptions {
+interface CommonEngineOptions {
   /** 32 hex digits, made once per device. */
   deviceId: string;
   /** Shown to the other devices: the computer's name. */
@@ -136,7 +146,6 @@ export interface EngineOptions {
   /** This device syncs images: it keeps their bytes here. Without it, image
    *  items are neither sent nor taken. */
   images?: ImageStore;
-  vaultKey: Bytes;
   store: SyncStore;
   /** Items holding detected secrets travel only while this says true. */
   syncSecrets?: () => boolean;
@@ -151,6 +160,13 @@ export interface EngineOptions {
   onIconsChanged?: () => void;
   /** A connection failed because of something on this device. */
   onError?: (error: unknown) => void;
+}
+
+interface LegacyEngineOptions {
+  trust?: never;
+  invites?: never;
+  approveEnrollment?: never;
+  vaultKey: Bytes;
   /** The Mac, while it shows a pairing code: that code's one-time key, which
    *  a phone joining may prove instead of the vault's (pairing.ts), or null. */
   pairingKey?: () => Bytes | null;
@@ -160,6 +176,23 @@ export interface EngineOptions {
    *  key the Mac gave it. Without this, a vault frame ends the connection. */
   onVaultKey?: (vaultKey: Bytes) => void;
 }
+
+export interface TrustedEngineOptions {
+  trust: VaultTrustManager;
+  invites?: EnrollmentInvites;
+  /** Confirm on the primary before admitting the identity that proved the QR. */
+  approveEnrollment?: (device: DevicePublicIdentity) => Promise<boolean>;
+  vaultKey?: never;
+  pairingKey?: never;
+  onPaired?: never;
+  onVaultKey?: never;
+  /** The retained peer persisted this generation. Treat a missing ack as
+   *  pending until it acknowledges or reconnects on the current generation. */
+  onTrustConfirmed?: (deviceId: string, generation: number) => void;
+}
+
+export type EngineOptions = CommonEngineOptions &
+  (LegacyEngineOptions | TrustedEngineOptions);
 
 export interface ConnectedPeer {
   deviceId: string;
@@ -212,8 +245,11 @@ interface Link {
 
 export class SyncEngine {
   private readonly options: EngineOptions;
-  private readonly keys: Promise<VaultKeys>;
+  private readonly keys: Promise<VaultKeys> | null;
   private readonly links = new Map<string, Link>();
+  private readonly controlSessions = new Set<Session>();
+  private readonly enrolling = new Set<Session>();
+  private readonly stopWatchingTrust: (() => void) | undefined;
   private ownEpoch: Promise<string> | null = null;
   private clockSeeded: Promise<void> | null = null;
   private attaching = 0;
@@ -221,12 +257,29 @@ export class SyncEngine {
 
   constructor(options: EngineOptions) {
     this.options = options;
-    this.keys = deriveVaultKeys(options.vaultKey);
+    this.keys = options.trust ? null : deriveVaultKeys(options.vaultKey);
+    this.stopWatchingTrust = options.trust?.beforeInstall(() => {
+      // Keep receiving control sessions alive long enough to acknowledge
+      // their durable update. Senders must not deliver a superseded snapshot.
+      for (const session of this.controlSessions)
+        if (session.trustUpdateDirection === "send") session.close();
+      for (const session of this.enrolling) session.close();
+      for (const link of this.links.values()) {
+        link.refused = true;
+        link.session.close();
+      }
+    });
   }
 
   /** What devices of this vault announce and look for, so others are ignored. */
   async discoveryTag(): Promise<string> {
-    return (await this.keys).tag;
+    if (this.options.trust)
+      return toHex(
+        await sha256(
+          utf8(`teneo discovery 3|${this.options.trust.current.pin.vaultId}`),
+        ),
+      );
+    return (await this.keys!).tag;
   }
 
   /** Run a connection from a transport, whichever side opened it. Settles when
@@ -237,19 +290,44 @@ export class SyncEngine {
     let link: Link | null = null;
     try {
       if (this.stopped) throw new SyncError("closed", "Sync is off");
-      const keys = await this.keys;
       await this.seedClock();
-      const pairingKey = this.options.pairingKey?.() ?? null;
-      session = await Session.open(channel, {
+      const common = {
         deviceId: this.options.deviceId,
-        authKey: keys.authKey,
-        pairingAuthKey: pairingKey
-          ? (await deriveVaultKeys(pairingKey)).authKey
-          : undefined,
         scheduler: this.options.scheduler,
         now: this.options.now,
-      });
-      if (session.usedPairingKey) return await this.pair(session);
+      };
+      if (this.options.trust) {
+        const manager = this.options.trust;
+        const trust = manager.current;
+        if (!manager.permits(trust))
+          throw new SyncError("closed", "The trusted device list is updating");
+        const invite = this.options.invites?.current() ?? undefined;
+        session = await Session.open(channel, {
+          ...common,
+          identity: manager.identity,
+          trust,
+          invite,
+        });
+        if (this.stopped || !manager.permits(trust))
+          throw new SyncError("closed", "The trusted device list changed");
+        if (session.enrollmentPeer && invite)
+          return this.enrollDevice(session, manager, trust, invite);
+        if (session.trustUpdateDirection)
+          return this.reconcileTrust(session, manager, trust);
+        this.options.onTrustConfirmed?.(session.peerId, trust.generation);
+      } else {
+        const pairingKey = this.options.pairingKey?.() ?? null;
+        session = await Session.open(channel, {
+          ...common,
+          authKey: (await this.keys!).authKey,
+          pairingAuthKey: pairingKey
+            ? (await deriveVaultKeys(pairingKey)).authKey
+            : undefined,
+        });
+        if (this.stopped) throw new SyncError("closed", "Sync is off");
+        if (session.usedPairingKey)
+          return await this.pair(session, this.options.vaultKey);
+      }
       link = await this.register(session);
     } catch (error) {
       session?.close();
@@ -274,8 +352,8 @@ export class SyncEngine {
 
   /** A phone proved the pairing code's one-time key: it gets the vault key,
    *  and nothing else, on this connection. The code is spent. */
-  private async pair(session: Session): Promise<SyncError | null> {
-    await session.send({ t: "vault", key: toBase64(this.options.vaultKey) });
+  private async pair(session: Session, key: Bytes): Promise<SyncError | null> {
+    await session.send({ t: "vault", key: toBase64(key) });
     this.options.onPaired?.();
     // the phone closes once it has read the key: closing first could drop it
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -286,6 +364,90 @@ export class SyncEngine {
     clearTimeout(timer);
     session.close();
     return null;
+  }
+
+  private async reconcileTrust(
+    session: Session,
+    manager: VaultTrustManager,
+    trust: VaultTrust,
+  ): Promise<SyncError | null> {
+    this.controlSessions.add(session);
+    const timer = setTimeout(() => session.close(), handshakeMs);
+    let complete = false;
+    try {
+      if (session.trustUpdateDirection === "send") {
+        session.onFrame((frame) => {
+          if (
+            frame.t !== "trust-ack" ||
+            frame.fingerprint !== trust.fingerprint
+          )
+            throw new SyncError(
+              "auth",
+              "The vault update was not acknowledged",
+            );
+          if (manager.permits(trust) && this.options.trust)
+            this.options.onTrustConfirmed?.(session.peerId, trust.generation);
+          complete = true;
+          session.close();
+        });
+        await session.send({ t: "trust-update", update: trust.snapshot() });
+      } else {
+        session.onFrame(async (frame) => {
+          if (complete || frame.t !== "trust-update")
+            throw new SyncError("protocol", "Unexpected vault update");
+          const next = await manager.accept(frame.update, (next) =>
+            session.matchesTrustUpdate(next),
+          );
+          await session.send({ t: "trust-ack", fingerprint: next.fingerprint });
+          complete = true;
+          // Let the primary receive the ack and close, or time out.
+        });
+      }
+      const ended = await session.closed;
+      return complete && ended?.code === "closed" ? null : ended;
+    } catch (error) {
+      return error instanceof SyncError
+        ? error
+        : new SyncError("failed", "The vault update did not finish");
+    } finally {
+      clearTimeout(timer);
+      this.controlSessions.delete(session);
+      session.close();
+    }
+  }
+
+  private async enrollDevice(
+    session: Session,
+    manager: VaultTrustManager,
+    previous: VaultTrust,
+    invite: EnrollmentInvite,
+  ): Promise<SyncError | null> {
+    const peer = session.enrollmentPeer!;
+    this.enrolling.add(session);
+    const timer = setTimeout(() => session.close(), enrollmentApprovalMs);
+    try {
+      if (
+        !this.options.invites?.claim(invite) ||
+        !(await Promise.race([
+          this.options.approveEnrollment?.(peer),
+          session.closed.then(() => false),
+        ])) ||
+        this.stopped ||
+        !manager.permits(previous)
+      )
+        throw new SyncError("auth", "The enrollment was not approved");
+      this.enrolling.delete(session);
+      const next = await manager.enroll(peer, previous);
+      if (this.stopped || !manager.permits(next))
+        throw new SyncError("closed", "The trusted device list changed");
+      return await this.reconcileTrust(session, manager, next);
+    } catch {
+      session.close();
+      return new SyncError("auth", "The enrollment did not finish");
+    } finally {
+      clearTimeout(timer);
+      this.enrolling.delete(session);
+    }
   }
 
   /** Tell the engine this device wrote to its history, or changed what may sync. */
@@ -354,6 +516,9 @@ export class SyncEngine {
 
   stop(): void {
     this.stopped = true;
+    this.stopWatchingTrust?.();
+    for (const session of this.controlSessions) session.close();
+    for (const session of this.enrolling) session.close();
     for (const link of this.links.values()) link.session.close();
   }
 
@@ -449,6 +614,8 @@ export class SyncEngine {
   ): Promise<void> {
     // a device disconnected here, on its way out: whatever it still sends
     if (link.refused) return;
+    if (frame.t === "trust-update" || frame.t === "trust-ack")
+      throw new SyncError("protocol", "Unexpected vault update");
     if (frame.t === "vault") return this.handleVault(link, frame.key);
     if (frame.t === "removed") return this.handleRemoved(link);
     if (frame.t === "state") await this.handleState(link, frame);

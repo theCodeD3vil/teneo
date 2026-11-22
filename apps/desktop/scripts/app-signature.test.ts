@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { signatureProblems } from "./app-signature.ts";
+import { releaseHelperProblems, signatureProblems } from "./app-signature.ts";
+import { syncDeviceIdentityHelper } from "./build-sync-device-identity.ts";
 
 // codesign -dv --verbose=4 of Teneo 0.4.3's teneo, as published
 const shipped = `Executable=/Applications/Teneo.app/Contents/MacOS/teneo
@@ -42,4 +43,59 @@ test("flags an entitlement that lets other code in", () => {
     "tjs has the entitlement com.apple.security.get-task-allow",
     "tjs has the entitlement com.apple.security.cs.disable-library-validation",
   ]);
+});
+
+const app = "dist/Teneo Beta.app";
+const helper = `${app}/Contents/Helpers/${syncDeviceIdentityHelper}`;
+const identity = "01".repeat(20);
+const release = { arch: "arm64", identity } as const;
+
+test("checks the exact architecture and release certificate on the app and helper", () => {
+  const verified: string[] = [];
+  expect(
+    releaseHelperProblems(app, release, {
+      executable: (path) => path === helper,
+      architectures: (path) => (path === helper ? ["arm64"] : []),
+      signedBy(path, fingerprint) {
+        expect(fingerprint).toBe(identity);
+        verified.push(path);
+        return true;
+      },
+    }),
+  ).toEqual([]);
+  expect(verified).toEqual([app, helper]);
+});
+
+test("rejects missing helpers, wrong architectures and other certificates", () => {
+  expect(
+    releaseHelperProblems(app, release, {
+      executable: () => false,
+      architectures: () => {
+        throw new Error("Unexpected architecture check");
+      },
+      signedBy: () => {
+        throw new Error("Unexpected signature check");
+      },
+    }),
+  ).toEqual([
+    `${syncDeviceIdentityHelper} is missing or isn't an executable file`,
+  ]);
+  expect(
+    releaseHelperProblems(app, release, {
+      executable: () => true,
+      architectures: () => ["x86_64"],
+      signedBy: (path) => path === app,
+    }),
+  ).toEqual([
+    `${syncDeviceIdentityHelper} must be built for arm64 (found x86_64)`,
+    `${syncDeviceIdentityHelper} isn't signed with the release certificate`,
+  ]);
+});
+
+test("refuses an ad-hoc identity selector or a loose certificate name", () => {
+  for (const identity of ["-", "Teneo Code Signing"]) {
+    expect(releaseHelperProblems(app, { ...release, identity })).toEqual([
+      "a release needs the exact code-signing certificate fingerprint",
+    ]);
+  }
 });

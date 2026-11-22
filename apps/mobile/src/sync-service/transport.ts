@@ -264,7 +264,20 @@ export class PhoneTransport {
 
   /** Dial `ip:port` and run the connection. Resolves when it ends; at once,
    *  not connected, when it could not be opened. */
-  private connect(address: string): Promise<DialResult> {
+  async connectEnrollment(
+    address: string,
+    attach: TransportOptions["engine"]["attach"],
+  ): Promise<boolean> {
+    const result = await this.connect(address, attach);
+    if (result.error) throw result.error;
+    return result.connected;
+  }
+
+  private connect(
+    address: string,
+    attach: TransportOptions["engine"]["attach"] = (channel) =>
+      this.options.engine.attach(channel),
+  ): Promise<DialResult> {
     return new Promise((resolve) => {
       const id = this.options.native.connect(address);
       if (id < 0) {
@@ -280,7 +293,7 @@ export class PhoneTransport {
         opened: (channel) => {
           cancelGuard();
           const openedAt = this.timers.now();
-          void this.options.engine.attach(channel).then((error) =>
+          void attach(channel).then((error) =>
             resolve({
               connected: true,
               error,

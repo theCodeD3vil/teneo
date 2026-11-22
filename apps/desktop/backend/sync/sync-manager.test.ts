@@ -6,9 +6,11 @@ import {
 } from "@teneo/shared/types/sync";
 import {
   type ConnectedPeer,
+  type DeviceIdentity,
   formatRecoveryCode,
   fromBase64,
   parsePairingLink,
+  parseEnrollmentLink,
   parseRecoveryCode,
   randomBytes,
   toBase64,
@@ -18,6 +20,7 @@ import { getSettings, loadSettings, updateSettings } from "../settings";
 import type { SyncService, SyncServiceOptions } from "./service";
 import { SyncManager, type SyncManagerDeps } from "./sync-manager";
 import type { StoredPeer } from "./sync-store";
+import { TrustedVaultStore } from "./trusted-vault-store";
 
 const keyName = "sync-vault-key";
 
@@ -30,6 +33,7 @@ interface Options {
   port?: number | null;
   /** how many items hold secrets */
   held?: number;
+  identity?: DeviceIdentity;
 }
 
 async function setup(options: Options = {}) {
@@ -116,13 +120,89 @@ async function setup(options: Options = {}) {
     log: (message) => {
       logged.push(message);
     },
+    ...(options.identity && {
+      trusted: {
+        offerUpgrade: () => true,
+        store: new TrustedVaultStore(app),
+        identity: async () => options.identity!,
+        join: async () => {
+          throw new Error("No enrollment peer");
+        },
+      },
+    }),
   };
   const manager = new SyncManager(app, deps);
-  return { manager, app, secrets, pushed, calls, logged, connected, known };
+  return {
+    manager,
+    app,
+    deps,
+    secrets,
+    pushed,
+    calls,
+    logged,
+    connected,
+    known,
+  };
 }
 
 const savedKey = (secrets: Map<string, string>) =>
   fromBase64(secrets.get(keyName) ?? "");
+
+test("preview migration keeps peer history, replaces legacy credentials, and reloads the rotated vault", async () => {
+  const algorithm = { name: "ECDSA", namedCurve: "P-256" };
+  const pair = (await crypto.subtle.generateKey(algorithm, false, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const identity: DeviceIdentity = {
+    deviceId: "a".repeat(32),
+    publicKey: toBase64(
+      new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)),
+    ),
+    sign: async (message) =>
+      new Uint8Array(
+        await crypto.subtle.sign(
+          { name: "ECDSA", hash: "SHA-256" },
+          pair.privateKey,
+          message,
+        ),
+      ),
+  };
+  const { manager, app, deps, secrets, calls } = await setup({ identity });
+  await manager.turnOn();
+  expect(savedKey(secrets)).not.toBeNull();
+  await expect(manager.upgradeTrusted()).resolves.toMatchObject({
+    trust: { primary: true, generation: 1 },
+  });
+  expect(secrets.has(keyName)).toBe(false);
+  expect(calls.forgotten).toBe(0);
+  expect(calls.stopped).toBe(1);
+  const invitation = await manager.pairingInfo();
+  expect(invitation.recoveryCode).toBe("");
+  expect(parseEnrollmentLink(invitation.link)?.pin.primary.publicKey).toBe(
+    identity.publicKey,
+  );
+  await expect(manager.rotateTrusted()).resolves.toMatchObject({
+    trust: { primary: true, generation: 2 },
+  });
+  await manager.stop();
+
+  const reopened = new SyncManager(app, deps);
+  await reopened.startIfEnabled();
+  expect(await reopened.status()).toMatchObject({
+    running: true,
+    trust: { primary: true, generation: 2 },
+  });
+  secrets.set("sync-trusted-vault-v1", "not a valid snapshot");
+  secrets.set(keyName, toBase64(randomBytes(32)));
+  await reopened.stop();
+  await reopened.startIfEnabled();
+  expect(await reopened.status()).toMatchObject({
+    running: false,
+    problem: expect.stringContaining("won't fall back"),
+  });
+  expect(calls.started).toHaveLength(3);
+});
 
 test("with sync off, nothing runs and the status says so", async () => {
   const { manager, calls } = await setup();

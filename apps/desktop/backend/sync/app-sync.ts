@@ -1,11 +1,14 @@
 // The real parts behind the sync manager: the engine, the database, the Mac.
-import { restampSecretItems } from "../database";
+import { getSyncIdentity, restampSecretItems } from "../database";
 import { logError } from "../files";
 import { runCommand } from "../run-command";
-import { isSyncAvailableIn } from "./availability";
+import { isSyncAvailableIn, isTrustedSyncOfferedIn } from "./availability";
+import { openDeviceSigner } from "./device-signer";
+import { joinFromInvite } from "./join-trusted";
 import { startSyncService } from "./service";
 import { SyncManager } from "./sync-manager";
 import { SqliteSyncStore } from "./sync-store";
+import { TrustedVaultStore } from "./trusted-vault-store";
 
 // Sync is in every build; TENEO_SYNC=0 switches it off for a run
 const isSyncAvailable = () => isSyncAvailableIn(tjs.env);
@@ -21,6 +24,14 @@ export function createSyncManager(app: TinyApp): SyncManager {
       runCommand(["/usr/sbin/scutil", "--get", "ComputerName"]),
     networkAddresses: () => tjs.system.networkInterfaces,
     log: logError,
+    trusted: {
+      offerUpgrade: async () =>
+        isTrustedSyncOfferedIn(tjs.env, (await app.info()).version),
+      store: new TrustedVaultStore(app),
+      identity: (create) =>
+        openDeviceSigner(app, getSyncIdentity().deviceId, create),
+      join: joinFromInvite,
+    },
   });
 }
 

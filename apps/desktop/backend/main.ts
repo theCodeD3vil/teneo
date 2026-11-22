@@ -9,15 +9,20 @@ import { getDataFolderUsage } from "./data-usage";
 import {
   encryptSecretsInHistory,
   getClipboardItem,
+  historyProtectionStatus,
   initializeDatabase,
   keepEncryptionFromEarlierVersion,
   listClipboardItems,
+  lockProtectedHistory,
+  protectHistorySecrets,
   refreshDetectionMetadata,
+  restoreSecretHistoryAccess,
   saveClipboardItem,
   setClipboardItemPinned,
   softDeleteClipboardItem,
   turnOffSecretEncryption,
   turnOnSecretEncryption,
+  unlockProtectedHistory,
 } from "./database";
 import { warnIfDevRunUsesRealData } from "./dev-run";
 import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
@@ -41,6 +46,10 @@ import {
   removeStaleLinkPreviews,
 } from "./link-previews";
 import { openItemFiles, openLink, revealItemFile } from "./open-targets";
+import {
+  HistoryKeychainAccessRequired,
+  LockedHistoryError,
+} from "./secret-encryption";
 import { getSettings, loadSettings, updateSettings } from "./settings";
 import {
   finishSetup,
@@ -81,7 +90,7 @@ export const api: Record<string, TinyApiHandler> = {
   excludedApps: ({ addedBundleIds }, app) =>
     listExcludedApps(addedBundleIds, app),
   filePreview: ({ path, size }, app) => getFilePreview(path, size, app),
-  requestFolderAccess: () => requestFolderAccess(),
+  requestFolderAccess: ({ name }) => requestFolderAccess(name),
   openLink: ({ url }, app) => openLink(url, app),
   openItemFiles: ({ id }, app) => openItemFiles(id, app),
   revealItemFile: ({ id }, app) => revealItemFile(id, app),
@@ -119,19 +128,66 @@ export const api: Record<string, TinyApiHandler> = {
     }
     return settings;
   },
-  setSecretEncryption: ({ enabled }, app) =>
-    enabled === true
-      ? turnOnSecretEncryption(app)
-      : turnOffSecretEncryption(app),
+  setSecretEncryption: ({ enabled }, app) => {
+    if (typeof enabled !== "boolean")
+      throw new Error("Choose whether to encrypt saved secrets.");
+    return enabled ? turnOnSecretEncryption(app) : turnOffSecretEncryption(app);
+  },
+  historyProtectionStatus: (_parameters, app) => historyProtectionStatus(app),
+  restoreSecretHistoryAccess: async (_parameters, app) => {
+    await restoreSecretHistoryAccess(app);
+    return historyProtectionStatus(app);
+  },
+  protectHistorySecrets: async ({ requireAuthentication }, app) => {
+    if (typeof requireAuthentication !== "boolean")
+      throw new Error("Choose a history protection mode.");
+    await protectHistorySecrets(app, requireAuthentication);
+    return historyProtectionStatus(app);
+  },
+  unlockHistorySecrets: async (_parameters, app) => {
+    await unlockProtectedHistory(app);
+    return historyProtectionStatus(app);
+  },
+  lockHistorySecrets: async (_parameters, app) => {
+    lockProtectedHistory();
+    return historyProtectionStatus(app);
+  },
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
   countItemsDeletedBy: ({ changes }, app) => countItemsDeletedBy(changes, app),
   dataFolderUsage: (_parameters, app) => getDataFolderUsage(app),
   syncStatus: (_parameters, app) => sync(app).status(),
-  syncTurnOn: (_parameters, app) => sync(app).turnOn(),
-  syncJoin: ({ code }, app) =>
-    sync(app).join(typeof code === "string" ? code : ""),
+  syncTurnOn: async (_parameters, app) => {
+    await refreshDetectionMetadata(app);
+    return sync(app).turnOn();
+  },
+  syncResume: async (_parameters, app) => {
+    await refreshDetectionMetadata(app);
+    await sync(app).startIfEnabled();
+    return sync(app).status();
+  },
+  syncJoin: async ({ code }, app) => {
+    await refreshDetectionMetadata(app);
+    return sync(app).join(typeof code === "string" ? code : "");
+  },
   syncTurnOff: (_parameters, app) => sync(app).turnOff(),
   syncPairingInfo: (_parameters, app) => sync(app).pairingInfo(),
+  syncUpgradeTrusted: async (_parameters, app) => {
+    await refreshDetectionMetadata(app);
+    return sync(app).upgradeTrusted();
+  },
+  syncRotateTrusted: ({ deviceId }, app) =>
+    sync(app).rotateTrusted(
+      typeof deviceId === "string" ? deviceId : undefined,
+    ),
+  syncAnswerEnrollment: ({ deviceId, fingerprint, accept }, app) => {
+    if (
+      typeof deviceId === "string" &&
+      typeof fingerprint === "string" &&
+      typeof accept === "boolean"
+    )
+      sync(app).answerEnrollment(deviceId, fingerprint, accept);
+  },
+  syncCancelEnrollment: (_parameters, app) => sync(app).cancelEnrollment(),
   syncRemoveDevice: ({ deviceId }, app) =>
     sync(app).removeDevice(typeof deviceId === "string" ? deviceId : ""),
   setSyncSecrets: ({ enabled }, app) =>
@@ -146,7 +202,17 @@ export async function onClipboardChange(
   if (self) return; // our own write, e.g. pasting a history item back
   const item = await readClipboardItem(app);
   if (!item) return;
-  await saveClipboardItem(item, app);
+  try {
+    await saveClipboardItem(item, app);
+  } catch (error) {
+    // A secret copied while locked stays out of history, never in plaintext.
+    if (
+      error instanceof LockedHistoryError ||
+      error instanceof HistoryKeychainAccessRequired
+    )
+      return;
+    throw error;
+  }
   await trimClipboardHistory(app); // keeps "Maximum items" as copies come in
 }
 
@@ -172,19 +238,11 @@ export async function init(app: TinyApp) {
       logError("encrypting secrets in history failed:", error),
     );
   }
-  // not awaited either: older copies catch up on new rules in the background.
-  // Sync waits for that, so no item holding a secret goes out unmarked.
-  void refreshDetectionMetadata(app)
-    .then(
-      () => sync(app).startIfEnabled(),
-      (error: unknown) => {
-        logError("refreshing secret and link detection failed:", error);
-        return sync(app).hold(
-          "Teneo couldn't check your history for secrets, so sync is paused until the next launch.",
-        );
-      },
-    )
-    .catch((error: unknown) => logError("starting sync failed:", error));
+  // Startup must not read a Keychain sync credential or touch the LAN. Only
+  // an explicitly confirmed resume may do either.
+  void refreshDetectionMetadata(app).catch((error: unknown) => {
+    logError("refreshing secret and link detection failed:", error);
+  });
   startTrimmingClipboardHistory(app);
   void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);

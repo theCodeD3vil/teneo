@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import type { FolderAccess } from "@teneo/shared/types/storage";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,9 +21,15 @@ import CancelIcon from "~icons/tabler/x";
 import BetaBadge from "@/components/BetaBadge.vue";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
 import { useExcludedApps } from "@/composables/useExcludedApps";
+import { useHistoryProtection } from "@/composables/useHistoryProtection";
+import {
+  folderExplanation,
+  usePermissionConfirmation,
+} from "@/composables/usePermissionConfirmation";
 import { useSecretEncryption } from "@/composables/useSecretEncryption";
 import { useSettings } from "@/composables/useSettings";
 
+import PermissionConfirmation from "./PermissionConfirmation.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
@@ -30,6 +37,48 @@ const { settings, updateSettings } = useSettings();
 
 const { status: accessibilityStatus, request: requestAccessibility } =
   useAccessibilityPermission();
+const { prompt, explain, cancel, confirm } = usePermissionConfirmation();
+const folders = ["Desktop", "Documents", "Downloads"] as const;
+const folderStatus = ref<
+  Partial<Record<FolderAccess["name"], FolderAccess["status"]>>
+>({});
+const requestingFolder = ref<FolderAccess["name"] | null>(null);
+
+function allowAccessibility(): void {
+  explain(
+    {
+      title: "Allow Teneo to paste into other apps?",
+      description:
+        "Accessibility lets Teneo paste into the active app. Manual pasting still works without it.",
+      action: "Open System Settings",
+    },
+    requestAccessibility,
+  );
+}
+
+function allowFolder(name: FolderAccess["name"]): void {
+  explain(
+    {
+      title: `Allow access to ${name}?`,
+      description: folderExplanation,
+      action: `Allow ${name}`,
+    },
+    async () => {
+      requestingFolder.value = name;
+      try {
+        const result: FolderAccess = await tiny.api.call(
+          "requestFolderAccess",
+          { name },
+        );
+        folderStatus.value[name] = result.status;
+      } catch {
+        folderStatus.value[name] = "denied";
+      } finally {
+        requestingFolder.value = null;
+      }
+    },
+  );
+}
 
 // Turning this off keeps passwords in history, so it asks first
 const isPasswordWarningOpen = ref(false);
@@ -63,13 +112,70 @@ const {
   setEncryption: setSecretEncryption,
 } = useSecretEncryption();
 const isDecryptWarningOpen = ref(false);
+const isProtectionWarningOpen = ref(false);
+const {
+  status: protection,
+  busy: isChangingProtection,
+  error: protectionError,
+  protect,
+  unlock,
+  lock,
+  restore,
+} = useHistoryProtection();
 const encryptSecrets = computed({
   get: () => settings.value.encryptSecrets,
   set: (enabled) => {
-    if (enabled) void setSecretEncryption(true);
+    if (enabled)
+      explain(
+        {
+          title: "Allow Keychain access to encrypt saved secrets?",
+          description: "Keychain stores the key that encrypts saved secrets.",
+          action: "Set up encryption",
+        },
+        () => setSecretEncryption(true),
+      );
     else isDecryptWarningOpen.value = true;
   },
 });
+
+function restoreHistoryKey(): void {
+  explain(
+    {
+      title: "Allow access to your history key?",
+      description:
+        "Teneo needs its Keychain key to read and save encrypted secrets.",
+      action: "Restore access",
+    },
+    restore,
+  );
+}
+
+function changeHistoryAuthentication(required: boolean): void {
+  explain(
+    {
+      title: required
+        ? "Require authentication to unlock secrets?"
+        : "Turn off the unlock requirement?",
+      description: required
+        ? "Require Touch ID or your Mac password to unlock saved secrets."
+        : "Secure Enclave will unlock saved secrets without asking you.",
+      action: required ? "Continue to authentication" : "Turn off requirement",
+    },
+    () => protect(required),
+  );
+}
+
+function requestHistoryUnlock(): void {
+  explain(
+    {
+      title: "Unlock saved secrets?",
+      description:
+        "Use Touch ID or your Mac password to unlock secrets for five minutes.",
+      action: "Continue to authentication",
+    },
+    unlock,
+  );
+}
 
 function showSecretsInHistory(): void {
   void updateSettings({ maskSecrets: false });
@@ -106,8 +212,33 @@ const {
           v-else-if="accessibilityStatus"
           variant="outline"
           size="sm"
-          @click="requestAccessibility">
+          @click="allowAccessibility">
           Grant access
+        </Button>
+      </SettingsField>
+      <SettingsField v-for="name in folders" :key="name">
+        <template #label>{{ name }}</template>
+        <template #description>
+          {{
+            folderStatus[name] === "denied"
+              ? "Not allowed. You can change this in System Settings → Privacy & Security → Files and Folders."
+              : folderStatus[name] === "missing"
+                ? "This folder isn’t available."
+                : "Thumbnails and sizes of files you copy"
+          }}
+        </template>
+        <span
+          v-if="folderStatus[name] === 'granted'"
+          class="text-success text-sm"
+          >Allowed</span
+        >
+        <Button
+          v-else
+          size="sm"
+          variant="outline"
+          :disabled="requestingFolder !== null"
+          @click="allowFolder(name)">
+          {{ folderStatus[name] ? "Try again" : "Allow previews" }}
         </Button>
       </SettingsField>
     </SettingsSection>
@@ -197,16 +328,143 @@ const {
       <SettingsField>
         <template #label>Encrypt secrets</template>
         <template #description>
-          Save secrets encrypted, with the key in your Keychain. macOS may ask
-          for your Mac password to allow it, and again after updates.
+          <template v-if="protection?.protected">
+            Saved secrets are encrypted with a key protected by Secure Enclave.
+          </template>
+          <template v-else>
+            Save secrets encrypted, with the key in your Keychain. macOS may ask
+            for your Mac password to allow it, and again after updates.
+          </template>
           <span v-if="encryptionError" class="text-destructive block">
             {{ encryptionError }}
           </span>
         </template>
         <Spinner v-if="isChangingEncryption" />
-        <Switch v-else v-model="encryptSecrets" />
+        <Switch
+          v-else
+          v-model="encryptSecrets"
+          :disabled="
+            isChangingProtection || protection?.locked || protection?.unreadable
+          " />
+      </SettingsField>
+
+      <SettingsField v-if="settings.encryptSecrets && protection">
+        <template #label>Hardware-backed encryption</template>
+        <template #description>
+          <template v-if="protection.unreadable">
+            Teneo can’t read the protected key. Your encrypted entries haven’t
+            been changed.
+          </template>
+          <template v-else-if="protection.protected"
+            >Protects your history key on this Mac.</template
+          >
+          <template v-else-if="protection.available"
+            >Keep the key that protects saved secrets bound to this
+            Mac.</template
+          >
+          <template v-else
+            >Secure Enclave isn’t available on this Mac.</template
+          >
+          <span
+            v-if="protectionError"
+            class="text-destructive block"
+            role="alert"
+            >{{ protectionError }}</span
+          >
+        </template>
+        <span v-if="protection.unreadable" class="text-destructive text-sm"
+          >Unavailable</span
+        >
+        <span v-else-if="protection.protected" class="text-success text-sm"
+          >On</span
+        >
+        <Button
+          v-else-if="protection.available"
+          variant="outline"
+          size="sm"
+          :disabled="isChangingEncryption || isChangingProtection"
+          @click="isProtectionWarningOpen = true">
+          Set up
+        </Button>
+      </SettingsField>
+
+      <SettingsField v-if="protection?.needsKeychainAccess">
+        <template #label>Saved secrets are unavailable</template>
+        <template #description
+          >Allow Teneo to read its Keychain key for this session.</template
+        >
+        <Button
+          size="sm"
+          variant="outline"
+          :disabled="isChangingProtection"
+          @click="restoreHistoryKey"
+          >Restore access</Button
+        >
+      </SettingsField>
+
+      <SettingsField
+        v-if="
+          settings.encryptSecrets &&
+          protection?.protected &&
+          !protection.unreadable
+        ">
+        <template #label
+          >Require authentication to unlock saved secrets</template
+        >
+        <template #description>
+          Use Touch ID or your Mac password. Secrets lock again after five
+          minutes.
+        </template>
+        <Switch
+          :model-value="protection.requireAuthentication"
+          :disabled="
+            isChangingEncryption || isChangingProtection || protection.locked
+          "
+          aria-label="Require authentication to unlock saved secrets"
+          @update:model-value="changeHistoryAuthentication" />
+      </SettingsField>
+
+      <SettingsField
+        v-if="settings.encryptSecrets && protection?.requireAuthentication">
+        <template #label>{{
+          protection.locked
+            ? "Saved secrets are locked"
+            : "Saved secrets are unlocked"
+        }}</template>
+        <template #description>
+          While locked, you can’t see or sync these entries, and new copies
+          containing secrets aren’t saved to history.
+        </template>
+        <Button
+          size="sm"
+          variant="outline"
+          :disabled="isChangingProtection"
+          @click="protection.locked ? requestHistoryUnlock() : lock()">
+          {{ protection.locked ? "Unlock" : "Lock now" }}
+        </Button>
       </SettingsField>
     </SettingsSection>
+
+    <AlertDialog v-model:open="isProtectionWarningOpen">
+      <AlertDialogContent class="ring-0">
+        <AlertDialogHeader>
+          <AlertDialogTitle
+            >Protect saved secrets with Secure Enclave?</AlertDialogTitle
+          >
+          <AlertDialogDescription>
+            Secure Enclave ties saved secrets to this Mac; backups won’t restore
+            them on another Mac. Keychain access may be needed to replace the
+            old key.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction @click="protect(false)"
+            >Protect saved secrets</AlertDialogAction
+          >
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
     <SettingsSection>
       <template #section-title>Links</template>
@@ -222,9 +480,11 @@ const {
         <AlertDialogHeader>
           <AlertDialogTitle>Stop encrypting secrets?</AlertDialogTitle>
           <AlertDialogDescription>
-            Secrets already in your history will be saved unencrypted on this
-            Mac, and Teneo's key is removed from your Keychain. Any secret Teneo
-            can't decrypt is deleted from history.
+            Saved secrets become unencrypted. macOS may ask for Keychain access
+            to read and remove the key.
+            <template v-if="!protection?.protected">
+              Any secret Teneo can’t decrypt is deleted from history.
+            </template>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -237,6 +497,11 @@ const {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <PermissionConfirmation
+      :prompt="prompt"
+      @cancel="cancel"
+      @confirm="confirm" />
 
     <AlertDialog v-model:open="isMaskSecretsWarningOpen">
       <AlertDialogContent class="ring-0">
