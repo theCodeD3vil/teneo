@@ -1,4 +1,9 @@
-export { clipboardHistoryChangedEvent } from "@teneo/shared/types/clipboard";
+export {
+  ClipboardItemAction,
+  ClipboardItemActionsVersion,
+  clipboardHistoryChangedEvent,
+  hasClipboardAction,
+} from "@teneo/shared/types/clipboard";
 export type {
   ClipboardHistoryItem,
   ClipboardItemKind,

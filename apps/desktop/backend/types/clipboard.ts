@@ -1,4 +1,9 @@
-export { clipboardHistoryChangedEvent } from "@teneo/shared/types/clipboard";
+export {
+  ClipboardItemAction,
+  ClipboardItemActionsVersion,
+  clipboardHistoryChangedEvent,
+  hasClipboardAction,
+} from "@teneo/shared/types/clipboard";
 import type {
   ClipboardHistoryItem,
   ClipboardItemKind,
@@ -30,6 +35,10 @@ export interface ClipboardItemRow {
   /** the detectionVersion secrets and link were found with; null for rows
    *  from before they were stored */
   detectorVersion: number | null;
+  /** precomputed ClipboardItemAction bitmask for text items */
+  actions?: number | null;
+  /** ClipboardItemActionsVersion for `actions` */
+  actionsVersion?: number | null;
   /** who made the device that copied it, when that device said so; the
    *  queries that list items read it from SYNC_PEERS */
   originMaker?: string | null;

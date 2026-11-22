@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 .build
+/apps/desktop/.local-ai-build/
 .turbo
 *.local
 /apps/desktop/executables/macos-*/teneo-sync-device-identity

@@ -1,4 +1,7 @@
-import type { SecretSpan } from "@teneo/shared/types/clipboard";
+import {
+  possibleCredentialLabel,
+  type SecretSpan,
+} from "@teneo/shared/types/clipboard";
 
 export interface TextPart {
   text: string;
@@ -13,7 +16,10 @@ export function maskSecrets(text: string, secrets: SecretSpan[]): TextPart[] {
   for (const { start, end, label } of secrets) {
     parts.push({ text: text.slice(position, start) });
     parts.push({
-      text: maskSecret(text.slice(start, end)),
+      text:
+        label === possibleCredentialLabel
+          ? "********"
+          : maskSecret(text.slice(start, end)),
       secretLabel: label,
     });
     position = end;

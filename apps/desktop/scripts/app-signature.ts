@@ -53,8 +53,11 @@ export function signatureProblems(
   return problems;
 }
 
-function codesign(args: string[]): string {
-  const result = spawnSync("codesign", args, { encoding: "utf8" });
+function codesign(args: string[]) {
+  return spawnSync("/usr/bin/codesign", args, { encoding: "utf8" });
+}
+
+function codesignOutput(result: ReturnType<typeof codesign>): string {
   // codesign -d writes what it shows to stderr
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
@@ -64,6 +67,7 @@ interface ReleaseSignature {
   /** The SHA-1 fingerprint returned by `security find-identity`, used only
    *  to select the exact signing certificate. */
   identity: string;
+  requireLocalAi?: boolean;
 }
 
 interface HelperInspection {
@@ -83,7 +87,7 @@ const inspectHelper: HelperInspection = {
   },
   signedBy(path, identity) {
     return (
-      spawnSync("codesign", [
+      codesign([
         "--verify",
         "--strict",
         `-R=certificate leaf = H"${identity}"`,
@@ -127,6 +131,31 @@ export function releaseHelperProblems(
   return problems;
 }
 
+export function inferenceSandboxProblems(
+  name: string,
+  entitlements: unknown,
+): string[] {
+  if (
+    entitlements &&
+    typeof entitlements === "object" &&
+    Object.keys(entitlements).length === 1 &&
+    "com.apple.security.app-sandbox" in entitlements &&
+    entitlements["com.apple.security.app-sandbox"] === true
+  ) {
+    return [];
+  }
+  return [`${name} must have only the enabled App Sandbox entitlement`];
+}
+
+function optionalEntries(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 /** Every problem with the signatures of an app bundle and the programs in it. */
 export function appSignatureProblems(
   app: string,
@@ -134,29 +163,66 @@ export function appSignatureProblems(
 ): string[] {
   const macos = join(app, "Contents", "MacOS");
   const helpers = join(app, "Contents", "Helpers");
+  const services = join(app, "Contents", "XPCServices");
+  const inference = join(services, "TeneoInference.xpc");
+  const xpcTargets = optionalEntries(services).flatMap((name) => {
+    const path = join(services, name);
+    const binaries = join(path, "Contents", "MacOS");
+    return [
+      path,
+      ...optionalEntries(binaries).map((bin) => join(binaries, bin)),
+    ];
+  });
   const executables = [
     app,
     ...readdirSync(macos).map((name) => join(macos, name)),
-    ...(() => {
-      try {
-        return readdirSync(helpers).map((name) => join(helpers, name));
-      } catch {
-        return [];
-      }
-    })(),
+    ...optionalEntries(helpers).map((name) => join(helpers, name)),
+    ...xpcTargets,
   ];
-  const problems = executables.flatMap((path) =>
-    signatureProblems(
-      path.slice(path.lastIndexOf("/") + 1),
-      codesign(["-dv", "--verbose=4", path]),
-      codesign(["-d", "--entitlements", "-", "--xml", path]),
-    ),
-  );
-  if (
-    spawnSync("codesign", ["--verify", "--strict", "--deep", app]).status !== 0
-  )
+  const problems = executables.flatMap((path) => {
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    const details = codesign(["-dv", "--verbose=4", path]);
+    const entitlements = codesign(["-d", "--entitlements", "-", "--xml", path]);
+    const issues = signatureProblems(
+      name,
+      details.status === 0 ? codesignOutput(details) : "",
+      codesignOutput(entitlements),
+    );
+    if (entitlements.status !== 0)
+      issues.push(`${name}'s entitlements could not be read`);
+    if (path === inference || path.startsWith(`${inference}/`)) {
+      const parsed = spawnSync(
+        "/usr/bin/plutil",
+        ["-convert", "json", "-o", "-", "--", "-"],
+        {
+          input: entitlements.stdout,
+          encoding: "utf8",
+        },
+      );
+      issues.push(
+        ...inferenceSandboxProblems(
+          name,
+          parsed.status === 0 ? JSON.parse(parsed.stdout) : null,
+        ),
+      );
+    }
+    return issues;
+  });
+  if (codesign(["--verify", "--strict", "--deep", app]).status !== 0)
     problems.push(`${app} doesn't pass codesign --verify --strict --deep`);
   if (release) problems.push(...releaseHelperProblems(app, release));
+  if (release?.requireLocalAi && isSigningCertificateHash(release.identity)) {
+    for (const path of [
+      join(macos, "teneo-ai-client"),
+      join(inference, "Contents", "MacOS", "teneo-ai-service"),
+    ]) {
+      if (!inspectHelper.executable(path)) {
+        problems.push(`${path} is missing or isn't an executable file`);
+      } else if (!inspectHelper.signedBy(path, release.identity)) {
+        problems.push(`${path} isn't signed with the release certificate`);
+      }
+    }
+  }
   return problems;
 }
 

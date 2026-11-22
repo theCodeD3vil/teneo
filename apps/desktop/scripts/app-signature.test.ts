@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 
-import { releaseHelperProblems, signatureProblems } from "./app-signature.ts";
+import {
+  inferenceSandboxProblems,
+  releaseHelperProblems,
+  signatureProblems,
+} from "./app-signature.ts";
 import { syncDeviceIdentityHelper } from "./build-sync-device-identity.ts";
 
 // codesign -dv --verbose=4 of Teneo 0.4.3's teneo, as published
@@ -13,6 +17,23 @@ TeamIdentifier=not set`;
 
 test("passes an app signed as releases are", () => {
   expect(signatureProblems("teneo", shipped, "")).toEqual([]);
+});
+
+test("allows only App Sandbox on the inference service", () => {
+  const name = "TeneoInference.xpc";
+  const sandbox = { "com.apple.security.app-sandbox": true };
+  expect(inferenceSandboxProblems(name, sandbox)).toEqual([]);
+  for (const entitlements of [
+    null,
+    {},
+    { "com.apple.security.app-sandbox": false },
+    { ...sandbox, "com.apple.security.network.client": true },
+    { ...sandbox, "com.apple.security.files.user-selected.read-only": true },
+  ]) {
+    expect(inferenceSandboxProblems(name, entitlements)).toEqual([
+      `${name} must have only the enabled App Sandbox entitlement`,
+    ]);
+  }
 });
 
 test("flags an app without the hardened runtime, or signed ad hoc", () => {

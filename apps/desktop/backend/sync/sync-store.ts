@@ -16,14 +16,22 @@ import { randomBytes, toHex } from "@teneo/sync";
 import type { Database } from "tjs:sqlite";
 
 import {
+  type PendingItemClassification,
   decryptRow,
-  detectInText,
   getSyncIdentity,
   initializeDatabase,
+  prepareTextDetection,
+  scheduleItemsClassification,
   serializeSecrets,
 } from "../database";
 import { logError } from "../files";
 import { trimClipboardHistory } from "../history-limits";
+import {
+  type CachedItemActions,
+  deleteCachedActions,
+  setCachedActions,
+} from "../item-actions";
+import { isLocalAiOptedInSync, primeLocalAiState } from "../local-ai";
 import { appPaths } from "../paths";
 import { currentHistoryKeyEnvelope, encryptText } from "../secret-encryption";
 import { getSettings } from "../settings";
@@ -252,13 +260,19 @@ export class SqliteSyncStore implements SyncStore {
   /** All of it or none of it. Other writes to the history wait until it ends
    *  (see exclusive), so none of them is caught in a rollback. */
   async transaction<T>(work: (tx: SyncTransaction) => Promise<T>): Promise<T> {
-    const database = await initializeDatabase(this.app);
-    return exclusive(async () => {
+    const [database] = await Promise.all([
+      initializeDatabase(this.app),
+      primeLocalAiState(this.app),
+    ]);
+    let committedTransaction: SqliteTransaction | null = null;
+    const outcome = await exclusive(async () => {
       database.exec("BEGIN IMMEDIATE");
       try {
         const transaction = new SqliteTransaction(database, this.app);
         const result = await work(transaction);
         database.exec("COMMIT");
+        transaction.flushActionCache();
+        committedTransaction = transaction;
         // the files of images deleted by the batch go after their rows
         await transaction.removeFiles();
         return result;
@@ -271,6 +285,17 @@ export class SqliteSyncStore implements SyncStore {
         throw error;
       }
     });
+    if (
+      committedTransaction &&
+      (committedTransaction as SqliteTransaction).pendingClassifications
+        .length > 0
+    ) {
+      scheduleItemsClassification(
+        (committedTransaction as SqliteTransaction).pendingClassifications,
+        this.app,
+      );
+    }
+    return outcome;
   }
 
   trimHistory(): Promise<void> {
@@ -284,10 +309,25 @@ class SqliteTransaction implements SyncTransaction {
 
   /** The files of images this transaction deleted, as their rows kept them */
   private readonly removedPaths: string[] = [];
+  private readonly cacheOps: Array<
+    | { kind: "set"; id: string; entry: CachedItemActions }
+    | { kind: "delete"; id: string }
+  > = [];
+  readonly pendingClassifications: PendingItemClassification[] = [];
 
   constructor(database: Database, app: TinyApp) {
     this.database = database;
     this.app = app;
+  }
+
+  flushActionCache(): void {
+    for (const op of this.cacheOps) {
+      if (op.kind === "set") {
+        setCachedActions(op.id, op.entry);
+      } else {
+        deleteCachedActions(op.id);
+      }
+    }
   }
 
   async removeFiles(): Promise<void> {
@@ -331,11 +371,46 @@ class SqliteTransaction implements SyncTransaction {
     const current = existing && (await decryptRow(existing, app));
     const textChanged =
       columns.value !== null && current?.value !== columns.value;
-    const found = textChanged ? detectInText(columns.value) : null;
     // A text that is exactly one colour is kept as a colour item, as one
     // copied here is. Nothing is looked for in a colour.
     const isColor =
       columns.value !== null && getCssColor(columns.value) !== null;
+    const optedIn = isLocalAiOptedInSync();
+    const prepared =
+      textChanged && columns.value !== null && !isColor
+        ? prepareTextDetection(columns.value, optedIn)
+        : null;
+    const found = textChanged
+      ? isColor
+        ? { secrets: [], link: null }
+        : {
+            secrets: prepared?.secrets ?? [],
+            link: prepared?.link ?? null,
+          }
+      : null;
+    const actions = prepared ? prepared.actions : null;
+    const actionsVersion = prepared ? prepared.actionsVersion : null;
+
+    if (columns.value === null || columns.deletedAt !== null || isColor) {
+      this.cacheOps.push({ kind: "delete", id: record.id });
+    } else if (prepared) {
+      this.cacheOps.push({
+        kind: "set",
+        id: record.id,
+        entry: {
+          actions: prepared.actions,
+          actionsVersion: prepared.actionsVersion,
+        },
+      });
+      if (prepared.needsBts && columns.value !== null) {
+        this.pendingClassifications.push({
+          id: record.id,
+          text: columns.value,
+          candidates: prepared.candidates,
+        });
+      }
+    }
+
     const encrypted =
       found !== null &&
       getSettings().encryptSecrets &&
@@ -355,9 +430,10 @@ class SqliteTransaction implements SyncTransaction {
           INSERT INTO "CLIPBOARD_ITEMS" (
             id, kind, value, dateCopied, sourceAppName, sourceAppBundleId,
             pinnedAt, pinnedStamp, deletedAt, createdAt, originDevice, syncSeq,
-            encrypted, secrets, linkUrl, linkHost, detectorVersion
+            encrypted, secrets, linkUrl, linkHost, detectorVersion,
+            actions, actionsVersion
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         record.id,
         isColor ? "color" : "text",
@@ -376,6 +452,8 @@ class SqliteTransaction implements SyncTransaction {
         link?.url ?? null,
         link?.host ?? null,
         found ? detectionVersion : null,
+        actions,
+        actionsVersion,
       );
       return;
     }
@@ -383,9 +461,9 @@ class SqliteTransaction implements SyncTransaction {
     const textColumns =
       columns.value === null
         ? // a tombstone: the text and what was found in it go
-          `value = NULL, encrypted = NULL, secrets = NULL, linkUrl = NULL, linkHost = NULL,`
+          `value = NULL, encrypted = NULL, secrets = NULL, linkUrl = NULL, linkHost = NULL, actions = NULL, actionsVersion = NULL,`
         : textChanged
-          ? `value = ?, encrypted = ?, secrets = ?, linkUrl = ?, linkHost = ?, detectorVersion = ?,`
+          ? `value = ?, encrypted = ?, secrets = ?, linkUrl = ?, linkHost = ?, detectorVersion = ?, actions = ?, actionsVersion = ?,`
           : "";
     run(
       database,
@@ -403,6 +481,8 @@ class SqliteTransaction implements SyncTransaction {
             link?.url ?? null,
             link?.host ?? null,
             detectionVersion,
+            actions,
+            actionsVersion,
           ]
         : []),
       columns.dateCopied,

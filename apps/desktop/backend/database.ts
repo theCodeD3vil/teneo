@@ -1,7 +1,10 @@
 import { findLink } from "@teneo/shared/detection/links";
 import { findSecrets } from "@teneo/shared/detection/secrets";
 import { detectionVersion } from "@teneo/shared/detection/version";
-import { textPreviewLength } from "@teneo/shared/types/clipboard";
+import {
+  possibleCredentialLabel,
+  textPreviewLength,
+} from "@teneo/shared/types/clipboard";
 import type {
   ClipboardLink,
   ClipboardListCursor,
@@ -29,6 +32,26 @@ import {
   pageOrder,
   truncateTextPreview,
 } from "./history-query";
+import {
+  ClipboardItemAction,
+  ClipboardItemActionsVersion,
+  clearCachedActions,
+  computeDeterministicActions,
+  deleteCachedActions,
+  getCachedActions,
+  needsErrorLineCheck,
+  setCachedActions,
+} from "./item-actions";
+import {
+  classifyLocalAiSecretBatch,
+  classifyLocalAiText,
+  getLocalAiStatus,
+  hasLocalAiPreviewModel,
+  isLocalAiOptedIn,
+  isLocalAiOptedInSync,
+  trackLocalAiTask,
+} from "./local-ai";
+import { credentialCandidates, mergeCredentialSpans } from "./local-ai-secrets";
 import { appPaths } from "./paths";
 import {
   areHistorySecretsLocked,
@@ -193,6 +216,74 @@ function createIndexes(database: Database): void {
   database.exec(`DROP INDEX IF EXISTS clipboard_items_date_copied_index`);
 }
 
+export interface PendingItemClassification {
+  id: string;
+  text: string;
+  candidates: ReturnType<typeof credentialCandidates>;
+  retainedPossibleSpans?: SecretSpan[];
+}
+
+export function prepareTextDetection(
+  text: string | null,
+  optedIn: boolean,
+): {
+  secrets: SecretSpan[];
+  link: ClipboardLink | null;
+  actions: number;
+  actionsVersion: number;
+  candidates: ReturnType<typeof credentialCandidates>;
+  needsBts: boolean;
+} {
+  const found = detectInText(text);
+  if (!text) {
+    return {
+      ...found,
+      actions: 0,
+      actionsVersion: optedIn
+        ? ClipboardItemActionsVersion.localAi
+        : ClipboardItemActionsVersion.deterministic,
+      candidates: [],
+      needsBts: false,
+    };
+  }
+  const candidates = optedIn ? credentialCandidates(text) : [];
+  if (candidates.length > 0) {
+    found.secrets = mergeCredentialSpans(
+      found.secrets,
+      candidates.map(({ start, end, label }) => ({ start, end, label })),
+    );
+    found.link = null;
+  }
+  const actions = computeDeterministicActions(text, found.secrets.length > 0);
+  if (!optedIn) {
+    return {
+      ...found,
+      actions,
+      actionsVersion: ClipboardItemActionsVersion.deterministic,
+      candidates,
+      needsBts: false,
+    };
+  }
+  const hasAmbiguous = candidates.some((candidate) =>
+    Boolean(candidate.context),
+  );
+  const hasErrorCandidate = needsErrorLineCheck(
+    text,
+    found.secrets.length > 0,
+    found.link !== null,
+  );
+  const needsBts = hasAmbiguous || hasErrorCandidate;
+  return {
+    ...found,
+    actions,
+    actionsVersion: needsBts
+      ? ClipboardItemActionsVersion.deterministic
+      : ClipboardItemActionsVersion.localAi,
+    candidates,
+    needsBts,
+  };
+}
+
 /** Save a clipboard item after transient clipboard data, such as images, is durable. */
 export async function saveClipboardItem(
   item: ClipboardItemToSave,
@@ -203,6 +294,11 @@ export async function saveClipboardItem(
   }
 
   const dateCopied = Date.now();
+  const isText = item.kind === "text";
+  const text = isText ? item.text : null;
+  const optedIn = isText ? await isLocalAiOptedIn(app) : false;
+  const prepared = isText ? prepareTextDetection(text, optedIn) : null;
+
   const savedItem: ClipboardHistoryItem = {
     ...item,
     kind: item.kind, // "empty" was ruled out above
@@ -211,7 +307,10 @@ export async function saveClipboardItem(
     pinned: false,
     pasteAsFile: item.pasteAsFile === true,
     fileSize: null, // read when history is listed
-    ...detectInText(item.kind === "text" ? item.text : null),
+    secrets: prepared?.secrets ?? [],
+    link: prepared?.link ?? null,
+    actions: prepared ? prepared.actions : null,
+    actionsVersion: prepared ? prepared.actionsVersion : null,
     isTruncated: false,
   };
   // With encryption on, text holding a secret is only ever saved encrypted:
@@ -221,27 +320,95 @@ export async function saveClipboardItem(
   if (getSettings().encryptSecrets && savedItem.secrets.length)
     assertHistoryUnlocked();
   const { deviceId } = getSyncIdentity();
+  let pendingBts: PendingItemClassification | null = null;
+
   // one writer at a time: a sync batch in progress finishes first
-  return exclusive(async () => {
+  const committed = await exclusive(async () => {
+    const repeated = await findRepeatCopy(savedItem, database, app);
+    let retainedPossibleSpans: SecretSpan[] | undefined;
+    if (repeated) {
+      const previousSecrets = parseSecrets(repeated.secrets);
+      const firstAmbiguous = prepared?.candidates.find((c) =>
+        Boolean(c.context),
+      );
+      retainedPossibleSpans = optedIn
+        ? previousSecrets.filter(
+            (span) =>
+              span.label === possibleCredentialLabel &&
+              !(
+                firstAmbiguous &&
+                span.start === firstAmbiguous.start &&
+                span.end === firstAmbiguous.end
+              ),
+          )
+        : previousSecrets;
+      savedItem.secrets = mergeCredentialSpans(
+        savedItem.secrets,
+        previousSecrets,
+      );
+      if (
+        savedItem.secrets.some((span) => span.label === possibleCredentialLabel)
+      ) {
+        savedItem.link = null;
+      }
+      if (isText) {
+        savedItem.actions = computeDeterministicActions(
+          text,
+          savedItem.secrets.length > 0,
+        );
+      }
+    }
     const isEncrypted =
       getSettings().encryptSecrets &&
       value !== null &&
       savedItem.secrets.length > 0;
-    const repeated = await findRepeatCopy(savedItem, database, app);
+    if (isEncrypted) assertHistoryUnlocked();
+    const storedLink =
+      isEncrypted && currentHistoryKeyEnvelope() ? null : savedItem.link;
     if (repeated) {
+      const upgrade = isEncrypted && repeated.encrypted !== 1;
+      const ciphertext = upgrade ? await encryptText(value, app) : null;
       run(
         database,
         `
           UPDATE "CLIPBOARD_ITEMS"
-          SET dateCopied = ?, sourceAppName = ?, sourceAppBundleId = ?, syncSeq = ?
+          SET dateCopied = max(dateCopied, ?), sourceAppName = ?, sourceAppBundleId = ?, syncSeq = ?,
+            secrets = ?, linkUrl = ?, linkHost = ?, actions = ?, actionsVersion = ?,
+            value = coalesce(?, value), encrypted = coalesce(?, encrypted)
           WHERE id = ?
         `,
         dateCopied,
         savedItem.sourceApp?.name ?? null,
         savedItem.sourceApp?.bundleId ?? null,
         nextSyncSeq(database),
+        serializeSecrets(savedItem.secrets),
+        storedLink?.url ?? null,
+        storedLink?.host ?? null,
+        savedItem.actions ?? null,
+        savedItem.actionsVersion ?? null,
+        ciphertext,
+        upgrade ? 1 : null,
         repeated.id,
       );
+      if (upgrade) checkpoint(database);
+      if (
+        isText &&
+        typeof savedItem.actions === "number" &&
+        typeof savedItem.actionsVersion === "number"
+      ) {
+        setCachedActions(repeated.id, {
+          actions: savedItem.actions,
+          actionsVersion: savedItem.actionsVersion,
+        });
+      }
+      if (prepared?.needsBts && text) {
+        pendingBts = {
+          id: repeated.id,
+          text,
+          candidates: prepared.candidates,
+          retainedPossibleSpans,
+        };
+      }
       notifyClipboardHistoryChanged(app);
       return { ...savedItem, id: repeated.id };
     }
@@ -254,9 +421,9 @@ export async function saveClipboardItem(
       `
         INSERT INTO "CLIPBOARD_ITEMS" (
           id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId, pasteAsFile, encrypted,
-          secrets, linkUrl, linkHost, detectorVersion, createdAt, originDevice, syncSeq
+          secrets, linkUrl, linkHost, detectorVersion, actions, actionsVersion, createdAt, originDevice, syncSeq
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       savedItem.id,
       savedItem.kind,
@@ -269,20 +436,372 @@ export async function saveClipboardItem(
       savedItem.pasteAsFile ? 1 : null,
       isEncrypted ? 1 : null,
       serializeSecrets(savedItem.secrets),
-      isEncrypted && currentHistoryKeyEnvelope()
-        ? null
-        : (savedItem.link?.url ?? null),
-      isEncrypted && currentHistoryKeyEnvelope()
-        ? null
-        : (savedItem.link?.host ?? null),
+      storedLink?.url ?? null,
+      storedLink?.host ?? null,
       detectionVersion,
+      savedItem.actions ?? null,
+      savedItem.actionsVersion ?? null,
       savedItem.dateCopied,
       deviceId,
       nextSyncSeq(database),
     );
+    if (
+      isText &&
+      typeof savedItem.actions === "number" &&
+      typeof savedItem.actionsVersion === "number"
+    ) {
+      setCachedActions(savedItem.id, {
+        actions: savedItem.actions,
+        actionsVersion: savedItem.actionsVersion,
+      });
+    }
+    if (prepared?.needsBts && text) {
+      pendingBts = {
+        id: savedItem.id,
+        text,
+        candidates: prepared.candidates,
+      };
+    }
     notifyClipboardHistoryChanged(app);
 
     return savedItem;
+  });
+
+  if (pendingBts) {
+    scheduleItemsClassification([pendingBts], app);
+  }
+  return committed;
+}
+
+/** Run Local AI credential unmasking and preview action checks behind the scenes,
+ *  batching credential contexts and reconciling all resulting updates atomically. */
+export function scheduleItemsClassification(
+  jobs: PendingItemClassification[],
+  app: TinyApp,
+): void {
+  if (jobs.length === 0) return;
+  const deduped = new Map<string, PendingItemClassification>();
+  for (const job of jobs) {
+    deduped.set(job.id, job);
+  }
+  const uniqueJobs = [...deduped.values()];
+
+  void trackLocalAiTask(
+    (async () => {
+      const status = await getLocalAiStatus(app);
+      if (!status.enabled) return;
+
+      const ambiguousEntries = uniqueJobs
+        .map((job, index) => ({
+          index,
+          ambiguous: job.candidates.find((c) => Boolean(c.context)),
+        }))
+        .filter((entry) => Boolean(entry.ambiguous?.context));
+
+      const secretLabels =
+        ambiguousEntries.length > 0
+          ? await classifyLocalAiSecretBatch(
+              ambiguousEntries.map((entry) => entry.ambiguous!.context!),
+              app,
+            )
+          : [];
+
+      if (!(await isLocalAiOptedIn(app))) return;
+
+      const labelByJobIndex = new Map<
+        number,
+        "possible_secret" | "no_signal" | null
+      >();
+      for (let i = 0; i < ambiguousEntries.length; i += 1) {
+        labelByJobIndex.set(
+          ambiguousEntries[i]!.index,
+          secretLabels[i] ?? null,
+        );
+      }
+
+      const canPreview = await hasLocalAiPreviewModel(app);
+      const resolved: Array<{
+        job: PendingItemClassification;
+        ambiguous: ReturnType<typeof credentialCandidates>[number] | undefined;
+        secrets: SecretSpan[];
+        link: ClipboardLink | null;
+        actions: number;
+        actionsVersion: number;
+      }> = [];
+
+      for (let index = 0; index < uniqueJobs.length; index += 1) {
+        if (!isLocalAiOptedInSync()) return;
+        const job = uniqueJobs[index]!;
+        const ambiguous = job.candidates.find((c) => Boolean(c.context));
+        const secretAnswer = labelByJobIndex.get(index) ?? null;
+        const base = detectInText(job.text);
+        const keptCandidates = job.candidates
+          .filter(
+            (candidate) =>
+              candidate !== ambiguous || secretAnswer !== "no_signal",
+          )
+          .map(({ start, end, label }) => ({ start, end, label }));
+        const secrets = mergeCredentialSpans(
+          base.secrets,
+          mergeCredentialSpans(keptCandidates, job.retainedPossibleSpans ?? []),
+        );
+        const link = secrets.length > 0 ? null : base.link;
+        let actions = computeDeterministicActions(job.text, secrets.length > 0);
+        let actionsVersion: number =
+          ambiguous && secretAnswer === null
+            ? ClipboardItemActionsVersion.deterministic
+            : ClipboardItemActionsVersion.localAi;
+
+        if (needsErrorLineCheck(job.text, secrets.length > 0, link !== null)) {
+          if (!canPreview) {
+            actionsVersion = ClipboardItemActionsVersion.deterministic;
+          } else {
+            const previewAnswer = await classifyLocalAiText(
+              "preview",
+              job.text,
+              app,
+            );
+            if (previewAnswer === "stack_trace") {
+              actions |= ClipboardItemAction.copyErrorLine;
+            } else if (previewAnswer !== "other") {
+              actionsVersion = ClipboardItemActionsVersion.deterministic;
+            }
+          }
+        }
+
+        resolved.push({
+          job,
+          ambiguous,
+          secrets,
+          link,
+          actions,
+          actionsVersion,
+        });
+      }
+
+      if (!isLocalAiOptedInSync() || resolved.length === 0) return;
+
+      const database = await initializeDatabase(app);
+      await exclusive(async () => {
+        if (!isLocalAiOptedInSync()) return;
+
+        type RowCheck = Pick<
+          ClipboardItemRow,
+          | "id"
+          | "kind"
+          | "value"
+          | "encrypted"
+          | "secrets"
+          | "linkUrl"
+          | "linkHost"
+          | "actions"
+          | "actionsVersion"
+        > & { deletedAt: number | null };
+
+        const preparedUpdates: Array<{
+          row: RowCheck;
+          nextValue: string | null;
+          nextEncrypted: number | null;
+          secretsJson: string | null;
+          linkUrl: string | null;
+          linkHost: string | null;
+          actions: number;
+          actionsVersion: number;
+          decrypting: boolean;
+        }> = [];
+
+        for (const item of resolved) {
+          const [row] = all<RowCheck>(
+            database,
+            `
+              SELECT id, kind, value, encrypted, secrets, linkUrl, linkHost,
+                actions, actionsVersion, deletedAt
+              FROM "CLIPBOARD_ITEMS"
+              WHERE id = ?
+            `,
+            item.job.id,
+          );
+          if (!row || row.deletedAt !== null || row.kind !== "text") {
+            deleteCachedActions(item.job.id);
+            continue;
+          }
+          const readable = await decryptRow(row, app);
+          if (!readable || readable.value !== item.job.text) continue;
+
+          const extraOnRow = parseSecrets(row.secrets).filter(
+            (span) =>
+              span.label === possibleCredentialLabel &&
+              !(
+                item.ambiguous &&
+                span.start === item.ambiguous.start &&
+                span.end === item.ambiguous.end
+              ),
+          );
+          const finalSecrets =
+            extraOnRow.length > 0
+              ? mergeCredentialSpans(item.secrets, extraOnRow)
+              : item.secrets;
+          const finalLink = finalSecrets.length > 0 ? null : item.link;
+          const finalActions = finalSecrets.length > 0 ? 0 : item.actions;
+
+          const wantEncrypted =
+            getSettings().encryptSecrets && finalSecrets.length > 0;
+          let nextValue = row.value;
+          let nextEncrypted = row.encrypted;
+          let decrypting = false;
+          if (wantEncrypted && row.encrypted !== 1) {
+            nextValue = await encryptText(item.job.text, app);
+            nextEncrypted = 1;
+          } else if (!wantEncrypted && row.encrypted === 1) {
+            nextValue = item.job.text;
+            nextEncrypted = null;
+            decrypting = true;
+          }
+
+          preparedUpdates.push({
+            row,
+            nextValue,
+            nextEncrypted,
+            secretsJson: serializeSecrets(finalSecrets),
+            linkUrl: finalLink?.url ?? null,
+            linkHost: finalLink?.host ?? null,
+            actions: finalActions,
+            actionsVersion: item.actionsVersion,
+            decrypting,
+          });
+        }
+
+        if (preparedUpdates.length === 0) return;
+
+        let needsCheckpoint = false;
+        let anyUnheldSecret = false;
+        let anyMetadataChanged = false;
+
+        transaction(database, () => {
+          for (const update of preparedUpdates) {
+            const { row } = update;
+            setCachedActions(row.id, {
+              actions: update.actions,
+              actionsVersion: update.actionsVersion,
+            });
+            const changed =
+              update.nextValue !== row.value ||
+              update.nextEncrypted !== row.encrypted ||
+              update.secretsJson !== row.secrets ||
+              update.linkUrl !== row.linkUrl ||
+              update.linkHost !== row.linkHost ||
+              update.actions !== (row.actions ?? null) ||
+              update.actionsVersion !== (row.actionsVersion ?? null);
+            if (!changed) continue;
+
+            if (update.decrypting) needsCheckpoint = true;
+            const hadSecret = row.encrypted === 1 || row.secrets !== null;
+            const hasSecretNow =
+              update.nextEncrypted === 1 || update.secretsJson !== null;
+            if (hadSecret && !hasSecretNow) {
+              anyUnheldSecret = true;
+              run(
+                database,
+                `
+                  UPDATE "CLIPBOARD_ITEMS"
+                  SET value = ?, encrypted = ?, secrets = ?, linkUrl = ?, linkHost = ?,
+                    actions = ?, actionsVersion = ?, syncSeq = ?
+                  WHERE id = ? AND deletedAt IS NULL
+                `,
+                update.nextValue,
+                update.nextEncrypted,
+                update.secretsJson,
+                update.linkUrl,
+                update.linkHost,
+                update.actions,
+                update.actionsVersion,
+                nextSyncSeq(database),
+                row.id,
+              );
+            } else {
+              anyMetadataChanged = true;
+              run(
+                database,
+                `
+                  UPDATE "CLIPBOARD_ITEMS"
+                  SET value = ?, encrypted = ?, secrets = ?, linkUrl = ?, linkHost = ?,
+                    actions = ?, actionsVersion = ?
+                  WHERE id = ? AND deletedAt IS NULL
+                `,
+                update.nextValue,
+                update.nextEncrypted,
+                update.secretsJson,
+                update.linkUrl,
+                update.linkHost,
+                update.actions,
+                update.actionsVersion,
+                row.id,
+              );
+            }
+          }
+        });
+
+        if (needsCheckpoint) checkpoint(database);
+        if (anyUnheldSecret) {
+          notifyClipboardHistoryChanged(app);
+        } else if (anyMetadataChanged) {
+          app.push(clipboardHistoryChangedEvent);
+        }
+      });
+    })().catch(() => {
+      logError("background item classification failed", null);
+    }),
+  );
+}
+
+/** Persist a lazy preview action check (for items saved before Local AI was enabled)
+ *  without advancing `syncSeq`. */
+export async function persistPreviewActionResult(
+  id: string,
+  isStackTrace: boolean,
+  app: TinyApp,
+): Promise<void> {
+  const database = await initializeDatabase(app);
+  await exclusive(async () => {
+    const [row] = all<
+      Pick<
+        ClipboardItemRow,
+        | "id"
+        | "kind"
+        | "value"
+        | "encrypted"
+        | "secrets"
+        | "actions"
+        | "actionsVersion"
+      > & { deletedAt: number | null }
+    >(
+      database,
+      `
+        SELECT id, kind, value, encrypted, secrets, actions, actionsVersion, deletedAt
+        FROM "CLIPBOARD_ITEMS" WHERE id = ?
+      `,
+      id,
+    );
+    if (!row || row.deletedAt !== null || row.kind !== "text") return;
+    const readable = await decryptRow(row, app);
+    if (!readable?.value) return;
+    const hasSecrets = parseSecrets(row.secrets).length > 0;
+    const actions = hasSecrets
+      ? 0
+      : computeDeterministicActions(readable.value, false) |
+        (isStackTrace ? ClipboardItemAction.copyErrorLine : 0);
+    const actionsVersion = ClipboardItemActionsVersion.localAi;
+    setCachedActions(id, { actions, actionsVersion });
+    if (row.actions === actions && row.actionsVersion === actionsVersion)
+      return;
+    run(
+      database,
+      `UPDATE "CLIPBOARD_ITEMS" SET actions = ?, actionsVersion = ? WHERE id = ? AND deletedAt IS NULL`,
+      actions,
+      actionsVersion,
+      id,
+    );
+    app.push(clipboardHistoryChangedEvent);
   });
 }
 
@@ -294,12 +813,16 @@ async function findRepeatCopy(
   item: TinyClipboardData,
   database: Database,
   app: TinyApp,
-): Promise<LatestCopy | null> {
+): Promise<
+  (LatestCopy & Pick<ClipboardItemRow, "encrypted" | "secrets">) | null
+> {
   if (item.kind === "image") return null;
-  const [latest] = all<LatestCopy & Pick<ClipboardItemRow, "encrypted">>(
+  const [latest] = all<
+    LatestCopy & Pick<ClipboardItemRow, "encrypted" | "secrets">
+  >(
     database,
     `
-      SELECT id, kind, value, path, encrypted FROM "CLIPBOARD_ITEMS"
+      SELECT id, kind, value, path, encrypted, secrets FROM "CLIPBOARD_ITEMS"
       WHERE deletedAt IS NULL AND pinnedAt IS NULL
       ORDER BY dateCopied DESC, id DESC LIMIT 1
     `,
@@ -353,10 +876,12 @@ async function refreshDetection(
   database: Database,
   app: TinyApp,
 ): Promise<void> {
-  const rows = all<Pick<ClipboardItemRow, "id" | "value" | "encrypted">>(
+  const rows = all<
+    Pick<ClipboardItemRow, "id" | "value" | "encrypted" | "secrets">
+  >(
     database,
     `
-      SELECT id, value, encrypted FROM "CLIPBOARD_ITEMS"
+      SELECT id, value, encrypted, secrets FROM "CLIPBOARD_ITEMS"
       WHERE kind = 'text' AND value IS NOT NULL
         AND (detectorVersion IS NULL OR detectorVersion < ?)
     `,
@@ -369,19 +894,32 @@ async function refreshDetection(
     if (!decrypted) continue;
     const { secrets, link } = detectInText(decrypted.value);
     const keepLink = row.encrypted !== 1 || !currentHistoryKeyEnvelope();
+    const retained = parseSecrets(row.secrets).filter(
+      (span) => span.label === possibleCredentialLabel,
+    );
+    const mergedSecrets = mergeCredentialSpans(secrets, retained);
+    const safeLink = !keepLink || mergedSecrets.length ? null : link;
+    const actions = computeDeterministicActions(
+      decrypted.value,
+      mergedSecrets.length > 0,
+    );
     run(
       database,
       `
         UPDATE "CLIPBOARD_ITEMS"
-        SET secrets = ?, linkUrl = ?, linkHost = ?, detectorVersion = ?
+        SET secrets = ?, linkUrl = ?, linkHost = ?, detectorVersion = ?,
+          actions = ?, actionsVersion = coalesce(actionsVersion, ?)
         WHERE id = ?
       `,
-      serializeSecrets(secrets),
-      (keepLink && link?.url) || null,
-      (keepLink && link?.host) || null,
+      serializeSecrets(mergedSecrets),
+      safeLink?.url ?? null,
+      safeLink?.host ?? null,
       detectionVersion,
+      actions,
+      ClipboardItemActionsVersion.deterministic,
       row.id,
     );
+    deleteCachedActions(row.id);
     changed = true;
   }
   if (changed) notifyClipboardHistoryChanged(app);
@@ -479,7 +1017,15 @@ export async function countClipboardItemsToDelete(
 }
 
 // What a tombstone no longer holds: the text and what was found in it
-const eraseText = ["value", "secrets", "linkUrl", "linkHost", "encrypted"]
+const eraseText = [
+  "value",
+  "secrets",
+  "linkUrl",
+  "linkHost",
+  "encrypted",
+  "actions",
+  "actionsVersion",
+]
   .map(
     (column) =>
       `${column} = CASE WHEN ${textKinds} THEN NULL ELSE ${column} END`,
@@ -561,6 +1107,7 @@ export async function deleteClipboardItems(
     };
   });
   if (!changed) return;
+  clearCachedActions();
   notifyClipboardHistoryChanged(app);
 
   // Images go after their rows, so history never points at a missing file
@@ -669,6 +1216,7 @@ export async function softDeleteClipboardItem(
         id,
       );
     }
+    deleteCachedActions(id);
     notifyClipboardHistoryChanged(app);
     return row.kind === "image"
       ? restoreImagePath(row.path, dataDirectory)
@@ -843,6 +1391,7 @@ const originMakerColumn = `
 const listColumns = (searching: boolean) => `
   id, kind, imageSize, path, dateCopied, sourceAppName, sourceAppBundleId,
   pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
+  actions, actionsVersion,
   ${originMakerColumn},
   CASE WHEN kind != 'text' OR encrypted IS 1${searching ? " OR secrets IS NOT NULL" : ""}
     THEN value ELSE substr(value, 1, ?) END AS value,
@@ -925,6 +1474,7 @@ export async function getClipboardItem(
     `
       SELECT id, kind, imageSize, path, value, dateCopied, sourceAppName, sourceAppBundleId,
         pinnedAt, pasteAsFile, encrypted, secrets, linkUrl, linkHost,
+        actions, actionsVersion,
         ${originMakerColumn}
       FROM "CLIPBOARD_ITEMS"
       WHERE id = ? AND deletedAt IS NULL
@@ -1066,7 +1616,7 @@ export async function decryptRow<
       !(error instanceof LockedHistoryError) &&
       !(error instanceof HistoryKeychainAccessRequired)
     )
-      logError(`decrypting history item ${row.id} failed:`, error);
+      logError(`decrypting history item ${row.id} failed`, null);
     return null;
   }
 }
@@ -1301,18 +1851,19 @@ async function encryptPlainSecrets(
   database: Database,
   app: TinyApp,
 ): Promise<void> {
-  const rows = all<Pick<ClipboardItemRow, "id" | "value">>(
+  const rows = all<Pick<ClipboardItemRow, "id" | "value" | "secrets">>(
     database,
     `
-      SELECT id, value FROM "CLIPBOARD_ITEMS"
+      SELECT id, value, secrets FROM "CLIPBOARD_ITEMS"
       WHERE kind = 'text' AND encrypted IS NULL AND value IS NOT NULL
     `,
   );
   // encrypted first, written after in one transaction: stopped midway, the
   // history is as it was rather than half encrypted
   const encrypted: { id: string; value: string }[] = [];
-  for (const { id, value } of rows) {
-    if (!value || findSecrets(value).length === 0) continue;
+  for (const { id, value, secrets } of rows) {
+    if (!value || (secrets === null && findSecrets(value).length === 0))
+      continue;
     encrypted.push({ id, value: await encryptText(value, app) });
   }
   if (encrypted.length === 0) return;
@@ -1414,6 +1965,7 @@ async function decryptEncryptedRows(
       if (plaintext === null) {
         // a delete like the user's: a tombstone, never a row that vanishes
         // from under the other devices
+        deleteCachedActions(id);
         run(
           database,
           `
@@ -1513,6 +2065,8 @@ const addedColumns = {
   imageHash: "TEXT",
   imageBytes: "INTEGER",
   imageType: "TEXT",
+  actions: "INTEGER",
+  actionsVersion: "INTEGER",
 };
 
 // What the storage limit reads of each row, in a table of its own: reading
@@ -1645,7 +2199,43 @@ function rowToClipboardItem(
       isText && row.linkUrl && row.linkHost
         ? { url: row.linkUrl, host: row.linkHost }
         : null,
+    ...resolveRowActions(row, isText, fullText, text.isTruncated, secrets),
     isTruncated: text.isTruncated,
+  };
+}
+
+function resolveRowActions(
+  row: ClipboardItemRow,
+  isText: boolean,
+  fullText: string | null,
+  isTruncated: boolean,
+  secrets: SecretSpan[],
+): { actions: number | null; actionsVersion: number | null } {
+  if (!isText) return { actions: null, actionsVersion: null };
+  const cached = getCachedActions(row.id);
+  if (cached) {
+    return { actions: cached.actions, actionsVersion: cached.actionsVersion };
+  }
+  if (
+    typeof row.actions === "number" &&
+    typeof row.actionsVersion === "number"
+  ) {
+    setCachedActions(row.id, {
+      actions: row.actions,
+      actionsVersion: row.actionsVersion,
+    });
+    return { actions: row.actions, actionsVersion: row.actionsVersion };
+  }
+  if (!isTruncated && fullText !== null) {
+    const actions = computeDeterministicActions(fullText, secrets.length > 0);
+    const actionsVersion = ClipboardItemActionsVersion.deterministic;
+    setCachedActions(row.id, { actions, actionsVersion });
+    return { actions, actionsVersion };
+  }
+  return {
+    actions: typeof row.actions === "number" ? row.actions : null,
+    actionsVersion:
+      typeof row.actionsVersion === "number" ? row.actionsVersion : null,
   };
 }
 

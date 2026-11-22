@@ -45,6 +45,13 @@ import {
   getLinkPreviewImage,
   removeStaleLinkPreviews,
 } from "./link-previews";
+import {
+  downloadLocalAi,
+  enableLocalAi,
+  getLocalAiStatus,
+  removeLocalAi,
+} from "./local-ai";
+import { suggestLocalAiAction } from "./local-ai-preview";
 import { openItemFiles, openLink, revealItemFile } from "./open-targets";
 import {
   HistoryKeychainAccessRequired,
@@ -155,6 +162,11 @@ export const api: Record<string, TinyApiHandler> = {
   clearHistory: (_parameters, app) => clearClipboardHistory(app),
   countItemsDeletedBy: ({ changes }, app) => countItemsDeletedBy(changes, app),
   dataFolderUsage: (_parameters, app) => getDataFolderUsage(app),
+  localAiStatus: (_parameters, app) => getLocalAiStatus(app),
+  localAiDownload: ({ id }, app) => downloadLocalAi(id, app),
+  localAiEnable: ({ enabled }, app) => enableLocalAi(enabled === true, app),
+  localAiRemove: (parameters, app) => removeLocalAi(app, parameters?.id),
+  localAiPreviewAction: ({ id }, app) => suggestLocalAiAction(id, app),
   syncStatus: (_parameters, app) => sync(app).status(),
   syncTurnOn: async (_parameters, app) => {
     await refreshDetectionMetadata(app);
