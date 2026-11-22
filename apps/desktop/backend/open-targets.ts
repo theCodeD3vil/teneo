@@ -22,17 +22,8 @@ export async function openLink(value: unknown, app: TinyApp): Promise<void> {
   await app.shell.open(link);
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await tjs.stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** The files an item points at that are still there: a copied file's paths,
- *  or a saved image. */
+/** Leave opening and revealing to the OS rather than probing copied paths
+ * ourselves, which can request folder access before Finder even opens. */
 async function itemFiles(id: unknown, app: TinyApp): Promise<string[]> {
   if (typeof id !== "string") return [];
   const item = await getClipboardItem(id, app);
@@ -43,8 +34,7 @@ async function itemFiles(id: unknown, app: TinyApp): Promise<string[]> {
       : item.kind === "files"
         ? item.paths
         : [];
-  const present = await Promise.all(paths.map(exists));
-  return paths.filter((_, index) => present[index]);
+  return paths;
 }
 
 export async function openItemFiles(id: unknown, app: TinyApp): Promise<void> {

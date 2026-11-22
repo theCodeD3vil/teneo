@@ -1,4 +1,4 @@
-import { toBase64 } from "@teneo/sync";
+import { parseEnrollmentLink, toBase64 } from "@teneo/sync";
 
 import type { PairResult } from "../types/client";
 import type { SyncStatus } from "../types/sync";
@@ -59,6 +59,25 @@ export class NativeSync {
   }
 
   async pair(code: string): Promise<PairResult> {
+    const link = code.trim();
+    const invite = parseEnrollmentLink(link);
+    if (invite) {
+      invite.key.fill(0);
+      try {
+        const result = await this.plugin.pairTrusted?.({ link });
+        if (!result)
+          return { ok: false, error: "Update Teneo to use this invitation." };
+        this.publish(toSyncStatus(result));
+        // Enrollment isn't done yet. The status stream displays the
+        // fingerprint and any rejection while the primary decides.
+        return { ok: true };
+      } catch (caught) {
+        return {
+          ok: false,
+          error: caught instanceof Error ? caught.message : String(caught),
+        };
+      }
+    }
     const parsed = await readPairingCode(code);
     if (!parsed) return { ok: false, error: invalidCodeMessage };
 

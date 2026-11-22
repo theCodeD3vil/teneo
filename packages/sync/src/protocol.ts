@@ -1,15 +1,15 @@
-// Connection protocol, version 1. Two plain handshake messages (hello, proof)
-// are followed by encrypted frames. Messages are strings: JSON for the
-// handshake, base64 of the AES-GCM ciphertext of a JSON frame after it.
+// Connection protocol. Plain JSON hellos exchange ephemeral public keys;
+// sealed proofs and data frames are base64 of AES-GCM ciphertext.
 //
-// The version has not changed since the first release, and a device closes a
-// connection over a frame it doesn't know. So what was added later is opt-in:
+// A device closes a connection over a frame it doesn't know. Optional
+// features that don't need a new protocol version are opt-in:
 // a device lists what it understands in its state frame's `caps`, and a frame
 // from after the first release is only sent to a device that listed it.
 // Fields added to the state frame are simply dropped by a device that doesn't
 // know them.
 import { isDeviceId } from "./hlc";
 import { maxImageBytes } from "./record";
+import type { VaultTrustUpdate } from "./vault-trust";
 
 /** 2: each connection agrees a key of its own (ECDH), and a device says who
  *  it is only once the connection is encrypted (session.ts). */
@@ -45,6 +45,8 @@ export interface Hello {
   nonce: string;
   /** Version 2: this connection's ECDH P-256 public key, raw, base64. */
   eph?: string;
+  /** v3: initiator is redeeming a one-time enrollment invite. */
+  enroll?: true;
 }
 
 /** What the sealed proof holds, once opened. */
@@ -167,8 +169,21 @@ export interface VaultFrame {
   key: string;
 }
 
+export interface TrustUpdateFrame {
+  t: "trust-update";
+  /** Validate the signed update against the pinned primary before installing. */
+  update: VaultTrustUpdate;
+}
+
+export interface TrustAckFrame {
+  t: "trust-ack";
+  fingerprint: string;
+}
+
 export type Frame =
   | VaultFrame
+  | TrustUpdateFrame
+  | TrustAckFrame
   | StateFrame
   | ChangesFrame
   | IconsWantFrame
@@ -220,6 +235,7 @@ export function parseHello(text: string): Hello | null {
     deviceId: m.deviceId,
     nonce,
     ...(eph && { eph }),
+    ...(m.enroll === true && { enroll: true as const }),
   };
 }
 
@@ -307,6 +323,17 @@ export function parseFrame(text: string): Frame | null {
     case "vault":
       return typeof m.key === "string" && /^[A-Za-z0-9+/]{43}=$/.test(m.key)
         ? { t: "vault", key: m.key }
+        : null;
+    case "trust-update": {
+      // The reconciler validates all fields and the signature before use.
+      const update = m.update as VaultTrustUpdate | null;
+      return text.length <= 16_384 && update && typeof update === "object"
+        ? { t: "trust-update", update }
+        : null;
+    }
+    case "trust-ack":
+      return isHash(m.fingerprint)
+        ? { t: "trust-ack", fingerprint: m.fingerprint }
         : null;
     case "blob": {
       if (!isHash(m.hash) || !isCount(m.offset) || !isCount(m.total)) {

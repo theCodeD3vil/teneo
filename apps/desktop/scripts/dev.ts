@@ -6,6 +6,9 @@
 import { spawn } from "node:child_process";
 
 import { writeAppIdentity } from "./app-config.ts";
+import { buildSyncDeviceIdentity } from "./build-sync-device-identity.ts";
+
+buildSyncDeviceIdentity();
 
 // TENEO_REAL_DATA=1 runs on the installed Teneo's data, which is under its id
 writeAppIdentity("debug", { keepId: process.env.TENEO_REAL_DATA === "1" });

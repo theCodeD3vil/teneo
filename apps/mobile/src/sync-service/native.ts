@@ -15,6 +15,12 @@ export interface NativeSync extends NativeHistory {
   failed(reason: string): void;
   /** Joining with a pairing code: the vault key the Mac sent, base64 */
   paired(vaultKey: string): void;
+  takeTrustedConfiguration(): string | null;
+  syncIdentityPublicKey(create: boolean): string | null;
+  signSyncIdentity(message: string): string | null;
+  saveTrustedSnapshot(snapshot: string): boolean;
+  trustedJoined(): void;
+  enrollmentFingerprint(fingerprint: string): void;
   /** Items with secrets may sync now, and this page knows it: the ones held
    *  back get new change numbers, so they are sent. Called by the page, so no
    *  send of its own can read them before it knows (SyncController). Does
@@ -41,6 +47,7 @@ export interface NativeSync extends NativeHistory {
   /** Dial `ip:port`. Returns the connection's number at once; `opened` or
    *  `closed` for it follows. Only local addresses are dialed. */
   connect(address: string): number;
+  syncNetworkReady(): boolean;
   /** The next of the connections' openings, messages and ends, in the order
    *  they happened, or null (or undefined, as some web views answer) once
    *  there are none: see inbox.ts */
@@ -100,7 +107,9 @@ export interface SyncPage {
     /** Joining with a pairing code: vaultKey is its one-time key, and the
      *  Mac at these host:port addresses sends the vault's */
     pairingAddresses?: string[] | null,
+    trustedConfiguration?: string,
   ): Promise<void>;
+  startTrusted(syncSecrets: boolean): Promise<void>;
   /** The user changed whether items holding secrets travel */
   setSyncSecrets(allowed: boolean): void;
   /** The user disconnected this device, and native code keeps that it is:

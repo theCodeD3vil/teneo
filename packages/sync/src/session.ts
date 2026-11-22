@@ -6,9 +6,9 @@
 //      authKey together, bound to both nonces and both eph keys: a recording
 //      of the connection stays sealed even to someone who later learns the
 //      vault key, as the eph keys are gone by then (forward secrecy)
-//   3. both send their proof, sealed: { deviceId, HMAC(authKey, role |
-//      transcript | deviceId) }. A device without the vault key can't open it
-//      or make one, and someone listening learns no device's id
+//   3. both send a sealed proof. v2 proves knowledge of the vault key.
+//      v3 signs the transcript and proves membership in the local signed
+//      device list; the shared vault key cannot authenticate a device.
 //   4. every later message is AES-GCM of one JSON frame, keyed per direction,
 //      with the frame's number as nonce
 import type { Channel } from "./channel";
@@ -44,6 +44,18 @@ import {
   parseProof,
   protocolVersion,
 } from "./protocol";
+import {
+  acceptsIdentity,
+  type DeviceIdentity,
+  type DevicePublicIdentity,
+  parseDeviceIdentity,
+  type VaultPin,
+  type VaultTrust,
+  verifyDeviceSignature,
+} from "./vault-trust";
+
+const identityProtocolVersion = 3;
+const fingerprintPattern = /^[0-9a-f]{64}$/;
 
 export type SyncErrorCode =
   | "version" // the other device speaks another protocol version
@@ -95,26 +107,64 @@ export const realScheduler: Scheduler = {
   },
 };
 
-export interface SessionOptions {
+interface CommonSessionOptions {
   deviceId: string;
-  authKey: Bytes;
-  /** A responder also takes a device that proves this key instead: a phone
-   *  joining with the one-time key of a pairing code (pairing in engine.ts).
-   *  `usedPairingKey` says which it was. An initiator uses authKey alone. */
-  pairingAuthKey?: Bytes;
   scheduler?: Scheduler;
   now?: () => number;
   /** How long the handshake may take. */
   handshakeMs?: number;
 }
 
-/** What one auth key gives a connection. */
-interface Candidate {
-  authKey: Bytes;
+export interface EnrollmentInvite {
+  /** 32 random bytes, handed to the joining device out of band. */
+  readonly key: Bytes;
+  readonly pin: VaultPin;
+}
+
+export type SessionOptions = CommonSessionOptions &
+  (
+    | {
+        authKey: Bytes;
+        /** One-time legacy pairing key, accepted by a responder only. */
+        pairingAuthKey?: Bytes;
+        identity?: never;
+        trust?: never;
+        invite?: never;
+      }
+    | {
+        identity: DeviceIdentity;
+        trust: VaultTrust;
+        /** A primary responder accepts this one-time invite, if active. */
+        invite?: EnrollmentInvite;
+        authKey?: never;
+        pairingAuthKey?: never;
+      }
+    | {
+        identity: DeviceIdentity;
+        trust?: never;
+        /** An initiator without a trust snapshot redeems this invite. */
+        invite: EnrollmentInvite;
+        authKey?: never;
+        pairingAuthKey?: never;
+      }
+  );
+
+interface ConnectionKeys {
   myProofKey: CryptoKey;
   peerProofKey: CryptoKey;
   sendKey: CryptoKey;
   receiveKey: CryptoKey;
+}
+
+/** What one auth key gives a connection. */
+interface Candidate extends ConnectionKeys {
+  authKey: Bytes;
+}
+
+interface IdentityProof {
+  deviceId: string;
+  generation: number;
+  fingerprint: string;
 }
 
 export type FrameHandler = (
@@ -146,6 +196,18 @@ export class Session {
   /** The device proved the pairing key, not the vault's. */
   usedPairingKey = false;
 
+  /** For an authenticated identity on a different generation, only the
+   *  primary can send a trust update and the receiver can acknowledge it. */
+  private trustLane: "send" | "receive" | null = null;
+  private trustFingerprint: string | null = null;
+  private trustGeneration: number | null = null;
+  private enrollmentKeys: ConnectionKeys | null = null;
+  /** The public identity authenticated on an enrollment-only connection. */
+  enrollmentPeer: DevicePublicIdentity | null = null;
+  get trustUpdateDirection(): "send" | "receive" | null {
+    return this.trustLane;
+  }
+
   private phase: Phase = "hello";
   private readonly ephemeral: Promise<EphemeralKey>;
   /** Both nonces and both eph keys, initiator's first. */
@@ -153,6 +215,7 @@ export class Session {
   /** The keys of each auth key this side takes, until the peer's proof says
    *  which one it holds. */
   private candidates: Candidate[] = [];
+  private identityKeys: ConnectionKeys | null = null;
   /** This side's proof waits for the peer's when there is a choice. */
   private proofSent = false;
   private sendKey: CryptoKey | null = null;
@@ -192,10 +255,15 @@ export class Session {
         channel.send(
           JSON.stringify({
             t: "hello",
-            v: protocolVersion,
+            v: this.options.identity
+              ? identityProtocolVersion
+              : protocolVersion,
             deviceId: toHex(randomBytes(16)),
             nonce: this.nonce,
             eph: key.publicKey,
+            ...(this.options.identity &&
+              !this.options.trust &&
+              this.initiator && { enroll: true }),
           }),
         );
       },
@@ -237,6 +305,7 @@ export class Session {
       .then(async () => {
         if (this.phase !== "open")
           throw new SyncError("closed", "Connection closed");
+        this.checkTrustFrame(frame, this.trustLane === "send");
         // the counter is taken here, in send order, not when send() was called
         const counter = this.sentCount++;
         const sealed = await seal(
@@ -244,6 +313,8 @@ export class Session {
           counter,
           utf8(JSON.stringify(frame)),
         );
+        if (this.phase !== "open")
+          throw new SyncError("closed", "Connection closed");
         this.channel.send(toBase64(sealed));
       })
       .finally(() => {
@@ -310,7 +381,10 @@ export class Session {
         "The other device did not begin with hello",
       );
     }
-    if (hello.v !== protocolVersion) {
+    const version = this.options.identity
+      ? identityProtocolVersion
+      : protocolVersion;
+    if (hello.v !== version) {
       throw new SyncError(
         "version",
         "The other device uses a different sync version. Update Teneo on the other device.",
@@ -319,7 +393,6 @@ export class Session {
     if (!hello.eph) {
       throw new SyncError("protocol", "The other device offered no key");
     }
-    const { authKey } = this.options;
     const mine = await this.ephemeral;
     const shared = await sharedSecret(mine.privateKey, hello.eph);
     if (!shared) {
@@ -332,6 +405,42 @@ export class Session {
         ? [this.nonce, hello.nonce, mine.publicKey, hello.eph]
         : [hello.nonce, this.nonce, hello.eph, mine.publicKey]
     ).join("|");
+    if (this.options.identity) {
+      const { identity, invite, trust } = this.options;
+      if (identity.deviceId !== this.options.deviceId)
+        throw new SyncError("auth", "This device's identity is not valid");
+      if (hello.enroll && this.initiator)
+        throw new SyncError("protocol", "Only an initiator can enroll");
+      if (hello.enroll || !trust) {
+        if (
+          !invite ||
+          invite.key.length !== 32 ||
+          (!trust && !this.initiator) ||
+          (trust &&
+            (trust.pin.vaultId !== invite.pin.vaultId ||
+              !acceptsIdentity(trust.pin.primary, invite.pin.primary) ||
+              !acceptsIdentity(trust.pin.primary, identity)))
+        )
+          throw new SyncError("auth", "No valid enrollment invitation");
+        this.enrollmentKeys = await this.deriveConnectionKeys(
+          concatBytes(invite.key, shared),
+          `v3 enrollment|${invite.pin.vaultId}`,
+        );
+        await this.sendEnrollmentProof(this.enrollmentKeys, invite, identity);
+        if (!this.isClosed()) this.phase = "proof";
+        return;
+      }
+      if (!acceptsIdentity(trust.member(this.options.deviceId), identity))
+        throw new SyncError("auth", "This device is not in the trusted list");
+      this.identityKeys = await this.deriveConnectionKeys(
+        shared,
+        `v3 identity|${trust.pin.vaultId}`,
+      );
+      await this.sendIdentityProof(this.identityKeys, { identity, trust });
+      if (!this.isClosed()) this.phase = "proof";
+      return;
+    }
+    const { authKey } = this.options;
     const keys = [
       authKey,
       ...(this.options.pairingAuthKey && !this.initiator
@@ -343,15 +452,28 @@ export class Session {
     );
     // with one key there is nothing to wait for
     if (this.candidates.length === 1) await this.sendProof(this.candidates[0]!);
-    this.phase = "proof";
+    if (!this.isClosed()) this.phase = "proof";
+  }
+
+  private isClosed(): boolean {
+    return this.phase === "closed";
   }
 
   private async deriveCandidate(
     authKey: Bytes,
     shared: Bytes,
   ): Promise<Candidate> {
-    const secret = concatBytes(authKey, shared);
-    const label = (name: string) => `v2 ${name}|${this.transcript}`;
+    return {
+      authKey,
+      ...(await this.deriveConnectionKeys(concatBytes(authKey, shared), "v2")),
+    };
+  }
+
+  private async deriveConnectionKeys(
+    secret: Bytes,
+    domain: string,
+  ): Promise<ConnectionKeys> {
+    const label = (name: string) => `${domain} ${name}|${this.transcript}`;
     const [proofI, proofR, initiatorKey, responderKey] = await Promise.all([
       hkdf(secret, label("proof initiator"), 32),
       hkdf(secret, label("proof responder"), 32),
@@ -363,12 +485,191 @@ export class Session {
       ? [initiatorKey, responderKey]
       : [responderKey, initiatorKey];
     return {
-      authKey,
       myProofKey: await importAesKey(mine),
       peerProofKey: await importAesKey(theirs),
       sendKey: await importAesKey(send),
       receiveKey: await importAesKey(receive),
     };
+  }
+
+  private identityProofBytes(
+    vaultId: string,
+    role: string,
+    { deviceId, generation, fingerprint }: IdentityProof,
+  ): Bytes {
+    return utf8(
+      JSON.stringify([
+        "teneo sync identity proof 3",
+        vaultId,
+        role,
+        this.transcript,
+        deviceId,
+        generation,
+        fingerprint,
+      ]),
+    );
+  }
+
+  private enrollmentProofBytes(
+    invite: EnrollmentInvite,
+    role: string,
+    { deviceId, publicKey }: DevicePublicIdentity,
+  ): Bytes {
+    return utf8(
+      JSON.stringify([
+        "teneo sync enrollment proof 3",
+        invite.pin.vaultId,
+        invite.pin.primary.deviceId,
+        invite.pin.primary.publicKey,
+        role,
+        this.transcript,
+        deviceId,
+        publicKey,
+      ]),
+    );
+  }
+
+  private async sendEnrollmentProof(
+    keys: ConnectionKeys,
+    invite: EnrollmentInvite,
+    signer: DeviceIdentity,
+  ): Promise<void> {
+    const [mine] = this.roles();
+    const signature = await signer.sign(
+      this.enrollmentProofBytes(invite, mine, signer),
+    );
+    const sealed = await seal(
+      keys.myProofKey,
+      0,
+      utf8(
+        JSON.stringify({
+          deviceId: signer.deviceId,
+          publicKey: signer.publicKey,
+          signature: toBase64(signature),
+        }),
+      ),
+    );
+    if (!this.isClosed()) this.channel.send(toBase64(sealed));
+  }
+
+  private async handleEnrollmentProof(
+    sealed: Bytes,
+    keys: ConnectionKeys,
+    invite: EnrollmentInvite,
+  ): Promise<void> {
+    let proof: { signature?: unknown };
+    try {
+      proof = JSON.parse(fromUtf8(await unseal(keys.peerProofKey, 0, sealed)));
+    } catch {
+      throw new SyncError("auth", "The enrollment proof could not be opened");
+    }
+    const admitted = parseDeviceIdentity(proof);
+    const [, theirs] = this.roles();
+    if (
+      !admitted ||
+      admitted.deviceId === this.options.deviceId ||
+      (this.initiator && !acceptsIdentity(invite.pin.primary, admitted)) ||
+      !(await verifyDeviceSignature(
+        admitted,
+        this.enrollmentProofBytes(invite, theirs, admitted),
+        proof.signature,
+      ))
+    )
+      throw new SyncError("auth", "The enrollment identity is not valid");
+    this.enrollmentKeys = null;
+    this.enrollmentPeer = admitted;
+    this.trustLane = this.initiator ? "receive" : "send";
+    this.finishHandshake(keys, admitted.deviceId);
+  }
+
+  private async sendIdentityProof(
+    keys: ConnectionKeys,
+    { identity, trust }: { identity: DeviceIdentity; trust: VaultTrust },
+  ): Promise<void> {
+    const [mine] = this.roles();
+    const proof: IdentityProof = {
+      deviceId: identity.deviceId,
+      generation: trust.generation,
+      fingerprint: trust.fingerprint,
+    };
+    const signature = await identity.sign(
+      this.identityProofBytes(trust.pin.vaultId, mine, proof),
+    );
+    const sealed = await seal(
+      keys.myProofKey,
+      0,
+      utf8(JSON.stringify({ ...proof, signature: toBase64(signature) })),
+    );
+    if (this.phase !== "closed") this.channel.send(toBase64(sealed));
+  }
+
+  private async handleIdentityProof(
+    sealed: Bytes,
+    keys: ConnectionKeys,
+    trust: VaultTrust,
+  ): Promise<void> {
+    let proof: Partial<IdentityProof> & { signature?: unknown };
+    try {
+      proof = JSON.parse(fromUtf8(await unseal(keys.peerProofKey, 0, sealed)));
+    } catch {
+      throw new SyncError("auth", "The device identity could not be opened");
+    }
+    if (
+      !proof ||
+      typeof proof.deviceId !== "string" ||
+      proof.deviceId === this.options.deviceId ||
+      typeof proof.generation !== "number" ||
+      !Number.isSafeInteger(proof.generation) ||
+      proof.generation < 1 ||
+      typeof proof.fingerprint !== "string" ||
+      !fingerprintPattern.test(proof.fingerprint)
+    )
+      throw new SyncError("auth", "The device identity is invalid");
+    const admitted = trust.member(proof.deviceId);
+    const [, theirs] = this.roles();
+    if (
+      !admitted ||
+      !(await verifyDeviceSignature(
+        admitted,
+        this.identityProofBytes(trust.pin.vaultId, theirs, {
+          deviceId: proof.deviceId,
+          generation: proof.generation,
+          fingerprint: proof.fingerprint,
+        }),
+        proof.signature,
+      ))
+    )
+      throw new SyncError("auth", "The device is not trusted");
+
+    if (proof.generation === trust.generation) {
+      if (proof.fingerprint !== trust.fingerprint)
+        throw new SyncError("auth", "Conflicting trusted device lists");
+    } else if (
+      proof.generation < trust.generation &&
+      this.options.deviceId === trust.pin.primary.deviceId
+    ) {
+      this.trustLane = "send";
+      this.trustFingerprint = trust.fingerprint;
+    } else if (
+      proof.generation > trust.generation &&
+      proof.deviceId === trust.pin.primary.deviceId
+    ) {
+      this.trustLane = "receive";
+      this.trustFingerprint = proof.fingerprint;
+      this.trustGeneration = proof.generation;
+    } else {
+      throw new SyncError("auth", "Reconnect to the primary device to update");
+    }
+    this.identityKeys = null;
+    this.finishHandshake(keys, proof.deviceId);
+  }
+
+  matchesTrustUpdate(trust: VaultTrust): boolean {
+    return (
+      this.trustLane === "receive" &&
+      trust.generation === this.trustGeneration &&
+      trust.fingerprint === this.trustFingerprint
+    );
   }
 
   private async sendProof(candidate: Candidate): Promise<void> {
@@ -392,6 +693,20 @@ export class Session {
     if (!sealed) {
       throw new SyncError("protocol", "The other device did not send a proof");
     }
+    if (this.enrollmentKeys && this.options.invite)
+      return this.handleEnrollmentProof(
+        sealed,
+        this.enrollmentKeys,
+        this.options.invite,
+      );
+    if (this.options.identity && this.options.trust)
+      return this.handleIdentityProof(
+        sealed,
+        this.identityKeys!,
+        this.options.trust,
+      );
+    if (this.options.identity)
+      throw new SyncError("protocol", "No enrollment was negotiated");
     // only a key derived from an auth key this side holds opens it
     let opened: { candidate: Candidate; index: number; bytes: Bytes } | null =
       null;
@@ -428,18 +743,38 @@ export class Session {
     if (proof.deviceId === this.options.deviceId) {
       throw new SyncError("protocol", "A device connected to itself");
     }
-    this.sendKey = opened.candidate.sendKey;
-    this.receiveKey = opened.candidate.receiveKey;
     this.usedPairingKey = opened.index === 1;
     if (!this.proofSent) await this.sendProof(opened.candidate);
     this.candidates = [];
-    this.peerId = proof.deviceId;
+    this.finishHandshake(opened.candidate, proof.deviceId);
+  }
+
+  private finishHandshake(keys: ConnectionKeys, peerId: string): void {
+    if (this.phase === "closed") return;
+    this.sendKey = keys.sendKey;
+    this.receiveKey = keys.receiveKey;
+    this.peerId = peerId;
     this.phase = "open";
     this.lastHeard = this.now();
     this.stopHeartbeat = this.scheduler.every(heartbeat.everyMs, () =>
       this.beat(),
     );
     this.resolveOpened(this);
+  }
+
+  private checkTrustFrame(frame: Frame, updateSender: boolean): void {
+    if (frame.t === "ping" || frame.t === "pong") return;
+    if (
+      (this.trustLane &&
+        frame.t !== (updateSender ? "trust-update" : "trust-ack")) ||
+      (!this.trustLane &&
+        (frame.t === "trust-update" || frame.t === "trust-ack")) ||
+      (this.options.identity && frame.t === "vault")
+    )
+      throw new SyncError(
+        "protocol",
+        "That frame is not allowed in this session",
+      );
   }
 
   private async handleFrame(message: string): Promise<void> {
@@ -459,6 +794,7 @@ export class Session {
     const frame = parseFrame(fromUtf8(plaintext));
     if (!frame)
       throw new SyncError("protocol", "A message had an unknown shape");
+    this.checkTrustFrame(frame, this.trustLane === "receive");
 
     this.lastHeard = this.now();
     if (frame.t === "ping") {
@@ -466,9 +802,8 @@ export class Session {
       return;
     }
     if (frame.t === "pong") return;
-    await (
-      await this.handler
-    )(frame);
+    const handler = await this.handler;
+    if (this.phase === "open") await handler(frame);
   }
 
   private beat(): void {
@@ -483,7 +818,11 @@ export class Session {
     if (this.phase === "closed") return;
     this.phase = "closed";
     this.stopHeartbeat?.();
-    this.channel.close(error?.code);
+    try {
+      this.channel.close(error?.code);
+    } catch {
+      // A broken transport must not keep the session open or block rotation.
+    }
     this.rejectOpened(
       error ?? new SyncError("closed", "Closed before it opened"),
     );

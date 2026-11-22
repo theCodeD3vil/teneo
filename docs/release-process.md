@@ -33,7 +33,10 @@ lives off GitHub.
    (`scripts/package-release.ts`). A draft is invisible, and no app updates
    to it. Each app must be signed with the hardened runtime and none of the
    entitlements that would let other code into it (`scripts/app-signature.ts`),
-   or the build fails.
+   or the build fails. Packaging also builds the Secure Enclave helper for
+   both CPUs. Each app must contain its matching helper, signed with the
+   same exact release certificate as the app. Beta testers opt in from
+   **Settings → Sync → Trusted sync → Set up**; nothing migrates on update.
 
    An Android bump starts `.github/workflows/release-android.yml` the same
    way: it builds the APK, records its provenance, and makes an

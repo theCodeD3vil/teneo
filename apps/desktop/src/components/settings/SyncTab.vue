@@ -26,9 +26,11 @@ import CheckIcon from "~icons/tabler/check";
 import ChevronRightIcon from "~icons/tabler/chevron-right";
 import CopyIcon from "~icons/tabler/copy";
 
+import { usePermissionConfirmation } from "@/composables/usePermissionConfirmation";
 import { useSettings } from "@/composables/useSettings";
 import { messageOf, useSyncStatus } from "@/composables/useSyncStatus";
 
+import PermissionConfirmation from "./PermissionConfirmation.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
@@ -38,17 +40,35 @@ const {
   isBusy,
   error,
   turnOn,
+  resume,
   join,
   turnOff,
   setSyncSecrets,
   removeDevice,
   pairingInfo,
+  upgradeTrusted,
+  rotateTrusted,
+  answerEnrollment,
+  cancelEnrollment,
 } = useSyncStatus();
 
 // --- joining another device's vault
 
 const isJoining = ref(false);
 const recoveryCode = ref("");
+const { prompt, explain, cancel, confirm } = usePermissionConfirmation();
+
+function confirmSyncAccess(action: string, proceed: () => unknown): void {
+  explain(
+    {
+      title: `${action}?`,
+      description:
+        "Local Network finds nearby devices; Keychain stores and reads the sync key.",
+      action,
+    },
+    proceed,
+  );
+}
 
 async function joinWithCode(): Promise<void> {
   if (await join(recoveryCode.value)) {
@@ -94,6 +114,7 @@ async function showPairing(): Promise<void> {
 
 watch(isPairingOpen, (isOpen) => {
   if (isOpen) return;
+  if (status.value?.trust) void cancelEnrollment().catch(() => undefined);
   pairing.value = null;
   pairingError.value = "";
   isCodeShown.value = false;
@@ -145,7 +166,7 @@ const connectedCount = computed(
 );
 
 const summary = computed(() => {
-  if (!status.value?.running) return "Starting…";
+  if (!status.value?.running) return isBusy.value ? "Starting…" : "Paused";
   if (connectedCount.value === 0) return "Looking for other devices…";
   return connectedCount.value === 1
     ? "Connected to 1 device"
@@ -263,6 +284,37 @@ const syncSecrets = computed({
 // --- turning sync off forgets this Mac's key, so it asks first
 
 const isTurnOffWarningOpen = ref(false);
+const isUpgradeOpen = ref(false);
+const rotation = ref<{ deviceId?: string; name?: string } | null>(null);
+
+async function confirmRotation(): Promise<void> {
+  if (!rotation.value) return;
+  if (await rotateTrusted(rotation.value.deviceId)) {
+    rotation.value = null;
+    openDeviceId.value = null;
+  }
+}
+
+async function respondToEnrollment(accept: boolean): Promise<void> {
+  const request = status.value?.trust?.approval;
+  if (!request) return;
+  try {
+    await answerEnrollment(request.deviceId, request.fingerprint, accept);
+    isPairingOpen.value = false;
+  } catch (caught) {
+    pairingError.value = messageOf(caught);
+  }
+}
+
+async function copyInvite(): Promise<void> {
+  if (!pairing.value) return;
+  try {
+    await tiny.clipboard.write({ text: pairing.value.link });
+    isCodeCopied.value = true;
+  } catch (caught) {
+    pairingError.value = messageOf(caught);
+  }
+}
 </script>
 
 <template>
@@ -276,13 +328,18 @@ const isTurnOffWarningOpen = ref(false);
           <template #label>Sync with your other devices</template>
           <template #description> Over your Wi-Fi, encrypted </template>
           <Spinner v-if="isBusy" />
-          <Button v-else size="sm" @click="turnOn()">Turn on</Button>
+          <Button
+            v-else
+            size="sm"
+            @click="confirmSyncAccess('Turn on sync', turnOn)"
+            >Turn on</Button
+          >
         </SettingsField>
 
         <SettingsField>
           <template #label>Join your other devices</template>
           <template #description>
-            Use the join code from another device
+            Use the code or invitation link from another device
           </template>
           <Button
             variant="outline"
@@ -292,12 +349,15 @@ const isTurnOffWarningOpen = ref(false);
             {{ isJoining ? "Cancel" : "Join" }}
           </Button>
           <template v-if="isJoining" #footer>
-            <form class="flex gap-2" @submit.prevent="joinWithCode">
+            <form
+              class="flex gap-2"
+              @submit.prevent="confirmSyncAccess('Join devices', joinWithCode)">
               <Input
                 :model-value="recoveryCode"
                 placeholder="Join code"
+                aria-label="Join code or invitation link"
                 autocomplete="off"
-                autocapitalize="characters"
+                autocapitalize="none"
                 spellcheck="false"
                 class="font-mono"
                 @update:model-value="recoveryCode = String($event)" />
@@ -308,6 +368,14 @@ const isTurnOffWarningOpen = ref(false);
                 Connect
               </Button>
             </form>
+            <p
+              v-if="status.trustedJoinFingerprint"
+              class="mt-2 text-sm"
+              role="status">
+              On the primary Mac, approve this device only if the fingerprint
+              matches:
+              <code>{{ status.trustedJoinFingerprint }}</code>
+            </p>
           </template>
         </SettingsField>
       </SettingsSection>
@@ -325,16 +393,27 @@ const isTurnOffWarningOpen = ref(false);
             <span v-if="status.problem" class="text-destructive block">
               {{ status.problem }}
             </span>
+            <span v-else-if="!status.running" class="block">
+              Resume sync to allow Keychain and local network access for this
+              session.
+            </span>
             <span class="mt-4 block">Shown as “{{ status.deviceName }}”</span>
           </template>
           <Spinner v-if="isBusy" />
-          <Button
-            v-else
-            variant="outline"
-            size="sm"
-            @click="isTurnOffWarningOpen = true">
-            Turn off
-          </Button>
+          <div v-else class="flex flex-wrap justify-end gap-2">
+            <Button
+              v-if="!status.running"
+              size="sm"
+              @click="confirmSyncAccess('Resume sync', resume)"
+              >Resume sync</Button
+            >
+            <Button
+              variant="outline"
+              size="sm"
+              @click="isTurnOffWarningOpen = true">
+              Turn off
+            </Button>
+          </div>
         </SettingsField>
       </SettingsSection>
 
@@ -359,6 +438,16 @@ const isTurnOffWarningOpen = ref(false);
             </span>
             <span class="text-foreground/60 text-xs">
               {{ platformName(device.platform) }} · {{ lastSeen(device) }}
+              <template v-if="device.disconnectedHere">
+                · Disconnected here
+              </template>
+              <template
+                v-if="
+                  status.trust?.primary &&
+                  status.trust.pendingDeviceIds.includes(device.deviceId)
+                ">
+                · Update pending
+              </template>
             </span>
           </span>
           <span class="flex shrink-0 items-center gap-3">
@@ -371,9 +460,15 @@ const isTurnOffWarningOpen = ref(false);
           </span>
         </button>
 
-        <SettingsField>
+        <SettingsField v-if="!status.trust || status.trust.primary">
           <template #label>Add a device</template>
-          <template #description> A QR code and a join code </template>
+          <template #description>
+            {{
+              status.trust
+                ? "A one-time invitation"
+                : "A QR code and a join code"
+            }}
+          </template>
           <Button variant="outline" size="sm" @click="showPairing()">
             Show code
           </Button>
@@ -393,6 +488,83 @@ const isTurnOffWarningOpen = ref(false);
         </SettingsField>
       </SettingsSection>
     </template>
+
+    <SettingsSection v-if="status.trustedUpgradeAvailable && !status.trust">
+      <template #section-title>Trusted sync · Preview</template>
+      <SettingsField>
+        <template #label>Make this Mac the primary device</template>
+        <template #description>
+          Protect sync with individual device keys. Other devices must pair
+          again.
+        </template>
+        <Button
+          size="sm"
+          variant="outline"
+          :disabled="isBusy"
+          @click="isUpgradeOpen = true">
+          Set up
+        </Button>
+      </SettingsField>
+      <SettingsField v-if="status.enabled">
+        <template #label>Join a trusted vault</template>
+        <template #description>
+          Paste the invitation from the primary Mac. Local history stays here.
+        </template>
+        <Button
+          size="sm"
+          variant="outline"
+          :disabled="isBusy"
+          @click="isJoining = !isJoining">
+          {{ isJoining ? "Cancel" : "Join" }}
+        </Button>
+        <template v-if="isJoining" #footer>
+          <form
+            class="flex gap-2"
+            @submit.prevent="confirmSyncAccess('Join devices', joinWithCode)">
+            <Input
+              v-model="recoveryCode"
+              placeholder="Invitation link"
+              aria-label="Trusted vault invitation"
+              autocomplete="off"
+              spellcheck="false" />
+            <Button
+              type="submit"
+              size="sm"
+              :disabled="isBusy || !recoveryCode.trim()">
+              Connect
+            </Button>
+          </form>
+          <p
+            v-if="status.trustedJoinFingerprint"
+            class="mt-2 text-sm"
+            role="status">
+            On the primary Mac, approve this device only if the fingerprint
+            matches:
+            <code>{{ status.trustedJoinFingerprint }}</code>
+          </p>
+        </template>
+      </SettingsField>
+    </SettingsSection>
+    <SettingsSection v-else-if="status.trust?.primary">
+      <template #section-title>Trusted sync · Preview</template>
+      <SettingsField>
+        <template #label>Rotate the sync key</template>
+        <template #description>
+          Replace the vault key without removing devices.
+          <span v-if="status.trust.pendingDeviceIds.length" class="block">
+            Waiting for {{ status.trust.pendingDeviceIds.length }} to confirm
+            the current key.
+          </span>
+        </template>
+        <Button
+          size="sm"
+          variant="outline"
+          :disabled="isBusy"
+          @click="rotation = {}">
+          Rotate key
+        </Button>
+      </SettingsField>
+    </SettingsSection>
 
     <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
 
@@ -414,15 +586,44 @@ const isTurnOffWarningOpen = ref(false);
               Scan it with Teneo on your phone. It works once, for the next 10
               minutes.
             </p>
+            <template v-if="status.trust">
+              <div v-if="status.trust.approval" class="grid gap-2 text-center">
+                <div role="status">
+                  <p>
+                    Approve only if this fingerprint matches the one on the
+                    joining device.
+                  </p>
+                  <code class="font-semibold">{{
+                    status.trust.approval.fingerprint
+                  }}</code>
+                </div>
+                <div class="flex justify-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    @click="respondToEnrollment(false)"
+                    >Reject</Button
+                  >
+                  <Button size="sm" @click="respondToEnrollment(true)"
+                    >Approve device</Button
+                  >
+                </div>
+              </div>
+              <Button v-else size="sm" variant="outline" @click="copyInvite">
+                {{
+                  isCodeCopied ? "Invitation copied" : "Copy invitation link"
+                }}
+              </Button>
+            </template>
             <Button
-              v-if="!isCodeShown"
+              v-else-if="!isCodeShown"
               variant="outline"
               size="sm"
               @click="isCodeShown = true">
               Show join code
             </Button>
             <div
-              v-if="isCodeShown"
+              v-if="pairing.recoveryCode && isCodeShown"
               class="bg-foreground/5 flex w-full items-center justify-center gap-3 rounded-lg px-3 py-3">
               <code
                 class="text-foreground/80 font-mono text-xs leading-5 tracking-wide select-none">
@@ -440,7 +641,7 @@ const isTurnOffWarningOpen = ref(false);
               </Button>
             </div>
             <Alert
-              v-if="isCodeShown"
+              v-if="pairing.recoveryCode && isCodeShown"
               class="bg-warning/10 dark:bg-warning/15 w-full border-0!">
               <AlertCircleIcon class="text-warning!" />
               <AlertTitle>Keep this code private</AlertTitle>
@@ -486,9 +687,22 @@ const isTurnOffWarningOpen = ref(false);
               </dd>
             </div>
           </dl>
+          <Button
+            v-if="status.trust?.primary"
+            variant="outline"
+            @click="
+              rotation = {
+                deviceId: shownDevice.deviceId,
+                name: shownDevice.name,
+              };
+              openDeviceId = null;
+            ">
+            Revoke and rotate
+          </Button>
           <AlertDialogFooter>
             <AlertDialogCancel>Done</AlertDialogCancel>
             <Button
+              v-if="!shownDevice.disconnectedHere"
               variant="destructive"
               @click="isConfirmingDisconnect = true">
               {{ shownDevice.disconnectedUs ? "Remove" : "Disconnect" }}
@@ -534,13 +748,66 @@ const isTurnOffWarningOpen = ref(false);
       </AlertDialogContent>
     </AlertDialog>
 
+    <AlertDialog v-model:open="isUpgradeOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Set up trusted sync?</AlertDialogTitle>
+          <AlertDialogDescription>
+            History stays, but devices must pair again. Keychain stores the new
+            credentials; Local Network finds devices. Losing this Mac means
+            starting a new vault.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction :disabled="isBusy" @click="upgradeTrusted()"
+            >Set up trusted sync</AlertDialogAction
+          >
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog
+      :open="rotation !== null"
+      @update:open="
+        (open) => {
+          if (!open) rotation = null;
+        }
+      ">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{{
+            rotation?.name
+              ? `Revoke ${rotation.name} and rotate the key?`
+              : "Rotate the sync key?"
+          }}</AlertDialogTitle>
+          <AlertDialogDescription>
+            Keychain saves the new key. Offline devices may still sync until
+            they reconnect here. This won’t erase items already shared.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <p v-if="error" class="text-destructive text-sm" role="alert">
+          {{ error }}
+        </p>
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="isBusy">Cancel</AlertDialogCancel>
+          <Button
+            :variant="rotation?.deviceId ? 'destructive' : 'default'"
+            :disabled="isBusy"
+            @click="confirmRotation()">
+            {{ rotation?.deviceId ? "Revoke and rotate" : "Rotate key" }}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <AlertDialog v-model:open="isTurnOffWarningOpen">
       <AlertDialogContent class="ring-0">
         <AlertDialogHeader>
           <AlertDialogTitle>Turn off sync?</AlertDialogTitle>
           <AlertDialogDescription>
-            This Mac stops syncing but keeps your history. To sync again, use a
-            join code from another device.
+            History stays on this Mac. Keychain access may be needed to remove
+            the sync credentials.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -572,5 +839,9 @@ const isTurnOffWarningOpen = ref(false);
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+    <PermissionConfirmation
+      :prompt="prompt"
+      @cancel="cancel"
+      @confirm="confirm" />
   </div>
 </template>

@@ -12,9 +12,17 @@ import javax.crypto.spec.GCMParameterSpec;
 final class KeystoreCipher implements VaultKeyStore.Cipher {
 
     private static final String PROVIDER = "AndroidKeyStore";
-    private static final String ALIAS = "teneo-sync-vault-key";
+    private final String alias;
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
     private static final int TAG_BITS = 128;
+
+    KeystoreCipher() {
+        this("teneo-sync-vault-key");
+    }
+
+    KeystoreCipher(String alias) {
+        this.alias = alias;
+    }
 
     @Override
     public byte[][] encrypt(byte[] plain) throws Exception {
@@ -39,20 +47,20 @@ final class KeystoreCipher implements VaultKeyStore.Cipher {
         try {
             KeyStore store = KeyStore.getInstance(PROVIDER);
             store.load(null);
-            store.deleteEntry(ALIAS);
+            store.deleteEntry(alias);
         } catch (Exception ignored) {
             // no key, or no Keystore: either way nothing can be decrypted
         }
     }
 
-    private static SecretKey key(boolean create) throws Exception {
+    private SecretKey key(boolean create) throws Exception {
         KeyStore store = KeyStore.getInstance(PROVIDER);
         store.load(null);
-        if (store.getKey(ALIAS, null) instanceof SecretKey existing) return existing;
+        if (store.getKey(alias, null) instanceof SecretKey existing) return existing;
         if (!create) return null;
         KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, PROVIDER);
         generator.init(
-            new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+            new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
                 .setKeySize(256)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)

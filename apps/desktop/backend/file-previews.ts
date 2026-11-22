@@ -1,6 +1,7 @@
 import type { FilePreview } from "@teneo/shared/types/clipboard";
 
 import { logError, pngDataUrl } from "./files";
+import { mayInspectFile } from "./folder-access";
 
 const PREVIEW_SIZE = 64;
 /** the item preview asks for bigger thumbnails, up to the panel's width */
@@ -20,6 +21,8 @@ export async function getFilePreview(
   if (typeof path !== "string" || !path.startsWith("/")) {
     return { url: null, isMissing: true };
   }
+  if (!(await mayInspectFile(path, app)))
+    return { url: null, isMissing: false };
   try {
     await tjs.stat(path);
   } catch (error) {
@@ -50,7 +53,11 @@ function isAccessDenied(error: unknown): boolean {
 
 /** A file's size in bytes, or null for a folder, whose stat size isn't the
  *  size of its contents, or a file that's gone. */
-export async function getFileSize(path: string): Promise<number | null> {
+export async function getFileSize(
+  path: string,
+  app: TinyApp,
+): Promise<number | null> {
+  if (!(await mayInspectFile(path, app))) return null;
   const stats = await tjs.stat(path).catch(() => null);
   return stats && !stats.isDirectory ? stats.size : null;
 }

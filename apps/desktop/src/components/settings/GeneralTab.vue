@@ -3,8 +3,13 @@ import { Switch } from "@teneo/ui/components/switch";
 import { computed, ref } from "vue";
 
 import { useLaunchAtLogin } from "@/composables/useLaunchAtLogin";
+import {
+  loginExplanation,
+  usePermissionConfirmation,
+} from "@/composables/usePermissionConfirmation";
 import { useSettings } from "@/composables/useSettings";
 
+import PermissionConfirmation from "./PermissionConfirmation.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
 
@@ -25,6 +30,12 @@ const pasteOnEnter = computed({
 
 const { status: launchAtLoginStatus, isEnabled: launchAtLogin } =
   useLaunchAtLogin();
+const { prompt, explain, cancel, confirm } = usePermissionConfirmation();
+
+function changeLaunchAtLogin(enabled: boolean): void {
+  if (enabled) explain(loginExplanation, () => (launchAtLogin.value = true));
+  else launchAtLogin.value = false;
+}
 </script>
 
 <template>
@@ -46,7 +57,9 @@ const { status: launchAtLoginStatus, isEnabled: launchAtLogin } =
           </template>
           <template v-else>Start Teneo when you log in to your Mac</template>
         </template>
-        <Switch v-model="launchAtLogin" />
+        <Switch
+          :model-value="launchAtLogin"
+          @update:model-value="changeLaunchAtLogin" />
       </SettingsField>
 
       <SettingsField>
@@ -74,5 +87,9 @@ const { status: launchAtLoginStatus, isEnabled: launchAtLogin } =
         <Switch v-model="playCopySound" />
       </SettingsField>
     </SettingsSection>
+    <PermissionConfirmation
+      :prompt="prompt"
+      @cancel="cancel"
+      @confirm="confirm" />
   </div>
 </template>

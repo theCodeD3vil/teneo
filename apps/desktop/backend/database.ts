@@ -15,6 +15,14 @@ import { type LatestCopy, isRepeatCopy } from "./duplicate-copy";
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";
 import {
+  createVerifiedHistoryKeyEnvelope,
+  historyHardwareAvailable,
+  historyProtectionChangedEvent,
+  historySecretsLockedEvent,
+  type HistoryProtectionStatus,
+  readHistoryKeyEnvelope,
+} from "./history-key-envelope";
+import {
   afterCursor,
   likePattern,
   matchesSearch,
@@ -23,11 +31,25 @@ import {
 } from "./history-query";
 import { appPaths } from "./paths";
 import {
+  areHistorySecretsLocked,
+  assertHistoryUnlocked,
+  currentHistoryKeyEnvelope,
   decryptText,
   deleteEncryptionKey,
   encryptText,
+  encryptHistoryText,
+  importEncryptionKey,
+  HistoryKeychainAccessRequired,
+  LockedHistoryError,
+  lockHistorySecrets,
+  needsHistoryKeychainAccess,
   prepareEncryptionKey,
+  removeLegacyEncryptionKey,
   restrictToSavedEncryptionKey,
+  restoreHistoryKeychainAccess,
+  setHistoryKeyEnvelope,
+  unlockHistorySecrets,
+  hasHardwareHistoryKey,
 } from "./secret-encryption";
 import { getSettings, isSettingSaved, updateSettings } from "./settings";
 import { all, checkpoint, exclusive, run, transaction } from "./sqlite";
@@ -99,6 +121,26 @@ async function openDatabase(app: TinyApp): Promise<Database> {
       )
   `);
   addMissingColumns(database);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS "HISTORY_PROTECTION" (
+      id INTEGER PRIMARY KEY CHECK (id = 1), envelope TEXT NOT NULL
+    )
+  `);
+  const [protection] = all<{ envelope: string }>(
+    database,
+    `SELECT envelope FROM "HISTORY_PROTECTION" WHERE id = 1`,
+  );
+  try {
+    configureHistoryProtection(
+      app,
+      protection
+        ? readHistoryKeyEnvelope(JSON.parse(protection.envelope))
+        : null,
+    );
+  } catch {
+    // Keep other history usable, but never fall back to a new or legacy key.
+    configureHistoryProtection(app, null, true);
+  }
   createIndexes(database);
   keepItemSizes(database);
   createSyncTables(database);
@@ -175,14 +217,16 @@ export async function saveClipboardItem(
   // With encryption on, text holding a secret is only ever saved encrypted:
   // when the key can't be read, encryptText throws and the item isn't saved
   const value = serializeValue(savedItem);
-  const isEncrypted =
-    getSettings().encryptSecrets &&
-    value !== null &&
-    savedItem.secrets.length > 0;
   const database = await initializeDatabase(app);
+  if (getSettings().encryptSecrets && savedItem.secrets.length)
+    assertHistoryUnlocked();
   const { deviceId } = getSyncIdentity();
   // one writer at a time: a sync batch in progress finishes first
   return exclusive(async () => {
+    const isEncrypted =
+      getSettings().encryptSecrets &&
+      value !== null &&
+      savedItem.secrets.length > 0;
     const repeated = await findRepeatCopy(savedItem, database, app);
     if (repeated) {
       run(
@@ -225,8 +269,12 @@ export async function saveClipboardItem(
       savedItem.pasteAsFile ? 1 : null,
       isEncrypted ? 1 : null,
       serializeSecrets(savedItem.secrets),
-      savedItem.link?.url ?? null,
-      savedItem.link?.host ?? null,
+      isEncrypted && currentHistoryKeyEnvelope()
+        ? null
+        : (savedItem.link?.url ?? null),
+      isEncrypted && currentHistoryKeyEnvelope()
+        ? null
+        : (savedItem.link?.host ?? null),
       detectionVersion,
       savedItem.dateCopied,
       deviceId,
@@ -320,6 +368,7 @@ async function refreshDetection(
     const decrypted = await decryptRow(row, app);
     if (!decrypted) continue;
     const { secrets, link } = detectInText(decrypted.value);
+    const keepLink = row.encrypted !== 1 || !currentHistoryKeyEnvelope();
     run(
       database,
       `
@@ -328,8 +377,8 @@ async function refreshDetection(
         WHERE id = ?
       `,
       serializeSecrets(secrets),
-      link?.url ?? null,
-      link?.host ?? null,
+      (keepLink && link?.url) || null,
+      (keepLink && link?.host) || null,
       detectionVersion,
       row.id,
     );
@@ -854,7 +903,7 @@ export async function listClipboardItems(
     if (!reachedLimit && rows.length < batchSize) exhausted = true;
   }
 
-  await readFileSizes(items);
+  await readFileSizes(items, app);
   return {
     items,
     nextCursor: exhausted ? null : (cursor ?? null),
@@ -887,17 +936,20 @@ export async function getClipboardItem(
   const { data: dataDirectory } = await appPaths(app);
   const item = decrypted && rowToClipboardItem(decrypted, dataDirectory, false);
   if (!item) return null;
-  await readFileSizes([item]);
+  await readFileSizes([item], app);
   return item;
 }
 
 // Only for a single copied file: next to "+N" the first file's size would
 // read as the total. Read now, not when copied, since the file may change.
-async function readFileSizes(items: ClipboardHistoryItem[]): Promise<void> {
+async function readFileSizes(
+  items: ClipboardHistoryItem[],
+  app: TinyApp,
+): Promise<void> {
   await Promise.all(
     items.map(async (item) => {
       if (item.paths.length === 1)
-        item.fileSize = await getFileSize(item.paths[0]);
+        item.fileSize = await getFileSize(item.paths[0], app);
     }),
   );
 }
@@ -1010,7 +1062,11 @@ export async function decryptRow<
   try {
     return { ...row, value: await decryptCached(row.id, row.value, app) };
   } catch (error) {
-    logError(`decrypting history item ${row.id} failed:`, error);
+    if (
+      !(error instanceof LockedHistoryError) &&
+      !(error instanceof HistoryKeychainAccessRequired)
+    )
+      logError(`decrypting history item ${row.id} failed:`, error);
     return null;
   }
 }
@@ -1030,6 +1086,7 @@ async function decryptCached(
   encryptedText: string,
   app: TinyApp,
 ): Promise<string> {
+  assertHistoryUnlocked();
   const key = `${id}:${encryptedText.slice(0, 24)}`;
   clearTimeout(forgetDecrypted);
   forgetDecrypted = setTimeout(() => decryptedTexts.clear(), decryptedCacheMs);
@@ -1041,6 +1098,7 @@ async function decryptCached(
     return known;
   }
   const text = await decryptText(encryptedText, app);
+  assertHistoryUnlocked();
   decryptedTexts.set(key, text);
   if (decryptedTexts.size > decryptedCacheSize) {
     decryptedTexts.delete(decryptedTexts.keys().next().value!);
@@ -1055,10 +1113,186 @@ export function forgetDecryptedTexts(): void {
   decryptedTexts.clear();
 }
 
+function configureHistoryProtection(
+  app: TinyApp,
+  envelope: ReturnType<typeof currentHistoryKeyEnvelope>,
+  unreadable = false,
+): void {
+  forgetDecryptedTexts();
+  setHistoryKeyEnvelope(
+    envelope,
+    () => {
+      forgetDecryptedTexts();
+      app.push(historySecretsLockedEvent);
+      app.push(historyProtectionChangedEvent);
+      app.push(clipboardHistoryChangedEvent);
+    },
+    unreadable,
+  );
+}
+
+async function retireLegacyHistoryKey(app: TinyApp): Promise<void> {
+  try {
+    await removeLegacyEncryptionKey(app);
+  } catch (error) {
+    logError("removing the obsolete history key failed:", error);
+  }
+}
+
+let hardwareAvailable: Promise<boolean> | undefined;
+
+export async function historyProtectionStatus(
+  app: TinyApp,
+): Promise<HistoryProtectionStatus> {
+  await initializeDatabase(app);
+  const envelope = currentHistoryKeyEnvelope();
+  hardwareAvailable ??= historyHardwareAvailable(app);
+  return {
+    available: await hardwareAvailable,
+    protected: hasHardwareHistoryKey(),
+    requireAuthentication: envelope?.requireAuthentication ?? false,
+    locked: areHistorySecretsLocked(),
+    ...(hasHardwareHistoryKey() && !envelope && { unreadable: true }),
+    ...(getSettings().encryptSecrets &&
+      needsHistoryKeychainAccess() && {
+        needsKeychainAccess: true,
+      }),
+  };
+}
+
+/** Commit new ciphertext and its wrapping metadata together. Never remove
+ * the old credential before the verified replacement is durable. */
+export async function protectHistorySecrets(
+  app: TinyApp,
+  requireAuthentication: boolean,
+): Promise<void> {
+  const database = await initializeDatabase(app);
+  await exclusive(async () => {
+    if (!getSettings().encryptSecrets)
+      throw new Error("Turn on Encrypt secrets first.");
+    if (
+      currentHistoryKeyEnvelope()?.requireAuthentication ===
+      requireAuthentication
+    )
+      return;
+    assertHistoryUnlocked();
+    const raw = crypto.getRandomValues(new Uint8Array(32));
+    try {
+      const envelope = await createVerifiedHistoryKeyEnvelope(
+        app,
+        raw,
+        requireAuthentication,
+      );
+      const key = await importEncryptionKey(raw);
+      const rows = all<{ id: string; value: string }>(
+        database,
+        `SELECT id, value FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1 AND value IS NOT NULL`,
+      );
+      if (rows.length && !(await restrictToSavedEncryptionKey(app)))
+        throw new Error(
+          "The old history key is missing. No entries were changed.",
+        );
+      const replacement: { id: string; value: string; field?: string }[] = [];
+      for (const row of rows) {
+        replacement.push({
+          id: row.id,
+          value: await encryptHistoryText(
+            await decryptText(row.value, app),
+            key,
+          ),
+        });
+      }
+      const plain = all<{ id: string; value: string }>(
+        database,
+        `SELECT id, value FROM "CLIPBOARD_ITEMS" WHERE kind = 'text' AND encrypted IS NULL AND value IS NOT NULL`,
+      );
+      for (const row of plain) {
+        const found = findSecrets(row.value);
+        if (found.length)
+          replacement.push({
+            id: row.id,
+            value: await encryptHistoryText(row.value, key),
+            field: serializeSecrets(found)!,
+          });
+      }
+      database.exec("PRAGMA synchronous = FULL");
+      try {
+        transaction(database, () => {
+          for (const row of replacement)
+            run(
+              database,
+              `UPDATE "CLIPBOARD_ITEMS"
+               SET value = ?, encrypted = 1, linkUrl = NULL, linkHost = NULL,
+                   secrets = coalesce(?, secrets)
+               WHERE id = ?`,
+              row.value,
+              row.field ?? null,
+              row.id,
+            );
+          run(
+            database,
+            `INSERT OR REPLACE INTO "HISTORY_PROTECTION" (id, envelope) VALUES (1, ?)`,
+            JSON.stringify(envelope),
+          );
+        });
+      } finally {
+        database.exec("PRAGMA synchronous = NORMAL");
+      }
+      configureHistoryProtection(app, envelope);
+      checkpoint(database);
+      await retireLegacyHistoryKey(app);
+      if (requireAuthentication) app.push(historySecretsLockedEvent);
+      app.push(historyProtectionChangedEvent);
+      app.push(clipboardHistoryChangedEvent);
+    } finally {
+      raw.fill(0);
+    }
+  });
+}
+
+export async function unlockProtectedHistory(app: TinyApp): Promise<void> {
+  const database = await initializeDatabase(app);
+  await exclusive(async () => {
+    if (!areHistorySecretsLocked()) return;
+    await unlockHistorySecrets(app);
+    await encryptPlainSecrets(database, app);
+    await refreshDetection(database, app);
+    // A peer may have advanced past rows that were temporarily unavailable.
+    if (getSettings().syncSecrets)
+      restampRows(database, `encrypted = 1 AND deletedAt IS NULL`);
+    app.push(historyProtectionChangedEvent);
+    notifyClipboardHistoryChanged(app);
+  });
+}
+
+export function lockProtectedHistory(): void {
+  lockHistorySecrets();
+}
+
+export async function restoreSecretHistoryAccess(app: TinyApp): Promise<void> {
+  const database = await initializeDatabase(app);
+  await exclusive(async () => {
+    if (!getSettings().encryptSecrets || !needsHistoryKeychainAccess()) return;
+    const hasRows =
+      all(
+        database,
+        `SELECT 1 FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1 LIMIT 1`,
+      ).length > 0;
+    await restoreHistoryKeychainAccess(app, hasRows);
+    await encryptPlainSecrets(database, app);
+    await refreshDetection(database, app);
+    if (getSettings().syncSecrets)
+      restampRows(database, `encrypted = 1 AND deletedAt IS NULL`);
+    app.push(historyProtectionChangedEvent);
+    notifyClipboardHistoryChanged(app);
+  });
+}
+
 /** Encrypt saved text that holds a secret but isn't encrypted yet: copied
  *  while encryption was off or before Teneo looked for secrets, or caught by
  *  a rule added since. Run at startup and when encryption is turned on. */
 export async function encryptSecretsInHistory(app: TinyApp): Promise<void> {
+  if (areHistorySecretsLocked() || needsHistoryKeychainAccess()) return;
   const database = await initializeDatabase(app);
   await exclusive(() => encryptPlainSecrets(database, app));
 }
@@ -1086,7 +1320,9 @@ async function encryptPlainSecrets(
     for (const { id, value } of encrypted) {
       run(
         database,
-        `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = 1 WHERE id = ? AND encrypted IS NULL`,
+        `UPDATE "CLIPBOARD_ITEMS" SET value = ?, encrypted = 1
+             ${currentHistoryKeyEnvelope() ? ", linkUrl = NULL, linkHost = NULL" : ""}
+         WHERE id = ? AND encrypted IS NULL`,
         value,
         id,
       );
@@ -1100,15 +1336,18 @@ async function encryptPlainSecrets(
 /** Turn "Encrypt API keys" on: get the Keychain key first, so a denied
  *  Keychain leaves it off, then encrypt the keys already in history. */
 export async function turnOnSecretEncryption(app: TinyApp): Promise<boolean> {
-  try {
-    await prepareEncryptionKey(app);
-  } catch (error) {
-    logError("reading the encryption key failed:", error);
-    return false;
-  }
-  await updateSettings({ encryptSecrets: true }, app);
-  await encryptSecretsInHistory(app);
-  return true;
+  const database = await initializeDatabase(app);
+  return exclusive(async () => {
+    try {
+      await prepareEncryptionKey(app);
+    } catch (error) {
+      logError("reading the encryption key failed:", error);
+      return false;
+    }
+    await updateSettings({ encryptSecrets: true }, app);
+    await encryptPlainSecrets(database, app);
+    return true;
+  });
 }
 
 /** Turn "Encrypt API keys" off: save the keys in history as plain text and
@@ -1118,27 +1357,36 @@ export async function turnOnSecretEncryption(app: TinyApp): Promise<boolean> {
  *  decrypting needs the key. The setting and the key change only after the
  *  history has, so a stop midway leaves encryption on, as it was. */
 export async function turnOffSecretEncryption(app: TinyApp): Promise<boolean> {
-  let hasKey: boolean;
-  try {
-    hasKey = await restrictToSavedEncryptionKey(app);
-  } catch (error) {
-    logError("reading the encryption key failed:", error);
-    return false;
-  }
-
   const database = await initializeDatabase(app);
-  await exclusive(() => decryptEncryptedRows(database, app, hasKey));
-
-  await updateSettings({ encryptSecrets: false }, app);
-  forgetDecryptedTexts();
-  if (hasKey) await deleteEncryptionKey(app);
-  return true;
+  return exclusive(async () => {
+    const hardware = hasHardwareHistoryKey();
+    let hasKey: boolean;
+    try {
+      hasKey = await restrictToSavedEncryptionKey(app);
+      await decryptEncryptedRows(database, app, hasKey, hardware);
+    } catch (error) {
+      if (!(error instanceof LockedHistoryError))
+        logError("reading the encryption key failed:", error);
+      return false;
+    }
+    await updateSettings({ encryptSecrets: false }, app);
+    if (hardware) {
+      run(database, `DELETE FROM "HISTORY_PROTECTION" WHERE id = 1`);
+      configureHistoryProtection(app, null);
+      app.push(historyProtectionChangedEvent);
+    } else {
+      forgetDecryptedTexts();
+      if (hasKey) await deleteEncryptionKey(app);
+    }
+    return true;
+  });
 }
 
 async function decryptEncryptedRows(
   database: Database,
   app: TinyApp,
   hasKey: boolean,
+  preserveUnreadable = false,
 ): Promise<void> {
   const rows = all<Pick<ClipboardItemRow, "id" | "value">>(
     database,
@@ -1154,7 +1402,10 @@ async function decryptEncryptedRows(
       id,
       plaintext:
         hasKey && value !== null
-          ? await decryptText(value, app).catch(() => null)
+          ? await decryptText(value, app).catch((error) => {
+              if (preserveUnreadable) throw error;
+              return null;
+            })
           : null,
     });
   }
@@ -1192,9 +1443,15 @@ async function decryptEncryptedRows(
 export async function keepEncryptionFromEarlierVersion(
   app: TinyApp,
 ): Promise<void> {
+  const database = await initializeDatabase(app);
+  if (hasHardwareHistoryKey()) {
+    if (!getSettings().encryptSecrets)
+      await updateSettings({ encryptSecrets: true }, app);
+    return;
+  }
   if (await isSettingSaved("encryptSecrets", app)) return;
   const [result] = all<{ count: number }>(
-    await initializeDatabase(app),
+    database,
     `SELECT COUNT(*) AS count FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1`,
   );
   if ((result?.count ?? 0) > 0) {

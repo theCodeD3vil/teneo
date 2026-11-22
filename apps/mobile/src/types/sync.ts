@@ -28,4 +28,5 @@ export interface SyncStatus {
   state: SyncState;
   devices: PairedDevice[];
   errorMessage?: string;
+  enrollmentFingerprint?: string;
 }

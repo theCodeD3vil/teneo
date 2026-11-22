@@ -25,7 +25,7 @@ import {
 import { logError } from "../files";
 import { trimClipboardHistory } from "../history-limits";
 import { appPaths } from "../paths";
-import { encryptText } from "../secret-encryption";
+import { currentHistoryKeyEnvelope, encryptText } from "../secret-encryption";
 import { getSettings } from "../settings";
 import { all, exclusive, run } from "../sqlite";
 import { measureImage } from "./image-store";
@@ -344,6 +344,7 @@ class SqliteTransaction implements SyncTransaction {
       textChanged && encrypted
         ? await encryptText(columns.value!, app)
         : columns.value;
+    const link = encrypted && currentHistoryKeyEnvelope() ? null : found?.link;
 
     // from here to the write there is no await
     const seq = nextSyncSeq(database);
@@ -372,8 +373,8 @@ class SqliteTransaction implements SyncTransaction {
         seq,
         encrypted ? 1 : null,
         found ? serializeSecrets(found.secrets) : null,
-        found?.link?.url ?? null,
-        found?.link?.host ?? null,
+        link?.url ?? null,
+        link?.host ?? null,
         found ? detectionVersion : null,
       );
       return;
@@ -399,8 +400,8 @@ class SqliteTransaction implements SyncTransaction {
             storedValue,
             encrypted ? 1 : null,
             serializeSecrets(found!.secrets),
-            found!.link?.url ?? null,
-            found!.link?.host ?? null,
+            link?.url ?? null,
+            link?.host ?? null,
             detectionVersion,
           ]
         : []),

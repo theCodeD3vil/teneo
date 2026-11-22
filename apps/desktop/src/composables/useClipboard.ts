@@ -131,6 +131,7 @@ export function useClipboardItem(
 // One subscription for all of the page's queries, for as long as any is mounted
 let subscriberCount = 0;
 let unsubscribeFromHistory: (() => void) | undefined;
+let unsubscribeFromLock: (() => void) | undefined;
 // The history changed while the panel was hidden
 let missedChanges = false;
 /** How long showing the panel waits for a list that changed while hidden */
@@ -139,6 +140,14 @@ const catchUpWaitMs = 200;
 function useHistoryChanges(queryClient: QueryClient): void {
   onMounted(() => {
     subscriberCount += 1;
+    unsubscribeFromLock ??= tiny.api.on("history-secrets-locked", () => {
+      // Drop cached plaintext rather than keeping it for the ordinary
+      // stale-while-revalidate window, including while the panel is hidden.
+      for (const queryKey of [clipboardItemsQueryKey, clipboardItemQueryKey]) {
+        queryClient.removeQueries({ queryKey, type: "inactive" });
+        void queryClient.resetQueries({ queryKey, type: "active" });
+      }
+    });
     unsubscribeFromHistory ??= tiny.api.on(clipboardHistoryChangedEvent, () => {
       // Lists on screen refetch their loaded pages; the others when next
       // shown. The panel is hidden most of the day while every copy on the
@@ -160,6 +169,8 @@ function useHistoryChanges(queryClient: QueryClient): void {
     if (subscriberCount === 0) {
       unsubscribeFromHistory?.();
       unsubscribeFromHistory = undefined;
+      unsubscribeFromLock?.();
+      unsubscribeFromLock = undefined;
     }
   });
 }

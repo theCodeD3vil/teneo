@@ -1,6 +1,11 @@
 // The sync engine, its store, and the transport that carries it, put together:
 // what the app and the dev peer both start. Nothing runs until this is called.
-import { type Bytes, type ConnectedPeer, SyncEngine } from "@teneo/sync";
+import {
+  type Bytes,
+  type ConnectedPeer,
+  SyncEngine,
+  type TrustedEngineOptions,
+} from "@teneo/sync";
 
 import {
   getSyncIdentity,
@@ -17,8 +22,7 @@ import { clearPartialImages, SqliteImageStore } from "./image-store";
 import { LanTransport } from "./lan-transport";
 import { isDisconnected, SqliteSyncStore, type StoredPeer } from "./sync-store";
 
-export interface SyncServiceOptions {
-  vaultKey: Bytes;
+interface CommonServiceOptions {
   /** Shown to the other devices. */
   name: string;
   platform?: string;
@@ -29,11 +33,19 @@ export interface SyncServiceOptions {
   discovery?: Discovery;
   onPeersChanged?: () => void;
   onError?: (error: unknown) => void;
+}
+
+interface LegacyServiceOptions {
+  trust?: never;
+  vaultKey: Bytes;
   /** The one-time key of the pairing code on show, or null (engine.ts). */
   pairingKey?: () => Bytes | null;
   /** A phone joined with it. */
   onPaired?: () => void;
 }
+
+export type SyncServiceOptions = CommonServiceOptions &
+  (LegacyServiceOptions | TrustedEngineOptions);
 
 export interface SyncService {
   readonly deviceId: string;
@@ -74,7 +86,6 @@ export async function startSyncService(
         .removedBy(peer.deviceId)
         .then(() => options.onPeersChanged?.())
         .catch((error: unknown) => options.onError?.(error)),
-    vaultKey: options.vaultKey,
     store,
     syncSecrets: options.syncSecrets,
     // a phone shows the icons of the apps items were copied from, and has
@@ -87,8 +98,18 @@ export async function startSyncService(
     onItemsChanged: () => app.push(clipboardHistoryChangedEvent),
     onPeersChanged: options.onPeersChanged,
     onError: options.onError,
-    pairingKey: options.pairingKey,
-    onPaired: options.onPaired,
+    ...(options.trust
+      ? {
+          trust: options.trust,
+          invites: options.invites,
+          approveEnrollment: options.approveEnrollment,
+          onTrustConfirmed: options.onTrustConfirmed,
+        }
+      : {
+          vaultKey: options.vaultKey,
+          pairingKey: options.pairingKey,
+          onPaired: options.onPaired,
+        }),
   });
   const discovery =
     options.discovery ??
@@ -99,10 +120,16 @@ export async function startSyncService(
     engine,
     deviceId,
     discovery,
-    // a device this Mac disconnected, or that disconnected it, is not dialed
+    // Trusted devices can still exchange membership updates after a local
+    // disconnect. The engine continues to block clipboard sync with them.
     knownPeers: async () =>
-      (await store.listPeers()).filter((peer) => !isDisconnected(peer)),
+      (await store.listPeers()).filter((peer) =>
+        options.trust
+          ? options.trust.current.member(peer.deviceId) !== undefined
+          : !isDisconnected(peer),
+      ),
     isDisconnected: async (peerId) => {
+      if (options.trust) return !options.trust.current.member(peerId);
       const peer = await store.getPeer(peerId);
       return peer !== null && isDisconnected(peer);
     },

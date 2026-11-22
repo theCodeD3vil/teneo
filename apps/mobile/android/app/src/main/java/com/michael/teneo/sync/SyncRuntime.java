@@ -56,6 +56,9 @@ final class SyncRuntime {
 
         /** Joining with a pairing code: the Mac sent the vault's key */
         void paired(byte[] vaultKey);
+        boolean installTrust(String snapshot, String runToken);
+        void trustedJoined();
+        void enrollmentFingerprint(String fingerprint);
 
         // --- disconnected devices (KnownDevices). Called on a web view thread.
 
@@ -86,6 +89,8 @@ final class SyncRuntime {
     private final Host host;
     /** The vault key, base64: handed to the page once, then let go of */
     private String vaultKey;
+    private String configuration;
+    private volatile String trustedRunToken;
     private volatile boolean syncSecrets;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final boolean debuggable;
@@ -122,6 +127,12 @@ final class SyncRuntime {
             () -> evaluate("window.teneoSyncPage && teneoSyncPage.localChanged && teneoSyncPage.localChanged()")
         );
         this.debuggable = (context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    synchronized void trustedConfiguration(JSONObject state) {
+        trustedRunToken = state.optString("token");
+        state.remove("token");
+        configuration = state.toString();
     }
 
     /** Main thread */
@@ -286,12 +297,75 @@ final class SyncRuntime {
         public void pageLoaded() {
             String key;
             synchronized (SyncRuntime.this) {
+                if (trustedRunToken != null) {
+                    evaluate("teneoSyncPage.startTrusted(" + syncSecrets + ")");
+                    return;
+                }
                 key = vaultKey;
                 vaultKey = null;
             }
             if (key == null) return;
             String pairing = pairingAddresses == null ? "null" : pairingAddresses;
             evaluate("teneoSyncPage.start(" + JSONObject.quote(key) + "," + syncSecrets + "," + pairing + ")");
+        }
+
+        @JavascriptInterface
+        public String takeTrustedConfiguration() {
+            synchronized (SyncRuntime.this) {
+                if (closed) return null;
+                String current = configuration;
+                configuration = null;
+                return current;
+            }
+        }
+
+        private DeviceIdentitySigner signer;
+
+        @JavascriptInterface
+        public String syncIdentityPublicKey(boolean create) {
+            if (closed || trustedRunToken == null) return null;
+            try {
+                signer = DeviceIdentitySigner.open(create);
+                return android.util.Base64.encodeToString(signer.publicKey(), android.util.Base64.NO_WRAP);
+            } catch (Exception unavailable) {
+                return null;
+            }
+        }
+
+        @JavascriptInterface
+        public String signSyncIdentity(String message) {
+            if (closed || signer == null || message == null || message.length() > 21_850) return null;
+            try {
+                byte[] bytes = android.util.Base64.decode(message, android.util.Base64.NO_WRAP);
+                String domain = new JSONArray(new String(bytes, java.nio.charset.StandardCharsets.UTF_8)).getString(0);
+                if (!domain.equals("teneo sync identity proof 3") && !domain.equals("teneo sync enrollment proof 3")) return null;
+                return android.util.Base64.encodeToString(signer.sign(bytes), android.util.Base64.NO_WRAP);
+            } catch (Exception unavailable) {
+                return null;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean saveTrustedSnapshot(String snapshot) {
+            return !closed &&
+                trustedRunToken != null &&
+                snapshot != null &&
+                snapshot.length() <= 16_384 &&
+                host.installTrust(snapshot, trustedRunToken);
+        }
+
+        @JavascriptInterface
+        public void trustedJoined() {
+            if (!closed && trustedRunToken != null) main.post(() -> {
+                if (!closed) host.trustedJoined();
+            });
+        }
+
+        @JavascriptInterface
+        public void enrollmentFingerprint(String fingerprint) {
+            if (!closed && fingerprint != null && fingerprint.matches("[0-9A-F]{4}(-[0-9A-F]{4}){2}")) {
+                host.enrollmentFingerprint(fingerprint);
+            }
         }
 
         /** The connected devices changed: a JSON array of {deviceId, name, platform} */
@@ -388,6 +462,11 @@ final class SyncRuntime {
         public int connect(String address) {
             SyncNetwork current = network;
             return current == null ? -1 : current.connect(address);
+        }
+
+        @JavascriptInterface
+        public boolean syncNetworkReady() {
+            return !closed && network != null;
         }
 
         /** The next connection event for the page, or null when it has taken them all: see PageInbox */

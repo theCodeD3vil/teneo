@@ -6,11 +6,17 @@
 // grant and read Teneo's keys from the Keychain. tinyjs signs with
 // `--options runtime` whenever there is a real identity; this checks that
 // it did, and that no entitlement undoes it.
-//   bun scripts/app-signature.ts PATH.app     (exits 1 with the problems)
+//   bun scripts/app-signature.ts PATH.app [ARCH CERTIFICATE_SHA1]
 /* oxlint-disable no-console -- a command-line script reports on the console */
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+
+import {
+  type MacReleaseArchitecture,
+  macReleaseArchitectures,
+  syncDeviceIdentityHelper,
+} from "./build-sync-device-identity.ts";
 
 /** Entitlements that open a hardened-runtime app back up. */
 export const loosening = [
@@ -53,8 +59,79 @@ function codesign(args: string[]): string {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
 
+interface ReleaseSignature {
+  arch: MacReleaseArchitecture;
+  /** The SHA-1 fingerprint returned by `security find-identity`, used only
+   *  to select the exact signing certificate. */
+  identity: string;
+}
+
+interface HelperInspection {
+  executable(path: string): boolean;
+  architectures(path: string): string[];
+  signedBy(path: string, identity: string): boolean;
+}
+
+const inspectHelper: HelperInspection = {
+  executable(path) {
+    const info = lstatSync(path, { throwIfNoEntry: false });
+    return info !== undefined && info.isFile() && (info.mode & 0o111) !== 0;
+  },
+  architectures(path) {
+    const result = spawnSync("lipo", ["-archs", path], { encoding: "utf8" });
+    return result.status === 0 ? result.stdout.trim().split(/\s+/) : [];
+  },
+  signedBy(path, identity) {
+    return (
+      spawnSync("codesign", [
+        "--verify",
+        "--strict",
+        `-R=certificate leaf = H"${identity}"`,
+        path,
+      ]).status === 0
+    );
+  },
+};
+
+export function isSigningCertificateHash(
+  identity: unknown,
+): identity is string {
+  return typeof identity === "string" && /^[0-9a-f]{40}$/i.test(identity);
+}
+
+/** Release-only checks. Teneo's own certificate has no Apple TeamIdentifier. */
+export function releaseHelperProblems(
+  app: string,
+  { arch, identity }: ReleaseSignature,
+  inspection = inspectHelper,
+): string[] {
+  if (!isSigningCertificateHash(identity))
+    return ["a release needs the exact code-signing certificate fingerprint"];
+  const helper = join(app, "Contents", "Helpers", syncDeviceIdentityHelper);
+  if (!inspection.executable(helper))
+    return [
+      `${syncDeviceIdentityHelper} is missing or isn't an executable file`,
+    ];
+  const problems: string[] = [];
+  const architectures = inspection.architectures(helper);
+  if (architectures.length !== 1 || architectures[0] !== arch)
+    problems.push(
+      `${syncDeviceIdentityHelper} must be built for ${arch} (found ${architectures.join(", ") || "no Mach-O architecture"})`,
+    );
+  if (!inspection.signedBy(app, identity))
+    problems.push("the app isn't signed with the release certificate");
+  if (!inspection.signedBy(helper, identity))
+    problems.push(
+      `${syncDeviceIdentityHelper} isn't signed with the release certificate`,
+    );
+  return problems;
+}
+
 /** Every problem with the signatures of an app bundle and the programs in it. */
-export function appSignatureProblems(app: string): string[] {
+export function appSignatureProblems(
+  app: string,
+  release?: ReleaseSignature,
+): string[] {
   const macos = join(app, "Contents", "MacOS");
   const helpers = join(app, "Contents", "Helpers");
   const executables = [
@@ -79,16 +156,28 @@ export function appSignatureProblems(app: string): string[] {
     spawnSync("codesign", ["--verify", "--strict", "--deep", app]).status !== 0
   )
     problems.push(`${app} doesn't pass codesign --verify --strict --deep`);
+  if (release) problems.push(...releaseHelperProblems(app, release));
   return problems;
 }
 
 if (import.meta.main) {
-  const app = process.argv[2];
-  if (!app) {
-    console.error("usage: bun scripts/app-signature.ts PATH.app");
+  const [app, archArg, identity, extra] = process.argv.slice(2);
+  const arch = macReleaseArchitectures.find((value) => value === archArg);
+  if (
+    !app ||
+    extra ||
+    ((archArg !== undefined || identity !== undefined) &&
+      (!arch || !isSigningCertificateHash(identity)))
+  ) {
+    console.error(
+      "usage: bun scripts/app-signature.ts PATH.app [arm64|x86_64 CERTIFICATE_SHA1]",
+    );
     process.exit(2);
   }
-  const problems = appSignatureProblems(app);
+  const problems = appSignatureProblems(
+    app,
+    arch && identity ? { arch, identity } : undefined,
+  );
   if (problems.length > 0) {
     console.error(
       `::error::${app}'s signature is wrong:\n  - ${problems.join("\n  - ")}`,

@@ -67,7 +67,7 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
     private SyncController controller;
     private SyncRuntime runtime;
     private int quickDeaths;
-    private boolean destroyed;
+    private volatile boolean destroyed;
     private boolean foreground;
     /** Debug builds: dial what Bonjour finds (false: only listen and announce) */
     private static boolean debugDialOut = true;
@@ -196,6 +196,18 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
 
     /** Start a runtime with the stored key. False when there is none to use. */
     private boolean begin() {
+        if (controller.hasTrusted()) {
+            try {
+                runtime = new SyncRuntime(this, this, null, controller.syncSecrets(), debugDialOut, null);
+                runtime.trustedConfiguration(controller.openTrustedRun());
+                runtime.start();
+                controller.running(true);
+                return true;
+            } catch (Exception unavailable) {
+                controller.problem("Trusted sync couldn't open. Turn sync off and pair again.");
+                return false;
+            }
+        }
         byte[] key = controller.vaultKey();
         if (key == null) {
             Log.w(TAG, "no sync key to start with: stopping");
@@ -208,6 +220,25 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         runtime.start();
         controller.running(true);
         return true;
+    }
+
+    @Override
+    public boolean installTrust(String snapshot, String runToken) {
+        return !destroyed && controller.installTrust(snapshot, runToken);
+    }
+
+    @Override
+    public void trustedJoined() {
+        if (destroyed) return;
+        controller.enrollmentFingerprint(null);
+        if (runtime != null) runtime.abandon();
+        runtime = null;
+        if (!begin()) stopSelf();
+    }
+
+    @Override
+    public void enrollmentFingerprint(String fingerprint) {
+        if (!destroyed) controller.enrollmentFingerprint(fingerprint);
     }
 
     // --- what the controller tells us
@@ -246,6 +277,17 @@ public final class SyncService extends Service implements SyncRuntime.Host, Sync
         if (runtime != null) runtime.abandon();
         runtime = null;
         controller.running(false);
+        controller.enrollmentFingerprint(null);
+        if (reason.startsWith("trusted enrollment failed")) {
+            controller.unpair();
+            controller.problem(
+                reason.endsWith("hardware not available")
+                    ? "This phone doesn't support a hardware-protected sync identity."
+                    : "Couldn't join. Check the local network and show a new invitation on the primary Mac."
+            );
+            stopSelf();
+            return;
+        }
         // the page says so when the Mac refused the code it was joining with
         if (controller.pairingAddresses() != null && reason.startsWith("the pairing code was refused")) {
             controller.pairingRefused();

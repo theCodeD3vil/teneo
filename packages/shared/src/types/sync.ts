@@ -16,6 +16,8 @@ export interface SyncDevice {
   /** it stopped syncing with this device, by its user's choice: it comes
    *  back once this device is paired again */
   disconnectedUs: boolean;
+  /** A local disconnect is not vault-wide revocation. */
+  disconnectedHere?: boolean;
 }
 
 /** How sync is going on this device, as the Sync tab shows it. */
@@ -33,6 +35,14 @@ export interface SyncStatus {
   deviceName: string;
   /** Devices paired with this one, connected or not. */
   devices: SyncDevice[];
+  trustedUpgradeAvailable?: boolean;
+  trustedJoinFingerprint?: string;
+  trust?: {
+    primary: boolean;
+    generation: number;
+    pendingDeviceIds: string[];
+    approval: { deviceId: string; fingerprint: string } | null;
+  };
 }
 
 /** What a new device needs to join this one. Both unlock the whole history:

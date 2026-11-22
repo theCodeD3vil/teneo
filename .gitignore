@@ -13,6 +13,7 @@ dist-ssr
 .build
 .turbo
 *.local
+/apps/desktop/executables/macos-*/teneo-sync-device-identity
 
 # Editor directories and files
 .vscode/*
