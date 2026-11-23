@@ -24,12 +24,14 @@ const emit = defineEmits<{ cancel: []; confirm: [] }>();
         if (!open) emit('cancel');
       }
     ">
-    <AlertDialogContent v-if="prompt" class="ring-0">
+    <AlertDialogContent v-if="prompt">
       <AlertDialogHeader>
-        <AlertDialogTitle>{{ prompt.title }}</AlertDialogTitle>
-        <AlertDialogDescription>{{
-          prompt.description
-        }}</AlertDialogDescription>
+        <AlertDialogTitle>
+          {{ prompt.title }}
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          {{ prompt.description }}
+        </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogCancel>Cancel</AlertDialogCancel>

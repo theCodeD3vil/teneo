@@ -7,6 +7,8 @@ import { disableBrowserBehaviorInProduction } from "../utils/browser-behavior";
 import { syncThemeWithSystem } from "../utils/theme";
 import SettingsApp from "./SettingsApp.vue";
 
+import "./settings.css";
+
 syncThemeWithSystem();
 disableBrowserBehaviorInProduction();
 

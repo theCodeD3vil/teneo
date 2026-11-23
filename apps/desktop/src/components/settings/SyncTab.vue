@@ -605,11 +605,8 @@ async function copyInvite(): Promise<void> {
     <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
 
     <AlertDialog v-model:open="isPairingOpen">
-      <AlertDialogContent
-        size="sm"
-        class="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 ring-0 data-[size=sm]:max-w-md">
-        <AlertDialogHeader
-          class="grid-rows-none justify-items-start gap-2 px-6 pt-6 pb-4 text-left">
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
           <SettingsStatus v-if="pendingApproval" tone="warning">
             Approval required
           </SettingsStatus>
@@ -632,7 +629,8 @@ async function copyInvite(): Promise<void> {
             and expires after 10 minutes.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div class="grid gap-4 overflow-y-auto px-6 pt-1 pb-6">
+        <div
+          class="settings-dialog-body settings-dialog-scroll grid gap-4 overflow-y-auto">
           <p
             v-if="!pairing && !pairingError"
             role="status"
@@ -692,8 +690,7 @@ async function copyInvite(): Promise<void> {
             {{ pairingError }}
           </p>
         </div>
-        <AlertDialogFooter
-          class="border-foreground/10 flex-row flex-wrap justify-end border-t px-6 py-4 group-data-[size=sm]/alert-dialog-content:flex">
+        <AlertDialogFooter>
           <template v-if="pendingApproval">
             <Button variant="outline" @click="respondToEnrollment(false)">
               Reject
@@ -714,10 +711,7 @@ async function copyInvite(): Promise<void> {
     </AlertDialog>
 
     <AlertDialog v-model:open="isDeviceOpen">
-      <AlertDialogContent
-        v-if="shownDevice"
-        size="sm"
-        class="ring-0 data-[size=sm]:max-w-md">
+      <AlertDialogContent v-if="shownDevice" size="sm">
         <template v-if="!isConfirmingDisconnect">
           <AlertDialogHeader>
             <AlertDialogTitle>{{ shownDevice.name }}</AlertDialogTitle>
@@ -727,31 +721,34 @@ async function copyInvite(): Promise<void> {
               code.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <dl class="bg-foreground/5 grid gap-2.5 rounded-lg px-3 py-3 text-sm">
-            <div
-              v-for="detail in deviceDetails"
-              :key="detail.label"
-              class="flex items-baseline justify-between gap-4">
-              <dt class="text-foreground/60 shrink-0 text-xs">
-                {{ detail.label }}
-              </dt>
-              <dd class="text-foreground/80 min-w-0 truncate text-right">
-                {{ detail.value }}
-              </dd>
-            </div>
-          </dl>
-          <Button
-            v-if="status.trust?.primary"
-            variant="outline"
-            @click="
-              rotation = {
-                deviceId: shownDevice.deviceId,
-                name: shownDevice.name,
-              };
-              openDeviceId = null;
-            ">
-            Revoke and rotate
-          </Button>
+          <div class="settings-dialog-body grid gap-3">
+            <dl
+              class="bg-foreground/5 grid gap-2.5 rounded-lg px-3 py-3 text-sm">
+              <div
+                v-for="detail in deviceDetails"
+                :key="detail.label"
+                class="flex items-baseline justify-between gap-4">
+                <dt class="text-foreground/60 shrink-0 text-xs">
+                  {{ detail.label }}
+                </dt>
+                <dd class="text-foreground/80 min-w-0 truncate text-right">
+                  {{ detail.value }}
+                </dd>
+              </div>
+            </dl>
+            <Button
+              v-if="status.trust?.primary"
+              variant="outline"
+              @click="
+                rotation = {
+                  deviceId: shownDevice.deviceId,
+                  name: shownDevice.name,
+                };
+                openDeviceId = null;
+              ">
+              Revoke and rotate
+            </Button>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Done</AlertDialogCancel>
             <Button
@@ -782,7 +779,9 @@ async function copyInvite(): Promise<void> {
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
+          <p v-if="error" class="settings-dialog-body text-destructive text-sm">
+            {{ error }}
+          </p>
           <AlertDialogFooter>
             <Button
               variant="outline"
@@ -839,7 +838,10 @@ async function copyInvite(): Promise<void> {
             they reconnect here. This won’t erase items already shared.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <p v-if="error" class="text-destructive text-sm" role="alert">
+        <p
+          v-if="error"
+          class="settings-dialog-body text-destructive text-sm"
+          role="alert">
           {{ error }}
         </p>
         <AlertDialogFooter>
@@ -855,7 +857,7 @@ async function copyInvite(): Promise<void> {
     </AlertDialog>
 
     <AlertDialog v-model:open="isTurnOffWarningOpen">
-      <AlertDialogContent class="ring-0">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Turn off sync?</AlertDialogTitle>
           <AlertDialogDescription>
