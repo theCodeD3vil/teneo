@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -136,28 +137,52 @@ export function prepareTinyjs(arches: readonly ("arm64" | "x86_64")[]) {
       ),
     );
 
+    // Match the pinned TinyJS setup.sh: Apple's optional AI bridge is only
+    // built against SDKs that ship FoundationModels.
+    const sdk = execFileSync("/usr/bin/xcrun", ["--show-sdk-path"], {
+      encoding: "utf8",
+    }).trim();
+    const buildAppleAi =
+      process.env.TINYJS_AI !== "0" &&
+      existsSync(
+        join(sdk, "System/Library/Frameworks/FoundationModels.framework"),
+      );
+    const frameworkFlags = frameworks.flatMap((name) => ["-framework", name]);
     const slices = arches.map((arch) => {
       const target = `${arch}-apple-macos14.0`;
       const launcherObject = join(work, `launcher-${arch}.o`);
       const aiObject = join(work, `ai-${arch}.o`);
       const slice = join(work, `launcher-${arch}`);
+      const launcherArgs = [
+        "-std=c++17",
+        "-x",
+        "objective-c++",
+        "-mmacosx-version-min=14.0",
+        "-arch",
+        arch,
+        `-I${join(native, "include")}`,
+        launcherSource,
+      ];
+      if (!buildAppleAi) {
+        execFileSync(
+          "/usr/bin/xcrun",
+          [
+            "clang++",
+            ...launcherArgs,
+            "-o",
+            slice,
+            ...frameworkFlags,
+            "-weak_framework",
+            "ScreenCaptureKit",
+            "-ldl",
+          ],
+          { stdio: "inherit" },
+        );
+        return slice;
+      }
       execFileSync(
         "/usr/bin/xcrun",
-        [
-          "clang++",
-          "-std=c++17",
-          "-c",
-          "-x",
-          "objective-c++",
-          "-DTINYJS_AI",
-          "-mmacosx-version-min=14.0",
-          "-arch",
-          arch,
-          `-I${join(native, "include")}`,
-          launcherSource,
-          "-o",
-          launcherObject,
-        ],
+        ["clang++", "-c", "-DTINYJS_AI", ...launcherArgs, "-o", launcherObject],
         { stdio: "inherit" },
       );
       execFileSync(
@@ -185,7 +210,7 @@ export function prepareTinyjs(arches: readonly ("arm64" | "x86_64")[]) {
           "-lc++",
           "-target",
           target,
-          ...frameworks.flatMap((name) => ["-framework", name]),
+          ...frameworkFlags,
           "-Xlinker",
           "-weak_framework",
           "-Xlinker",
