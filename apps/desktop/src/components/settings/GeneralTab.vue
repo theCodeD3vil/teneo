@@ -39,7 +39,7 @@ function changeLaunchAtLogin(enabled: boolean): void {
 </script>
 
 <template>
-  <div class="mx-auto grid max-w-xl gap-y-6">
+  <div class="grid gap-y-6">
     <SettingsSection>
       <template #section-title>Startup</template>
 
@@ -61,7 +61,10 @@ function changeLaunchAtLogin(enabled: boolean): void {
           :model-value="launchAtLogin"
           @update:model-value="changeLaunchAtLogin" />
       </SettingsField>
+    </SettingsSection>
 
+    <SettingsSection>
+      <template #section-title>Updates</template>
       <SettingsField>
         <template #label>Check for updates</template>
         <template #description>

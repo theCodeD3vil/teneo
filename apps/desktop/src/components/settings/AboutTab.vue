@@ -9,6 +9,7 @@ import { version } from "../../../tinyjs.json";
 import ExternalLink from "./ExternalLink.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
+import SettingsStatus from "./SettingsStatus.vue";
 
 const checkForUpdateMutation = useMutation({
   mutationFn: async () => {
@@ -42,10 +43,10 @@ const updateStatus = computed(() => {
 });
 </script>
 <template>
-  <div class="mx-auto grid max-w-xl gap-y-6">
+  <div class="grid gap-y-6">
     <SettingsSection v-if="foundOn">
       <template #section-title>Security notice</template>
-      <p class="text-foreground/70 text-sm leading-relaxed">
+      <p class="text-foreground/80 px-4 py-3 text-sm leading-relaxed">
         On {{ foundOn }} Teneo found and removed harmful software that a fake
         Teneo 0.4.2 had installed on this Mac. It could read what you copied.
         Change the passwords and API keys you copied since 16 November 2026, and
@@ -65,11 +66,25 @@ const updateStatus = computed(() => {
         <template #label>Made by</template>
         <ExternalLink name="c0d3v1l" url="https://michaelnji.codes" />
       </SettingsField>
+    </SettingsSection>
 
+    <SettingsSection>
+      <template #section-title>Updates</template>
       <SettingsField>
         <template #label>Software update</template>
-        <template v-if="updateStatus" #description>
-          {{ updateStatus }}
+        <template #status>
+          <SettingsStatus
+            v-if="updateStatus"
+            :tone="
+              checkForUpdateMutation.isError.value
+                ? 'warning'
+                : checkForUpdateMutation.data.value?.available
+                  ? 'neutral'
+                  : 'success'
+            "
+            live>
+            {{ updateStatus }}
+          </SettingsStatus>
         </template>
         <Button
           variant="outline"

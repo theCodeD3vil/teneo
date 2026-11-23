@@ -1,5 +1,7 @@
 // Until the user finishes the setup window, Teneo stays out of the menu bar:
 // no icon, and no shortcut to open the panel
+import config from "../tinyjs.json";
+import { menuBarIcon } from "./app-identity";
 import { devName } from "./dev-run";
 import { syncOpenPanelShortcut } from "./global-shortcut";
 import { appPaths } from "./paths";
@@ -19,8 +21,13 @@ async function isSetupComplete(app: TinyApp): Promise<boolean> {
 
 async function showInMenuBar(app: TinyApp): Promise<void> {
   const { resources } = await appPaths(app);
-  // full-colour duotone mark, so template: false keeps the two blues
-  app.tray.set({ icon: `${resources}/tray.png`, template: false });
+  // Keep the variant's colours rather than using a monochrome template.
+  const icon = menuBarIcon(config.id, Boolean(tjs.env.TINYJS_ICON));
+  app.tray.set({
+    icon: `${resources}/${icon}`,
+    template: false,
+    tooltip: config.title,
+  });
   await syncOpenPanelShortcut(app);
 }
 

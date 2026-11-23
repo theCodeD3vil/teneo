@@ -6,7 +6,7 @@ import type {
 } from "@teneo/shared/types/clipboard";
 import { textPreviewLength } from "@teneo/shared/types/clipboard";
 
-import type { PairResult, TeneoClient } from "../types/client";
+import type { PairOptions, PairResult, TeneoClient } from "../types/client";
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
 import { FakeSync } from "./fake-sync";
@@ -234,8 +234,8 @@ export class FakeClient implements TeneoClient {
     return this.sync.onSyncStatusChanged(listener);
   }
 
-  pair(code: string): Promise<PairResult> {
-    return this.sync.pair(code);
+  pair(code: string, options?: PairOptions): Promise<PairResult> {
+    return this.sync.pair(code, options);
   }
 
   unpair(): Promise<void> {

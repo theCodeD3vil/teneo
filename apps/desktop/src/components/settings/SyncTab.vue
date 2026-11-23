@@ -17,7 +17,6 @@ import {
 } from "@teneo/ui/components/alert-dialog";
 import { Button } from "@teneo/ui/components/button";
 import { Input } from "@teneo/ui/components/input";
-import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { renderSVG } from "uqr";
 import { computed, ref, watch } from "vue";
@@ -25,7 +24,9 @@ import AlertCircleIcon from "~icons/tabler/alert-circle";
 import CheckIcon from "~icons/tabler/check";
 import ChevronRightIcon from "~icons/tabler/chevron-right";
 import CopyIcon from "~icons/tabler/copy";
+import LaptopIcon from "~icons/tabler/device-laptop";
 
+import { useDelayedBusy } from "@/composables/useDelayedBusy";
 import { usePermissionConfirmation } from "@/composables/usePermissionConfirmation";
 import { useSettings } from "@/composables/useSettings";
 import { messageOf, useSyncStatus } from "@/composables/useSyncStatus";
@@ -33,6 +34,7 @@ import { messageOf, useSyncStatus } from "@/composables/useSyncStatus";
 import PermissionConfirmation from "./PermissionConfirmation.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
+import SettingsStatus from "./SettingsStatus.vue";
 
 const { settings } = useSettings();
 const {
@@ -77,22 +79,25 @@ async function joinWithCode(): Promise<void> {
   }
 }
 
-// --- adding a device. The code unlocks the whole history, so it shows only
-// when asked for, in a modal, and is dropped when the modal closes or sync ends.
+// --- adding a device. The join code unlocks the whole history, so it only
+// appears inside this dialog and is dropped when the dialog closes or sync ends.
 
 const isPairingOpen = ref(false);
 const pairing = ref<PairingInfo | null>(null);
 const isLoadingPairing = ref(false);
+const showPairingProgress = useDelayedBusy(isLoadingPairing);
 const pairingError = ref("");
+const pendingApproval = computed(() =>
+  pairing.value ? status.value?.trust?.approval : undefined,
+);
+const approvalHeading = ref<HTMLElement | null>(null);
+watch(approvalHeading, (heading) => heading?.focus(), { flush: "post" });
 // two even rows of groups, so the code never breaks in the middle of one
 const codeLines = computed(() => {
   const groups = pairing.value?.recoveryCode.split("-") ?? [];
   const half = Math.ceil(groups.length / 2);
   return [groups.slice(0, half).join("-"), groups.slice(half).join("-")];
 });
-// The QR code is a one-time key, good for minutes; the join code is the
-// vault's own key, for good, so it shows only when asked for
-const isCodeShown = ref(false);
 const isCodeCopied = ref(false);
 const copiedIconTimeout = 1500;
 let copiedTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -117,7 +122,6 @@ watch(isPairingOpen, (isOpen) => {
   if (status.value?.trust) void cancelEnrollment().catch(() => undefined);
   pairing.value = null;
   pairingError.value = "";
-  isCodeShown.value = false;
   clearTimeout(copiedTimeout);
   isCodeCopied.value = false;
 });
@@ -165,12 +169,20 @@ const connectedCount = computed(
   () => status.value?.devices.filter((device) => device.connected).length ?? 0,
 );
 
-const summary = computed(() => {
-  if (!status.value?.running) return isBusy.value ? "Starting…" : "Paused";
-  if (connectedCount.value === 0) return "Looking for other devices…";
+const syncState = computed(() => {
+  if (status.value?.problem)
+    return { label: "Needs attention", tone: "warning" } as const;
+  if (!status.value?.running)
+    return { label: "Starting", tone: "neutral" } as const;
+  if (connectedCount.value === 0)
+    return { label: "Looking for devices", tone: "neutral" } as const;
+  return { label: "Connected", tone: "success" } as const;
+});
+
+const connectedSummary = computed(() => {
   return connectedCount.value === 1
-    ? "Connected to 1 device"
-    : `Connected to ${connectedCount.value} devices`;
+    ? "Syncing with 1 device over Wi-Fi."
+    : `Syncing with ${connectedCount.value} devices over Wi-Fi.`;
 });
 
 const platformNames: Record<string, string> = {
@@ -298,6 +310,7 @@ async function confirmRotation(): Promise<void> {
 async function respondToEnrollment(accept: boolean): Promise<void> {
   const request = status.value?.trust?.approval;
   if (!request) return;
+  pairingError.value = "";
   try {
     await answerEnrollment(request.deviceId, request.fingerprint, accept);
     isPairingOpen.value = false;
@@ -318,7 +331,7 @@ async function copyInvite(): Promise<void> {
 </script>
 
 <template>
-  <div v-if="status" class="mx-auto grid max-w-xl gap-y-6">
+  <div v-if="status" class="grid gap-y-6">
     <!-- sync is off -->
     <template v-if="!status.enabled">
       <SettingsSection>
@@ -327,10 +340,9 @@ async function copyInvite(): Promise<void> {
         <SettingsField>
           <template #label>Sync with your other devices</template>
           <template #description> Over your Wi-Fi, encrypted </template>
-          <Spinner v-if="isBusy" />
           <Button
-            v-else
             size="sm"
+            :disabled="isBusy"
             @click="confirmSyncAccess('Turn on sync', turnOn)"
             >Turn on</Button
           >
@@ -386,35 +398,60 @@ async function copyInvite(): Promise<void> {
       <SettingsSection>
         <template #section-title>Sync</template>
 
-        <SettingsField>
-          <template #label>Sync is on</template>
-          <template #description>
-            {{ summary }}
-            <span v-if="status.problem" class="text-destructive block">
-              {{ status.problem }}
-            </span>
-            <span v-else-if="!status.running" class="block">
-              Resume sync to allow Keychain and local network access for this
-              session.
-            </span>
-            <span class="mt-4 block">Shown as “{{ status.deviceName }}”</span>
-          </template>
-          <Spinner v-if="isBusy" />
-          <div v-else class="flex flex-wrap justify-end gap-2">
+        <div class="grid gap-4 px-4 py-4">
+          <div
+            class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+            <div class="grid min-w-0 flex-1 basis-72 gap-2">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h4 class="text-sm font-semibold">Sync on this Mac</h4>
+                <SettingsStatus :tone="syncState.tone" live>
+                  {{ syncState.label }}
+                </SettingsStatus>
+              </div>
+              <p class="text-muted-foreground text-sm">
+                <template v-if="status.problem">{{ status.problem }}</template>
+                <template v-else-if="!status.running">
+                  Waiting for access to the sync key and local network.
+                </template>
+                <template v-else-if="connectedCount">
+                  {{ connectedSummary }}
+                </template>
+                <template v-else>
+                  Keep your devices on the same Wi-Fi network to sync.
+                </template>
+              </p>
+            </div>
             <Button
-              v-if="!status.running"
+              v-if="!status.running && status.problem"
               size="sm"
-              @click="confirmSyncAccess('Resume sync', resume)"
-              >Resume sync</Button
-            >
-            <Button
-              variant="outline"
-              size="sm"
-              @click="isTurnOffWarningOpen = true">
-              Turn off
+              :disabled="isBusy"
+              @click="confirmSyncAccess('Resume sync', resume)">
+              Resume sync
             </Button>
           </div>
-        </SettingsField>
+          <div
+            class="border-foreground/10 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-3">
+            <div class="flex min-w-0 items-center gap-2.5">
+              <LaptopIcon
+                aria-hidden="true"
+                class="text-muted-foreground size-4 shrink-0" />
+              <dl class="min-w-0 text-xs">
+                <dt class="text-muted-foreground">Device name</dt>
+                <dd class="text-foreground/85 font-medium wrap-break-word">
+                  {{ status.deviceName }}
+                </dd>
+              </dl>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="text-muted-foreground"
+              :disabled="isBusy"
+              @click="isTurnOffWarningOpen = true">
+              Turn off sync
+            </Button>
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection>
@@ -483,8 +520,7 @@ async function copyInvite(): Promise<void> {
           <template #description>
             Items like API keys stay on this Mac when off
           </template>
-          <Spinner v-if="isBusy" />
-          <Switch v-else v-model="syncSecrets" />
+          <Switch v-model="syncSecrets" :disabled="isBusy" />
         </SettingsField>
       </SettingsSection>
     </template>
@@ -569,102 +605,113 @@ async function copyInvite(): Promise<void> {
     <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
 
     <AlertDialog v-model:open="isPairingOpen">
-      <AlertDialogContent size="sm" class="ring-0 data-[size=sm]:max-w-md">
+      <AlertDialogContent size="sm">
         <AlertDialogHeader>
-          <AlertDialogTitle>Add a device</AlertDialogTitle>
+          <SettingsStatus v-if="pendingApproval" tone="warning">
+            Approval required
+          </SettingsStatus>
+          <AlertDialogTitle>
+            <span
+              v-if="pendingApproval"
+              ref="approvalHeading"
+              tabindex="-1"
+              class="outline-none">
+              Verify the joining device
+            </span>
+            <template v-else>Add a device</template>
+          </AlertDialogTitle>
+          <AlertDialogDescription v-if="pendingApproval">
+            Approve only if the fingerprint below matches the one in Teneo on
+            the joining device.
+          </AlertDialogDescription>
+          <AlertDialogDescription v-else>
+            Scan the QR code with Teneo on your phone. The QR code works once
+            and expires after 10 minutes.
+          </AlertDialogDescription>
         </AlertDialogHeader>
-        <div class="grid min-h-44 content-center justify-items-center gap-4">
-          <Spinner v-if="isLoadingPairing" />
+        <div
+          class="settings-dialog-body settings-dialog-scroll grid gap-4 overflow-y-auto">
+          <p
+            v-if="!pairing && !pairingError"
+            role="status"
+            class="text-foreground/60 grid min-h-44 place-items-center text-sm">
+            {{ showPairingProgress ? "Preparing the pairing code…" : "" }}
+          </p>
+          <dl
+            v-else-if="pendingApproval"
+            class="bg-foreground/5 grid gap-2 rounded-lg px-4 py-4">
+            <dt class="text-foreground/60 text-xs font-medium">
+              Device fingerprint
+            </dt>
+            <dd class="font-mono text-xl font-semibold tracking-wide">
+              {{ pendingApproval.fingerprint }}
+            </dd>
+          </dl>
           <template v-else-if="pairing">
             <!-- the SVG is made here from the link, never from page input -->
             <div
               role="img"
               aria-label="QR code for adding a device"
-              class="size-44 overflow-hidden rounded-lg bg-white p-1 [&>svg]:block [&>svg]:size-full"
+              class="mx-auto aspect-square w-full max-w-44 overflow-hidden rounded-lg bg-white p-1 [&>svg]:block [&>svg]:size-full"
               v-html="qrCode" />
-            <p class="text-foreground/60 text-center text-xs">
-              Scan it with Teneo on your phone. It works once, for the next 10
-              minutes.
-            </p>
-            <template v-if="status.trust">
-              <div v-if="status.trust.approval" class="grid gap-2 text-center">
-                <div role="status">
-                  <p>
-                    Approve only if this fingerprint matches the one on the
-                    joining device.
-                  </p>
-                  <code class="font-semibold">{{
-                    status.trust.approval.fingerprint
-                  }}</code>
+            <template v-if="!status.trust && pairing.recoveryCode">
+              <div
+                class="bg-foreground/5 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3">
+                <div>
+                  <p class="text-foreground/60 mb-1 text-xs">Join code</p>
+                  <code
+                    class="text-foreground/80 font-mono text-xs leading-5 tracking-wide select-none">
+                    <span v-for="line in codeLines" :key="line" class="block">
+                      {{ line }}
+                    </span>
+                  </code>
                 </div>
-                <div class="flex justify-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    @click="respondToEnrollment(false)"
-                    >Reject</Button
-                  >
-                  <Button size="sm" @click="respondToEnrollment(true)"
-                    >Approve device</Button
-                  >
-                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="
+                    isCodeCopied ? 'Join code copied' : 'Copy join code'
+                  "
+                  @click="copyRecoveryCode">
+                  <CheckIcon v-if="isCodeCopied" />
+                  <CopyIcon v-else />
+                </Button>
               </div>
-              <Button v-else size="sm" variant="outline" @click="copyInvite">
-                {{
-                  isCodeCopied ? "Invitation copied" : "Copy invitation link"
-                }}
-              </Button>
+              <Alert class="bg-warning/10 dark:bg-warning/15 w-full border-0!">
+                <AlertCircleIcon aria-hidden="true" class="text-warning!" />
+                <AlertTitle>Keep this code private</AlertTitle>
+                <AlertDescription class="text-foreground/60 text-xs">
+                  Anyone with it can read your clipboard history.
+                </AlertDescription>
+              </Alert>
             </template>
-            <Button
-              v-else-if="!isCodeShown"
-              variant="outline"
-              size="sm"
-              @click="isCodeShown = true">
-              Show join code
-            </Button>
-            <div
-              v-if="pairing.recoveryCode && isCodeShown"
-              class="bg-foreground/5 flex w-full items-center justify-center gap-3 rounded-lg px-3 py-3">
-              <code
-                class="text-foreground/80 font-mono text-xs leading-5 tracking-wide select-none">
-                <span v-for="line in codeLines" :key="line" class="block">
-                  {{ line }}
-                </span>
-              </code>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Copy join code"
-                @click="copyRecoveryCode">
-                <CheckIcon v-if="isCodeCopied" />
-                <CopyIcon v-else />
-              </Button>
-            </div>
-            <Alert
-              v-if="pairing.recoveryCode && isCodeShown"
-              class="bg-warning/10 dark:bg-warning/15 w-full border-0!">
-              <AlertCircleIcon class="text-warning!" />
-              <AlertTitle>Keep this code private</AlertTitle>
-              <AlertDescription class="text-foreground/60 text-xs">
-                Anyone with it can read your clipboard history.
-              </AlertDescription>
-            </Alert>
           </template>
-          <p v-if="pairingError" class="text-destructive text-sm">
+          <p v-if="pairingError" role="alert" class="text-destructive text-sm">
             {{ pairingError }}
           </p>
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel class="col-span-full">Done</AlertDialogCancel>
+          <template v-if="pendingApproval">
+            <Button variant="outline" @click="respondToEnrollment(false)">
+              Reject
+            </Button>
+            <Button @click="respondToEnrollment(true)">Approve device</Button>
+          </template>
+          <template v-else>
+            <Button
+              v-if="pairing && status.trust"
+              variant="outline"
+              @click="copyInvite">
+              {{ isCodeCopied ? "Invitation copied" : "Copy invitation link" }}
+            </Button>
+            <AlertDialogCancel>Done</AlertDialogCancel>
+          </template>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
 
     <AlertDialog v-model:open="isDeviceOpen">
-      <AlertDialogContent
-        v-if="shownDevice"
-        size="sm"
-        class="ring-0 data-[size=sm]:max-w-md">
+      <AlertDialogContent v-if="shownDevice" size="sm">
         <template v-if="!isConfirmingDisconnect">
           <AlertDialogHeader>
             <AlertDialogTitle>{{ shownDevice.name }}</AlertDialogTitle>
@@ -674,31 +721,34 @@ async function copyInvite(): Promise<void> {
               code.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <dl class="bg-foreground/5 grid gap-2.5 rounded-lg px-3 py-3 text-sm">
-            <div
-              v-for="detail in deviceDetails"
-              :key="detail.label"
-              class="flex items-baseline justify-between gap-4">
-              <dt class="text-foreground/60 shrink-0 text-xs">
-                {{ detail.label }}
-              </dt>
-              <dd class="text-foreground/80 min-w-0 truncate text-right">
-                {{ detail.value }}
-              </dd>
-            </div>
-          </dl>
-          <Button
-            v-if="status.trust?.primary"
-            variant="outline"
-            @click="
-              rotation = {
-                deviceId: shownDevice.deviceId,
-                name: shownDevice.name,
-              };
-              openDeviceId = null;
-            ">
-            Revoke and rotate
-          </Button>
+          <div class="settings-dialog-body grid gap-3">
+            <dl
+              class="bg-foreground/5 grid gap-2.5 rounded-lg px-3 py-3 text-sm">
+              <div
+                v-for="detail in deviceDetails"
+                :key="detail.label"
+                class="flex items-baseline justify-between gap-4">
+                <dt class="text-foreground/60 shrink-0 text-xs">
+                  {{ detail.label }}
+                </dt>
+                <dd class="text-foreground/80 min-w-0 truncate text-right">
+                  {{ detail.value }}
+                </dd>
+              </div>
+            </dl>
+            <Button
+              v-if="status.trust?.primary"
+              variant="outline"
+              @click="
+                rotation = {
+                  deviceId: shownDevice.deviceId,
+                  name: shownDevice.name,
+                };
+                openDeviceId = null;
+              ">
+              Revoke and rotate
+            </Button>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Done</AlertDialogCancel>
             <Button
@@ -729,7 +779,9 @@ async function copyInvite(): Promise<void> {
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
+          <p v-if="error" class="settings-dialog-body text-destructive text-sm">
+            {{ error }}
+          </p>
           <AlertDialogFooter>
             <Button
               variant="outline"
@@ -786,7 +838,10 @@ async function copyInvite(): Promise<void> {
             they reconnect here. This won’t erase items already shared.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <p v-if="error" class="text-destructive text-sm" role="alert">
+        <p
+          v-if="error"
+          class="settings-dialog-body text-destructive text-sm"
+          role="alert">
           {{ error }}
         </p>
         <AlertDialogFooter>
@@ -802,7 +857,7 @@ async function copyInvite(): Promise<void> {
     </AlertDialog>
 
     <AlertDialog v-model:open="isTurnOffWarningOpen">
-      <AlertDialogContent class="ring-0">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Turn off sync?</AlertDialogTitle>
           <AlertDialogDescription>

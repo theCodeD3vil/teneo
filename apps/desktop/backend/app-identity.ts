@@ -1,7 +1,7 @@
 // Teneo is built as three apps, so a beta and a dev run install and run
 // beside the full release: each has its own name, and its own id, which is
 // what macOS keys its data folder, Keychain entries and permissions by. Each
-// has its own icon too, so they are told apart in Finder and the Dock. No
+// has its own icon too, so they are told apart in Finder, the Dock and menu bar. No
 // globals in here, so the scripts and the tests can import it.
 export type AppVariant = "production" | "beta" | "debug";
 
@@ -24,6 +24,12 @@ const releases = "https://github.com/theCodeD3vil/teneo/releases";
 export const betaChannelTag = "beta-channel";
 
 const productionUpdateUrl = `${releases}/latest/download/manifest.json`;
+
+const menuBarIcons: Record<AppVariant, string> = {
+  production: "tray.png",
+  beta: "tray-beta.png",
+  debug: "tray-debug.png",
+};
 
 export const appIdentities: Record<AppVariant, AppIdentity> = {
   production: {
@@ -54,6 +60,14 @@ export function isBetaVersion(version: string): boolean {
 /** The app a release of this version is: a beta version is Teneo Beta. */
 export function releaseVariant(version: string): "production" | "beta" {
   return isBetaVersion(version) ? "beta" : "production";
+}
+
+/** A debug run keeps its debug icon even when using another build's data. */
+export function menuBarIcon(appId: string, dev: boolean): string {
+  if (dev || appId === appIdentities.debug.id) return menuBarIcons.debug;
+  return appId === appIdentities.beta.id
+    ? menuBarIcons.beta
+    : menuBarIcons.production;
 }
 
 export interface TinyConfig {

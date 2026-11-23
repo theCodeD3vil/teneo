@@ -12,6 +12,7 @@ import { devName, isDevRun } from "./dev-run";
 import {
   classifierModel,
   gemmaModel,
+  localAiModelsDirectory,
   maxInferenceBytes,
 } from "./local-ai-model";
 import { credentialCandidates } from "./local-ai-secrets";
@@ -181,7 +182,7 @@ function isSandboxReady(): Promise<boolean> {
 }
 
 const modelFolder = async (app: TinyApp) =>
-  `${(await appPaths(app)).data}/models`;
+  `${(await appPaths(app)).data}/${localAiModelsDirectory}`;
 const gemmaPath = async (app: TinyApp) =>
   `${await modelFolder(app)}/${gemmaModel.filename}`;
 const classifierPaths = async (app: TinyApp) => {
@@ -619,7 +620,11 @@ async function downloadFileWithCurl(
   }, 400);
   try {
     const result = await child.wait();
-    return result.exit_status === 0;
+    if (result.exit_status !== 0) return false;
+    // A transfer can finish between ticks. Report the final size so the UI
+    // can show the verification step even for fast downloads.
+    onProgress(Math.min(await bytesAt(destination), expectedBytes));
+    return true;
   } finally {
     clearInterval(progress);
   }

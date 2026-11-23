@@ -7,12 +7,17 @@ defineProps<{
 <template>
   <!-- a disabled fieldset disables every control inside it, whatever the slot holds -->
   <fieldset :disabled="disabled" class="min-w-0 disabled:opacity-50">
-    <div class="flex items-center justify-between gap-4 px-3 py-2.5">
-      <div class="grid gap-0.5">
-        <span class="text-foreground/80 text-sm font-light">
-          <slot name="label" />
-        </span>
-        <span v-if="$slots.description" class="text-foreground/60 text-xs">
+    <div class="flex min-h-12 items-center justify-between gap-6 px-4 py-3">
+      <div class="grid min-w-0 gap-1">
+        <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <span class="text-sm font-medium">
+            <slot name="label" />
+          </span>
+          <slot name="status" />
+        </div>
+        <span
+          v-if="$slots.description"
+          class="text-muted-foreground max-w-md text-xs leading-relaxed">
           <slot name="description" />
         </span>
       </div>
@@ -20,7 +25,7 @@ defineProps<{
       <slot />
     </div>
     <!-- full-width extra below the row, e.g. a progress bar -->
-    <div v-if="$slots.footer" class="px-3 pb-2.5">
+    <div v-if="$slots.footer" class="px-4 pb-3">
       <slot name="footer" />
     </div>
   </fieldset>

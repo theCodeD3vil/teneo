@@ -28,6 +28,23 @@
   }
 }
 
+/* The native Settings and Update windows are frameless. Draw their shared
+   edge without moving the contents or interfering with drag and resize. */
+.window-frame {
+  position: relative;
+}
+.window-frame::after {
+  content: "";
+  position: absolute;
+  z-index: 10;
+  /* Match the visible macOS corner instead of using a card radius. The
+     one-pixel inset keeps the antialiased stroke inside the native mask. */
+  inset: 1px;
+  pointer-events: none;
+  border: 1px solid color-mix(in oklch, var(--foreground) 22%, transparent);
+  border-radius: 14px;
+}
+
 /* Code in the text preview. Each token colour is mixed toward the text colour,
    which darkens it on the light panel and softens it on the dark one. */
 .hljs {

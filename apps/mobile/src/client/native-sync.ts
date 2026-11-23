@@ -1,6 +1,6 @@
 import { parseEnrollmentLink, toBase64 } from "@teneo/sync";
 
-import type { PairResult } from "../types/client";
+import type { PairOptions, PairResult } from "../types/client";
 import type { SyncStatus } from "../types/sync";
 import { invalidCodeMessage, readPairingCode } from "./pairing-code";
 import { type SyncPlugin, toSyncStatus } from "./sync-plugin";
@@ -58,15 +58,19 @@ export class NativeSync {
     };
   }
 
-  async pair(code: string): Promise<PairResult> {
+  async pair(
+    code: string,
+    { replaceExisting }: PairOptions = {},
+  ): Promise<PairResult> {
     const link = code.trim();
     const invite = parseEnrollmentLink(link);
     if (invite) {
       invite.key.fill(0);
       try {
-        const result = await this.plugin.pairTrusted?.({ link });
-        if (!result)
+        if (!this.plugin.pairTrusted)
           return { ok: false, error: "Update Teneo to use this invitation." };
+        if (replaceExisting) await this.unpair();
+        const result = await this.plugin.pairTrusted({ link });
         this.publish(toSyncStatus(result));
         // Enrollment isn't done yet. The status stream displays the
         // fingerprint and any rejection while the primary decides.
@@ -81,10 +85,12 @@ export class NativeSync {
     const parsed = await readPairingCode(code);
     if (!parsed) return { ok: false, error: invalidCodeMessage };
 
-    // listening first: the first device can connect before `pair` answers
-    const firstDevice = this.firstConnectedDevice();
+    let firstDevice: ReturnType<NativeSync["firstConnectedDevice"]> | undefined;
     let paired: SyncStatus;
     try {
+      if (replaceExisting) await this.unpair();
+      // Listen before pairing: the first device can connect before it answers.
+      firstDevice = this.firstConnectedDevice();
       paired = toSyncStatus(
         await this.plugin.pair({
           vaultKey: toBase64(parsed.vaultKey),
@@ -92,7 +98,7 @@ export class NativeSync {
         }),
       );
     } catch (error) {
-      firstDevice.cancel();
+      firstDevice?.cancel();
       return {
         ok: false,
         error: error instanceof Error ? error.message : String(error),

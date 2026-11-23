@@ -1,9 +1,17 @@
 <script setup lang="ts">
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@teneo/ui/components/alert";
 import { Button } from "@teneo/ui/components/button";
 import { Switch } from "@teneo/ui/components/switch";
 import { computed, onMounted, ref } from "vue";
+import AlertCircleIcon from "~icons/tabler/alert-circle";
 
 import BetaBadge from "@/components/BetaBadge.vue";
+import TransferProgress from "@/components/TransferProgress.vue";
+import { useHistoryProtection } from "@/composables/useHistoryProtection";
 import {
   localAiStatusFailed,
   refreshLocalAi,
@@ -13,8 +21,30 @@ import type { LocalAiModelStatus } from "@/types/local-ai";
 
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
+import SettingsStatus from "./SettingsStatus.vue";
 
+const emit = defineEmits<{ openSecurity: [] }>();
 const status = useLocalAi();
+const { status: protection } = useHistoryProtection();
+const unavailableHistory = computed(() => {
+  if (protection.value?.locked)
+    return {
+      title: "Saved secrets are locked",
+      action: "Choose Unlock in Security, then copy the item again.",
+    };
+  if (protection.value?.needsKeychainAccess)
+    return {
+      title: "Saved secrets are unavailable",
+      action: "Choose Restore access in Security, then copy the item again.",
+    };
+  if (protection.value?.unreadable)
+    return {
+      title: "Saved secrets are unavailable",
+      action: "Check the encryption status in Security.",
+    };
+  return null;
+});
+
 onMounted(() => {
   if (!status.value?.available) void refreshLocalAi();
 });
@@ -40,15 +70,9 @@ const models = computed<readonly LocalAiModelStatus[]>(() => {
   ];
 });
 
-const activeDownload = computed(() =>
-  models.value.find((entry) => entry.downloading),
-);
-const progress = computed(() => {
-  const active = activeDownload.value;
-  return active && active.bytes > 0
-    ? Math.floor((active.downloadedBytes / active.bytes) * 100)
-    : 0;
-});
+function isVerifying(entry: LocalAiModelStatus): boolean {
+  return entry.bytes > 0 && entry.downloadedBytes >= entry.bytes;
+}
 
 function formatSizeMb(bytes: number): number {
   return Math.round(bytes / 1e6);
@@ -84,7 +108,26 @@ const remove = (id: string) =>
 </script>
 
 <template>
-  <div v-if="status" class="mx-auto grid max-w-xl gap-y-6">
+  <Alert
+    v-if="unavailableHistory"
+    class="border-warning/30 bg-warning/10 dark:bg-warning/15 mb-4">
+    <AlertCircleIcon aria-hidden="true" class="text-warning!" />
+    <AlertTitle>{{ unavailableHistory.title }}</AlertTitle>
+    <AlertDescription class="text-foreground/75 text-xs">
+      <p>
+        New copies containing detected secrets aren’t saved to history while
+        Teneo can’t encrypt them. {{ unavailableHistory.action }}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        class="mt-2 w-fit"
+        @click="emit('openSecurity')">
+        Open Security
+      </Button>
+    </AlertDescription>
+  </Alert>
+  <div v-if="status" class="grid gap-y-6">
     <SettingsSection>
       <template #section-title><span>Local AI</span> <BetaBadge /></template>
       <SettingsField>
@@ -103,17 +146,25 @@ const remove = (id: string) =>
           aria-label="Use Local AI"
           @update:model-value="setEnabled" />
       </SettingsField>
+    </SettingsSection>
+    <SettingsSection>
+      <template #section-title>Models</template>
       <SettingsField v-for="entry in models" :key="entry.id">
         <template #label>{{ entry.name }}</template>
-        <template #description>
-          {{ formatSizeMb(entry.bytes) }} MB ·
-          {{ entry.installed ? "Installed" : "Not installed" }} ·
-          {{ entry.description }}
+        <template #status>
+          <SettingsStatus
+            v-if="!entry.downloading"
+            :tone="entry.installed ? 'success' : 'neutral'"
+            live>
+            {{ entry.installed ? "Installed" : "Not installed" }}
+          </SettingsStatus>
         </template>
+        <template #description> {{ formatSizeMb(entry.bytes) }} MB </template>
         <Button
           v-if="entry.installed"
-          variant="outline"
+          variant="ghost"
           size="sm"
+          class="text-muted-foreground"
           :disabled="busy || status.downloading"
           @click="remove(entry.id)">
           Remove
@@ -126,21 +177,15 @@ const remove = (id: string) =>
           @click="download(entry.id)">
           Download
         </Button>
+        <template v-if="entry.downloading" #footer>
+          <TransferProgress
+            :label="isVerifying(entry) ? 'Verifying…' : 'Downloading…'"
+            :progress-label="`Download progress for ${entry.name}`"
+            :received="entry.downloadedBytes || undefined"
+            :total="entry.bytes"
+            :finalizing="isVerifying(entry)" />
+        </template>
       </SettingsField>
-      <div v-if="activeDownload" class="grid gap-2 px-3 py-2 text-sm">
-        <span role="status">
-          {{
-            progress >= 100
-              ? `Verifying ${activeDownload.name}…`
-              : `Downloading ${activeDownload.name}…`
-          }}
-        </span>
-        <progress
-          aria-label="Model download progress"
-          class="accent-primary w-full"
-          :value="progress"
-          max="100" />
-      </div>
       <p v-if="error" role="alert" class="text-destructive px-3 py-2 text-sm">
         {{ error }}
       </p>
@@ -163,13 +208,10 @@ const remove = (id: string) =>
       Detection can make mistakes and does not rescan older history.
     </p>
   </div>
-  <p
-    v-else-if="localAiStatusFailed"
-    role="status"
-    class="mx-auto max-w-xl px-3 text-sm">
+  <p v-else-if="localAiStatusFailed" role="status" class="px-3 text-sm">
     Couldn’t reach the Local AI backend. Restart Teneo Debug and try again.
   </p>
-  <p v-else role="status" class="mx-auto max-w-xl px-3 text-sm">
+  <p v-else role="status" class="px-3 text-sm">
     Waiting for the Local AI backend…
   </p>
 </template>

@@ -29,6 +29,7 @@ import {
   macReleaseArchitectures,
 } from "./build-sync-device-identity.ts";
 import { buildManifest } from "./release-manifest.ts";
+import { prepareTinyjs } from "./tinyjs-keychain.ts";
 
 const option = (name: string) => {
   const index = process.argv.indexOf(name);
@@ -53,6 +54,8 @@ const { name, title, version } = JSON.parse(
 mkdirSync(out, { recursive: true });
 // TinyJS stages and signs the correct Trusted Sync helper for each CPU.
 buildSyncDeviceIdentity();
+const tinyjsTool = prepareTinyjs(macReleaseArchitectures);
+process.on("exit", tinyjsTool.dispose);
 
 function run([command, ...args]: string[]): boolean {
   return spawnSync(command, args, { stdio: "inherit" }).status === 0;
@@ -136,8 +139,8 @@ for (const arch of macReleaseArchitectures) {
   // Build the .app first (without --dmg), attach and sign Local AI XPC inside-out,
   // verify signatures, and then emit both the .dmg and .zip from the identical .app.
   if (
-    !run(["tinyjs", "build", "--arch", arch]) &&
-    !run(["tinyjs", "build", "--arch", arch])
+    !run([tinyjsTool.binary, "build", "--arch", arch]) &&
+    !run([tinyjsTool.binary, "build", "--arch", arch])
   ) {
     throw new Error(`the ${arch} build failed`);
   }

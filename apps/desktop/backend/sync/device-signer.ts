@@ -8,6 +8,7 @@ import {
 } from "@teneo/sync";
 
 import { devName } from "../dev-run";
+import { readKeychain } from "../keychain";
 
 const account = () => devName("sync-device-identity-v1");
 const helper = "teneo-sync-device-identity";
@@ -67,11 +68,12 @@ export async function openDeviceSigner(
   app: TinyApp,
   deviceId: string,
   create: boolean,
+  interactive = true,
 ): Promise<DeviceIdentity> {
   const directory = (await app.paths()).executables;
   if (!directory) throw new Error("The sync identity helper was not installed");
   const path = `${directory}/${helper}`;
-  let representation = await app.secrets.get(account());
+  let representation = await readKeychain(app, account(), interactive);
   let response;
   if (representation) {
     response = await call(path, { operation: "public", representation });

@@ -11,6 +11,7 @@ import {
 import { TestNetwork } from "@teneo/sync/testing";
 import { Database } from "tjs:sqlite";
 
+import { getDataFolderUsage } from "../data-usage";
 import {
   countClipboardItemsToDelete,
   countClipboardMedia,
@@ -34,6 +35,7 @@ import {
 } from "../database";
 import { getFilePreview, getFileSize } from "../file-previews";
 import { clearClipboardHistory } from "../history-limits";
+import { localAiModelsDirectory } from "../local-ai-model";
 import {
   prepareEncryptionKey,
   setHistoryKeyEnvelope,
@@ -77,6 +79,8 @@ await tjs.makeDir(`${folder}/cache`, { recursive: true });
 const stored = new Map<string, unknown>();
 const secrets = new Map<string, string>();
 let keychainReads = 0;
+let silentKeychainReads = 0;
+let silentKeychainBlocked = false;
 const app = {
   paths: async () => ({
     data: dataFolder,
@@ -93,6 +97,11 @@ const app = {
   secrets: {
     get: async (key: string) => {
       keychainReads += 1;
+      return secrets.get(key) ?? null;
+    },
+    getWithoutPrompt: async (key: string) => {
+      silentKeychainReads += 1;
+      if (silentKeychainBlocked) throw new Error("interaction not allowed");
       return secrets.get(key) ?? null;
     },
     set: async (key: string, value: string) => {
@@ -1469,7 +1478,7 @@ await test("encryption turns on and off in one go, and an unreadable key becomes
   await softDeleteClipboardItem(saved.id, app);
 });
 
-await test("relaunch: listing and copying cannot read Keychain before explicit restore", async () => {
+await test("relaunch: blocked or missing credentials never prompt or create a replacement", async () => {
   check(await turnOnSecretEncryption(app), "encryption turned on");
   const saved = await saveClipboardItem(
     textItem(`existing ${secretText}`),
@@ -1479,18 +1488,27 @@ await test("relaunch: listing and copying cannot read Keychain before explicit r
   check(originalKey, "there is an original key");
   setHistoryKeyEnvelope(null, () => {});
   const reads = keychainReads;
+  const silentReads = silentKeychainReads;
+  silentKeychainBlocked = true;
+  try {
+    await restoreSecretHistoryAccess(app, false);
+  } finally {
+    silentKeychainBlocked = false;
+  }
   same(
     await getClipboardItem(saved.id, app),
     null,
-    "secret hidden before consent",
+    "secret hidden when the silent read is blocked",
   );
   await listClipboardItems(app, { kind: "all", search: "", limit: 50 });
   await rejects(
     saveClipboardItem(textItem(`new ${secretText}`), app),
     "no plaintext fallback",
   );
-  same(keychainReads, reads, "no background keychain read");
+  same(keychainReads, reads, "no interactive read");
+  same(silentKeychainReads, silentReads + 1, "looked once at launch");
   secrets.delete("history-encryption-key");
+  await restoreSecretHistoryAccess(app, false);
   await rejects(restoreSecretHistoryAccess(app), "missing original key");
   same(
     secrets.has("history-encryption-key"),
@@ -1498,12 +1516,24 @@ await test("relaunch: listing and copying cannot read Keychain before explicit r
     "no replacement for persisted history",
   );
   secrets.set("history-encryption-key", originalKey);
-  await restoreSecretHistoryAccess(app);
+  await restoreSecretHistoryAccess(app, false);
   same(
     (await getClipboardItem(saved.id, app))?.text,
     `existing ${secretText}`,
-    "access restored",
+    "access restored silently with the original key",
   );
+  const copied = await saveClipboardItem(textItem(`new ${secretText}`), app);
+  const database = await initializeDatabase(app);
+  same(
+    all<{ encrypted: number }>(
+      database,
+      `SELECT encrypted FROM "CLIPBOARD_ITEMS" WHERE id = ?`,
+      copied.id,
+    )[0]?.encrypted,
+    1,
+    "new secrets stay encrypted",
+  );
+  await softDeleteClipboardItem(copied.id, app);
   check(await turnOffSecretEncryption(app), "settings reset");
   await softDeleteClipboardItem(saved.id, app);
 });
@@ -1520,6 +1550,28 @@ await test("unknown paths have no automatic file metadata or missing-file result
     await getFilePreview(`${dataFolder}/missing`, 64, app),
     { url: null, isMissing: true },
     "app-owned path can be checked",
+  );
+});
+
+await test("storage usage leaves out models and in-progress model downloads", async () => {
+  const before = await getDataFolderUsage(app);
+  const models = `${dataFolder}/${localAiModelsDirectory}`;
+  const retained = `${dataFolder}/nested/models`;
+  await tjs.makeDir(`${models}/download-test`, { recursive: true });
+  await tjs.writeFile(`${models}/installed`, new Uint8Array(1024));
+  await tjs.writeFile(`${models}/download-test/partial`, new Uint8Array(512));
+  await tjs.makeDir(retained, { recursive: true });
+  await tjs.writeFile(`${retained}/ordinary-file`, new Uint8Array(32));
+  const after = await getDataFolderUsage(app);
+  same(
+    after.size,
+    before.size + 32,
+    "only the top-level model folder is excluded",
+  );
+  same(
+    after.clipboardSizeByKind,
+    before.clipboardSizeByKind,
+    "history usage is unchanged",
   );
 });
 

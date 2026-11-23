@@ -6,6 +6,7 @@ import {
   type HistoryKeyEnvelope,
   openHistoryKeyEnvelope,
 } from "./history-key-envelope";
+import { readKeychain } from "./keychain";
 
 // With "Encrypt API keys" on, text holding a secret is saved encrypted
 // (AES-GCM) with a key kept in the macOS Keychain, so the database file alone
@@ -62,8 +63,11 @@ async function loadOrCreateEncryptionKey(app: TinyApp): Promise<CryptoKey> {
   }
 }
 
-async function loadSavedEncryptionKey(app: TinyApp): Promise<CryptoKey | null> {
-  const savedKey = await app.secrets.get(keychainKeyName());
+async function loadSavedEncryptionKey(
+  app: TinyApp,
+  interactive = true,
+): Promise<CryptoKey | null> {
+  const savedKey = await readKeychain(app, keychainKeyName(), interactive);
   if (!savedKey) return null;
   const bytes = Uint8Array.fromBase64(savedKey);
   try {
@@ -71,6 +75,20 @@ async function loadSavedEncryptionKey(app: TinyApp): Promise<CryptoKey | null> {
     return await importEncryptionKey(bytes);
   } finally {
     bytes.fill(0);
+  }
+}
+
+export async function openSavedHistoryKeySilently(
+  app: TinyApp,
+): Promise<boolean> {
+  if (!needsHistoryKeychainAccess()) return false;
+  try {
+    const key = await loadSavedEncryptionKey(app, false);
+    if (!key) return false;
+    encryptionKeyPromise = Promise.resolve(key);
+    return true;
+  } catch {
+    return false;
   }
 }
 

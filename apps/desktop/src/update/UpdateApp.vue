@@ -5,10 +5,10 @@ import {
 } from "@teneo/shared/types/windows";
 import { Button } from "@teneo/ui/components/button";
 import { ScrollArea } from "@teneo/ui/components/scroll-area";
-import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { onKeyStroke } from "@vueuse/core";
 import { computed, ref } from "vue";
 
+import TransferProgress from "@/components/TransferProgress.vue";
 import { showWindowWhenPainted } from "@/lib/window-ready";
 
 import ReleaseNotes from "./ReleaseNotes.vue";
@@ -34,11 +34,6 @@ const isDownloaded = computed(
     progress.value?.total != null &&
     progress.value.received >= progress.value.total,
 );
-// null shows a moving bar: still connecting, size unknown, or installing
-const downloadPercent = computed(() => {
-  if (!progress.value?.total || isDownloaded.value) return null;
-  return (progress.value.received / progress.value.total) * 100;
-});
 
 function remindLater(): void {
   if (isInstalling.value) return;
@@ -73,7 +68,7 @@ onKeyStroke("Escape", (event) => {
 
 <template>
   <div
-    class="flex h-screen flex-col overflow-hidden bg-transparent! px-6 pb-6 dark:bg-black/55!">
+    class="window-frame flex h-screen flex-col overflow-hidden bg-transparent! px-6 pb-6 dark:bg-black/55!">
     <!-- the window is frameless: the header drags the window -->
     <header data-tiny-drag class="flex shrink-0 items-center gap-x-4 pt-7 pb-5">
       <img data-tiny-drag class="size-14 shrink-0" src="/icon.png" alt="" />
@@ -95,34 +90,14 @@ onKeyStroke("Escape", (event) => {
 
     <!-- same height in both states, so the notes don't jump -->
     <footer class="mt-auto flex h-14 shrink-0 items-end">
-      <div
+      <TransferProgress
         v-if="isInstalling"
-        class="flex h-9 w-full flex-col justify-center gap-y-2">
-        <div class="text-foreground/60 flex justify-between text-xs">
-          <span>{{ isDownloaded ? "Installing…" : "Downloading…" }}</span>
-          <span v-if="progress && !isDownloaded" class="tabular-nums">
-            {{ formatFileSize(progress.received) }}
-            <template v-if="progress.total">
-              of {{ formatFileSize(progress.total) }}
-            </template>
-          </span>
-        </div>
-        <div
-          role="progressbar"
-          aria-label="Update progress"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-valuenow="downloadPercent ?? undefined"
-          class="bg-foreground/10 dark:bg-foreground/15 h-1.5 overflow-hidden rounded-full">
-          <div
-            v-if="downloadPercent !== null"
-            class="bg-primary h-full rounded-full transition-[width] duration-200 ease-out"
-            :style="{ width: `${downloadPercent}%` }" />
-          <div
-            v-else
-            class="indeterminate bg-primary h-full w-2/5 rounded-full" />
-        </div>
-      </div>
+        class="h-9"
+        :label="isDownloaded ? 'Installing…' : 'Downloading…'"
+        progress-label="Update progress"
+        :received="progress?.received"
+        :total="progress?.total"
+        :finalizing="isDownloaded" />
 
       <div v-else class="flex w-full items-center gap-x-2">
         <p v-if="didInstallFail" class="text-destructive text-xs">
@@ -136,18 +111,3 @@ onKeyStroke("Escape", (event) => {
     </footer>
   </div>
 </template>
-
-<style scoped>
-/* A segment sweeping across while there's no percentage to show */
-.indeterminate {
-  animation: sweep 1.4s ease-in-out infinite;
-}
-@keyframes sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(250%);
-  }
-}
-</style>
