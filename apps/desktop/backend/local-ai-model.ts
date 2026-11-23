@@ -2,9 +2,11 @@
 const modelReleaseBase =
   "https://github.com/theCodeD3vil/teneo-models/releases/download/q12-v1";
 
+export const localAiModelsDirectory = "models";
+
 export const classifierModel = {
   id: "teneo-minilm-q12-classifier",
-  name: "Credential Classifier (MiniLM Q12)",
+  name: "Teneo-V1",
   role: "classification",
   description: "Classifies possible credentials in copied and synced text",
   bytes: 172_112_443 + 5_568_950,

@@ -2,7 +2,7 @@ import type { ClipboardItemKind } from "./clipboard";
 
 /** What Teneo's data folder holds, for Settings › Storage. */
 export interface DataFolderUsage {
-  /** total bytes: history database, saved images, app icons, settings */
+  /** bytes of history, images, app icons and settings; excludes Local AI models */
   size: number;
   /** bytes counted against the storage limit, per kind of unpinned history
    *  item: its text, color or file list, plus its saved image */
@@ -21,3 +21,10 @@ export interface FolderAccess {
   /** missing: there's no such folder on this Mac */
   status: "granted" | "denied" | "missing";
 }
+
+/** Saved enabled folders and the results of recent explicit requests. */
+export type FolderAccessStatus = Partial<
+  Record<FolderAccess["name"], FolderAccess["status"]>
+>;
+
+export const folderAccessChangedEvent = "folder-access-changed";

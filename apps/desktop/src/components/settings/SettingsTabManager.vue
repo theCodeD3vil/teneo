@@ -5,7 +5,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@teneo/ui/components/tabs";
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import HardDriveIcon from "~icons/tabler/database";
 import InformationCircleIcon from "~icons/tabler/info-circle";
 import KeyboardIcon from "~icons/tabler/keyboard";
@@ -56,17 +56,24 @@ const settingsTabs = computed(() =>
 );
 
 const selectedTab = ref<SettingsTab>("general");
+
+async function openSecurity(): Promise<void> {
+  selectedTab.value = "security";
+  await nextTick();
+  document.querySelector<HTMLElement>("[data-settings-tab=security]")?.focus();
+}
 </script>
 
 <template>
   <Tabs v-model="selectedTab" class="min-h-0 w-full flex-1 bg-transparent!">
-    <TabsList class="gap-x-3 self-center bg-transparent!">
+    <TabsList class="gap-x-2 self-center bg-transparent!">
       <TabsTrigger
         v-for="tab in settingsTabs"
         :key="tab.value"
         :value="tab.value"
-        class="data-active:bg-primary/10! dark:data-active:bg-primary/20! bg-foreground/5 dark:bg-foreground/10 data-active:text-primary! data-active:border-primary/80! text-xs font-light capitalize">
-        <component :is="tab.icon" />
+        :data-settings-tab="tab.value"
+        class="data-active:bg-primary/10! dark:data-active:bg-primary/20! data-active:text-primary! data-active:border-primary/40! text-muted-foreground hover:bg-foreground/5 text-xs font-medium capitalize">
+        <component :is="tab.icon" aria-hidden="true" />
         {{ "label" in tab ? tab.label : tab.value }}
       </TabsTrigger>
     </TabsList>
@@ -76,8 +83,13 @@ const selectedTab = ref<SettingsTab>("general");
       v-for="tab in settingsTabs"
       :key="tab.value"
       :value="tab.value"
-      class="mt-4 min-h-0 flex-1 overflow-y-auto bg-transparent!">
-      <component :is="tab.content" />
+      class="mt-5 min-h-0 flex-1 overflow-y-auto bg-transparent!">
+      <div class="mx-auto max-w-2xl">
+        <LocalAiTab
+          v-if="tab.value === 'local-ai'"
+          @open-security="openSecurity" />
+        <component v-else :is="tab.content" />
+      </div>
     </TabsContent>
   </Tabs>
 </template>

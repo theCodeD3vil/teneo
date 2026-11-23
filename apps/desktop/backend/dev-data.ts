@@ -12,6 +12,7 @@ export const appStoreKeys = [
   "setupComplete",
   "syncDeviceId",
   "localAiEnabled",
+  "folderPreviews",
 ];
 export const appSecretNames = ["history-encryption-key"];
 

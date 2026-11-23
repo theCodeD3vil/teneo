@@ -14,6 +14,7 @@ import type {
 } from "@teneo/shared/types/clipboard";
 import { Database } from "tjs:sqlite";
 
+import { devName } from "./dev-run";
 import { type LatestCopy, isRepeatCopy } from "./duplicate-copy";
 import { getFileSize } from "./file-previews";
 import { logError } from "./files";
@@ -66,6 +67,7 @@ import {
   LockedHistoryError,
   lockHistorySecrets,
   needsHistoryKeychainAccess,
+  openSavedHistoryKeySilently,
   prepareEncryptionKey,
   removeLegacyEncryptionKey,
   restrictToSavedEncryptionKey,
@@ -1819,22 +1821,38 @@ export function lockProtectedHistory(): void {
   lockHistorySecrets();
 }
 
-export async function restoreSecretHistoryAccess(app: TinyApp): Promise<void> {
+export async function restoreSecretHistoryAccess(
+  app: TinyApp,
+  interactive = true,
+): Promise<boolean> {
   const database = await initializeDatabase(app);
-  await exclusive(async () => {
-    if (!getSettings().encryptSecrets || !needsHistoryKeychainAccess()) return;
-    const hasRows =
-      all(
-        database,
-        `SELECT 1 FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1 LIMIT 1`,
-      ).length > 0;
-    await restoreHistoryKeychainAccess(app, hasRows);
+  return exclusive(async () => {
+    if (!getSettings().encryptSecrets || !needsHistoryKeychainAccess())
+      return false;
+    // A peer can skip unreadable entries; resend once after access comes back,
+    // not every time the app relaunches and reads the same key.
+    const readyKey = devName("history-key-was-readable");
+    if (interactive) {
+      const hasRows =
+        all(
+          database,
+          `SELECT 1 FROM "CLIPBOARD_ITEMS" WHERE encrypted = 1 LIMIT 1`,
+        ).length > 0;
+      await restoreHistoryKeychainAccess(app, hasRows);
+    } else if (!(await openSavedHistoryKeySilently(app))) {
+      if ((await app.store.get(readyKey)) === true)
+        await app.store.set(readyKey, false);
+      return false;
+    }
     await encryptPlainSecrets(database, app);
     await refreshDetection(database, app);
-    if (getSettings().syncSecrets)
+    const wasReadable = (await app.store.get(readyKey)) === true;
+    if (getSettings().syncSecrets && (interactive || !wasReadable))
       restampRows(database, `encrypted = 1 AND deletedAt IS NULL`);
+    if (!wasReadable) await app.store.set(readyKey, true);
     app.push(historyProtectionChangedEvent);
     notifyClipboardHistoryChanged(app);
+    return true;
   });
 }
 

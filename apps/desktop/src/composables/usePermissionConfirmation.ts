@@ -33,7 +33,7 @@ export function usePermissionConfirmation() {
 }
 
 export const folderExplanation =
-  "Folder access shows thumbnails and sizes for copied files.";
+  "Teneo will remember this folder for thumbnails and sizes of files you copy. macOS may ask for access if it hasn’t already been granted.";
 
 export const loginExplanation: PermissionExplanation = {
   title: "Open Teneo at login?",

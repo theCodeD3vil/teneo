@@ -30,6 +30,7 @@ interface Options {
   /** what the Keychain does when a key is saved */
   keychainSaves?: boolean;
   keychainReadThrows?: boolean;
+  silentReadThrows?: boolean;
   port?: number | null;
   /** how many items hold secrets */
   held?: number;
@@ -40,6 +41,8 @@ async function setup(options: Options = {}) {
   const store = new Map<string, unknown>();
   const secrets = new Map<string, string>();
   const pushed: Array<{ event: string; data: SyncStatus }> = [];
+  const reads = { interactive: 0, silent: 0 };
+  let localNetworkUsed = false;
   const app = {
     store: {
       get: async (key: string) => store.get(key) ?? null,
@@ -47,7 +50,14 @@ async function setup(options: Options = {}) {
     },
     secrets: {
       get: async (key: string) => {
+        reads.interactive += 1;
         if (options.keychainReadThrows) throw new Error("denied");
+        return secrets.get(key) ?? null;
+      },
+      getWithoutPrompt: async (key: string) => {
+        reads.silent += 1;
+        if (options.silentReadThrows)
+          throw new Error("interaction not allowed");
         return secrets.get(key) ?? null;
       },
       set: async (key: string, value: string) => {
@@ -103,6 +113,10 @@ async function setup(options: Options = {}) {
       calls.started.push(startOptions);
       return service;
     },
+    hasUsedLocalNetwork: async () => localNetworkUsed,
+    rememberLocalNetwork: async () => {
+      localNetworkUsed = true;
+    },
     restampSecretItems: async () => {
       calls.restamped += 1;
       return options.held ?? 3;
@@ -139,6 +153,7 @@ async function setup(options: Options = {}) {
     secrets,
     pushed,
     calls,
+    reads,
     logged,
     connected,
     known,
@@ -147,6 +162,50 @@ async function setup(options: Options = {}) {
 
 const savedKey = (secrets: Map<string, string>) =>
   fromBase64(secrets.get(keyName) ?? "");
+
+test("relaunch resumes after successful network access without an interactive Keychain read", async () => {
+  const { manager, app, deps, calls, reads } = await setup();
+  await manager.turnOn();
+  await manager.stop();
+  const reopened = new SyncManager(app, deps);
+  await reopened.startIfEnabled(false);
+  expect(await reopened.status()).toMatchObject({
+    enabled: true,
+    running: false,
+    problem: expect.stringContaining("local network"),
+  });
+  expect(reads).toEqual({ interactive: 0, silent: 0 });
+  calls.started[0]!.onLocalNetworkReady?.();
+  await reopened.startIfEnabled(false);
+  expect(await reopened.status()).toMatchObject({
+    running: true,
+    problem: null,
+  });
+  expect(reads).toEqual({ interactive: 0, silent: 1 });
+  expect(calls.pairings).toBe(1);
+});
+
+test("relaunch does not retry interactively when Keychain blocks startup", async () => {
+  const { manager, app, deps, calls, reads } = await setup({
+    silentReadThrows: true,
+  });
+  await manager.turnOn();
+  calls.started[0]!.onLocalNetworkReady?.();
+  await manager.stop();
+  const reopened = new SyncManager(app, deps);
+  await reopened.startIfEnabled(false);
+  expect(await reopened.status()).toMatchObject({
+    running: false,
+    problem: expect.stringContaining("Keychain"),
+  });
+  expect(reads).toEqual({ interactive: 0, silent: 1 });
+  expect(calls.started).toHaveLength(1);
+  await reopened.startIfEnabled();
+  expect(await reopened.status()).toMatchObject({
+    running: true,
+    problem: null,
+  });
+});
 
 test("preview migration keeps peer history, replaces legacy credentials, and reloads the rotated vault", async () => {
   const algorithm = { name: "ECDSA", namedCurve: "P-256" };
@@ -188,7 +247,8 @@ test("preview migration keeps peer history, replaces legacy credentials, and rel
   await manager.stop();
 
   const reopened = new SyncManager(app, deps);
-  await reopened.startIfEnabled();
+  calls.started.at(-1)?.onLocalNetworkReady?.();
+  await reopened.startIfEnabled(false);
   expect(await reopened.status()).toMatchObject({
     running: true,
     trust: { primary: true, generation: 2 },
@@ -196,7 +256,7 @@ test("preview migration keeps peer history, replaces legacy credentials, and rel
   secrets.set("sync-trusted-vault-v1", "not a valid snapshot");
   secrets.set(keyName, toBase64(randomBytes(32)));
   await reopened.stop();
-  await reopened.startIfEnabled();
+  await reopened.startIfEnabled(false);
   expect(await reopened.status()).toMatchObject({
     running: false,
     problem: expect.stringContaining("won't fall back"),

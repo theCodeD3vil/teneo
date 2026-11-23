@@ -14,6 +14,11 @@ export interface PairResult {
   deviceName?: string;
 }
 
+export interface PairOptions {
+  /** The user has confirmed replacing this phone's current sync pairing. */
+  replaceExisting?: boolean;
+}
+
 export interface TeneoClient {
   listItems(request: ClipboardListRequest): Promise<ClipboardListPage>;
   getItem(id: string): Promise<ClipboardHistoryItem | null>;
@@ -41,7 +46,7 @@ export interface TeneoClient {
   updateSettings(changes: Partial<MobileSettings>): Promise<MobileSettings>;
   getSyncStatus(): Promise<SyncStatus>;
   onSyncStatusChanged(listener: (status: SyncStatus) => void): () => void;
-  pair(code: string): Promise<PairResult>;
+  pair(code: string, options?: PairOptions): Promise<PairResult>;
   unpair(): Promise<void>;
   /** Stop syncing with one device, until it is paired again. The others
    *  carry on. */

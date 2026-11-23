@@ -167,6 +167,30 @@ describe("NativeSync", () => {
     expect(heard).toEqual(["not_paired"]);
   });
 
+  test("an invalid replacement code leaves the current pairing untouched", async () => {
+    const { plugin, calls, kept } = fakePlugin();
+    const sync = new NativeSync(plugin, { waitForDeviceMs: 0 });
+    await sync.pair(await formatRecoveryCode(key));
+    expect((await sync.pair("not a code", { replaceExisting: true })).ok).toBe(
+      false,
+    );
+    expect(calls).toEqual(["pair"]);
+    expect(kept).toEqual([key]);
+  });
+
+  test("a confirmed replacement reuses the existing unpair and pair flow", async () => {
+    const { plugin, calls, kept } = fakePlugin();
+    const sync = new NativeSync(plugin, { waitForDeviceMs: 0 });
+    const replacement = new Uint8Array(32).fill(12);
+    await sync.pair(await formatRecoveryCode(key));
+    const result = await sync.pair(await formatRecoveryCode(replacement), {
+      replaceExisting: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual(["pair", "unpair", "pair"]);
+    expect(kept).toEqual([replacement]);
+  });
+
   test("disconnecting a device tells native code and says who is left", async () => {
     const { plugin, calls, emit } = fakePlugin();
     const sync = new NativeSync(plugin, { waitForDeviceMs: 0 });

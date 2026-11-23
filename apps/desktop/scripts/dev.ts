@@ -7,8 +7,13 @@ import { spawn } from "node:child_process";
 
 import { writeAppIdentity } from "./app-config.ts";
 import { buildSyncDeviceIdentity } from "./build-sync-device-identity.ts";
+import { prepareTinyjs } from "./tinyjs-keychain.ts";
 
 buildSyncDeviceIdentity();
+const tinyjsTool = prepareTinyjs([
+  process.arch === "arm64" ? "arm64" : "x86_64",
+]);
+process.on("exit", tinyjsTool.dispose);
 
 // TENEO_REAL_DATA=1 runs on the installed Teneo's data, which is under its id
 writeAppIdentity("debug", { keepId: process.env.TENEO_REAL_DATA === "1" });
@@ -20,7 +25,7 @@ function restore(): void {
   writeAppIdentity("production");
 }
 
-const tinyjs = spawn("tinyjs", ["dev", ...process.argv.slice(2)], {
+const tinyjs = spawn(tinyjsTool.binary, ["dev", ...process.argv.slice(2)], {
   stdio: "inherit",
 });
 // Ctrl-C reaches tinyjs too, as it is in the same terminal: wait for it to

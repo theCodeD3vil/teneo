@@ -7,7 +7,7 @@ import type {
 } from "@teneo/shared/types/clipboard";
 
 import type { LinkPreviews } from "../previews/link-previews";
-import type { PairResult, TeneoClient } from "../types/client";
+import type { PairOptions, PairResult, TeneoClient } from "../types/client";
 import { defaultSettings, type MobileSettings } from "../types/settings";
 import type { SyncStatus } from "../types/sync";
 import {
@@ -371,9 +371,9 @@ export class NativeClient implements TeneoClient {
     return this.sync?.onSyncStatusChanged(listener) ?? (() => {});
   }
 
-  async pair(code: string): Promise<PairResult> {
+  async pair(code: string, options?: PairOptions): Promise<PairResult> {
     if (!this.sync) return { ok: false, error: "Sync isn't available here" };
-    const result = await this.sync.pair(code);
+    const result = await this.sync.pair(code, options);
     if (result.ok) void this.askForNotifications();
     return result;
   }

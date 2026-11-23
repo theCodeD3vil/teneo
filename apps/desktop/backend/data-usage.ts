@@ -1,13 +1,16 @@
 import type { DataFolderUsage } from "@teneo/shared/types/storage";
 
 import { countClipboardMedia, listClipboardItemSizes } from "./database";
+import { localAiModelsDirectory } from "./local-ai-model";
 import { appPaths } from "./paths";
 
 export async function getDataFolderUsage(
   app: TinyApp,
 ): Promise<DataFolderUsage> {
   const [size, itemSizes, counts] = await Promise.all([
-    appPaths(app).then(({ data }) => getFolderSize(data)),
+    appPaths(app).then(({ data }) =>
+      getFolderSize(data, localAiModelsDirectory),
+    ),
     listClipboardItemSizes(app),
     countClipboardMedia(app),
   ]);
@@ -23,8 +26,11 @@ export async function getDataFolderUsage(
   return { size, clipboardSizeByKind, itemCount, ...counts };
 }
 
-/** Total bytes of every file in folder and its subfolders. */
-async function getFolderSize(folder: string): Promise<number> {
+/** Total bytes, optionally excluding a single top-level entry and its contents. */
+async function getFolderSize(
+  folder: string,
+  skipEntry?: string,
+): Promise<number> {
   let size = 0;
   let entries: AsyncIterable<{ name: string; isDirectory: boolean }>;
   try {
@@ -33,6 +39,7 @@ async function getFolderSize(folder: string): Promise<number> {
     return 0; // nothing saved yet
   }
   for await (const entry of entries) {
+    if (entry.name === skipEntry) continue;
     const path = `${folder}/${entry.name}`;
     size += entry.isDirectory
       ? await getFolderSize(path)

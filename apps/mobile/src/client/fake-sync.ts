@@ -1,4 +1,4 @@
-import type { PairResult } from "../types/client";
+import type { PairOptions, PairResult } from "../types/client";
 import type { SyncStatus } from "../types/sync";
 import { invalidCodeMessage, readPairingCode } from "./pairing-code";
 
@@ -35,16 +35,21 @@ export class FakeSync {
     };
   }
 
-  async pair(code: string): Promise<PairResult> {
-    if (this.status.state !== "not_paired") {
+  async pair(
+    code: string,
+    { replaceExisting }: PairOptions = {},
+  ): Promise<PairResult> {
+    if (this.status.state !== "not_paired" && !replaceExisting) {
       return {
         ok: false,
         error: "This phone already syncs. Turn sync off before joining again.",
       };
     }
-    if (!(await readPairingCode(code))) {
+    const parsed = await readPairingCode(code);
+    if (!parsed) {
       return { ok: false, error: invalidCodeMessage };
     }
+    parsed.vaultKey.fill(0);
 
     this.status = {
       state: "connected",

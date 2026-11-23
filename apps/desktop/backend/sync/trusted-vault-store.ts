@@ -6,6 +6,7 @@ import {
 } from "@teneo/sync";
 
 import { devName } from "../dev-run";
+import { readKeychain } from "../keychain";
 
 /** The one Keychain item is both the trusted-mode marker and its contents.
  *  Read errors or unreadable contents are fatal; never fall back to legacy. */
@@ -24,8 +25,9 @@ export class TrustedVaultStore {
 
   async read(
     openIdentity: () => Promise<DeviceIdentity>,
+    interactive = true,
   ): Promise<VaultTrustManager | null> {
-    const encoded = await this.app.secrets.get(account());
+    const encoded = await readKeychain(this.app, account(), interactive);
     if (encoded === null || encoded === undefined) return null;
     const { pin, update } = JSON.parse(encoded) as {
       pin: VaultPin;

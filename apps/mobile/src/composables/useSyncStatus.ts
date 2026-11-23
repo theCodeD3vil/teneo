@@ -1,6 +1,7 @@
 import { ref } from "vue";
 
 import { useClient } from "../client";
+import type { PairOptions } from "../types/client";
 import type { SyncStatus } from "../types/sync";
 
 const status = ref<SyncStatus | null>(null);
@@ -43,9 +44,10 @@ export function useSyncStatus() {
    *  while this screen is already joining or turning off. */
   async function join(
     code: string,
+    options?: PairOptions,
   ): Promise<{ deviceName: string | null } | null> {
     if (isBusy.value || !code.trim()) return null;
-    const result = await run(() => client.pair(code));
+    const result = await run(() => client.pair(code, options));
     if (!result) return null;
     if (!result.ok) {
       error.value = result.error ?? "Couldn't join with that code";

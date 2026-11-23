@@ -14,13 +14,16 @@ import { Button } from "@teneo/ui/components/button";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { Switch } from "@teneo/ui/components/switch";
 import { computed, ref } from "vue";
-import TickIcon from "~icons/tabler/check";
+import LockIcon from "~icons/tabler/lock";
+import LockOpenIcon from "~icons/tabler/lock-open";
 import AddIcon from "~icons/tabler/plus";
 import CancelIcon from "~icons/tabler/x";
 
 import BetaBadge from "@/components/BetaBadge.vue";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
+import { useDelayedBusy } from "@/composables/useDelayedBusy";
 import { useExcludedApps } from "@/composables/useExcludedApps";
+import { useFolderAccess } from "@/composables/useFolderAccess";
 import { useHistoryProtection } from "@/composables/useHistoryProtection";
 import {
   folderExplanation,
@@ -32,6 +35,7 @@ import { useSettings } from "@/composables/useSettings";
 import PermissionConfirmation from "./PermissionConfirmation.vue";
 import SettingsField from "./SettingsField.vue";
 import SettingsSection from "./SettingsSection.vue";
+import SettingsStatus from "./SettingsStatus.vue";
 
 const { settings, updateSettings } = useSettings();
 
@@ -39,10 +43,13 @@ const { status: accessibilityStatus, request: requestAccessibility } =
   useAccessibilityPermission();
 const { prompt, explain, cancel, confirm } = usePermissionConfirmation();
 const folders = ["Desktop", "Documents", "Downloads"] as const;
-const folderStatus = ref<
-  Partial<Record<FolderAccess["name"], FolderAccess["status"]>>
->({});
-const requestingFolder = ref<FolderAccess["name"] | null>(null);
+const {
+  status: folderStatus,
+  loading: loadingFolders,
+  requesting: requestingFolder,
+  error: folderError,
+  setEnabled: setFolderEnabled,
+} = useFolderAccess();
 
 function allowAccessibility(): void {
   explain(
@@ -59,24 +66,11 @@ function allowAccessibility(): void {
 function allowFolder(name: FolderAccess["name"]): void {
   explain(
     {
-      title: `Allow access to ${name}?`,
+      title: `Enable previews for ${name}?`,
       description: folderExplanation,
-      action: `Allow ${name}`,
+      action: "Enable previews",
     },
-    async () => {
-      requestingFolder.value = name;
-      try {
-        const result: FolderAccess = await tiny.api.call(
-          "requestFolderAccess",
-          { name },
-        );
-        folderStatus.value[name] = result.status;
-      } catch {
-        folderStatus.value[name] = "denied";
-      } finally {
-        requestingFolder.value = null;
-      }
-    },
+    () => setFolderEnabled(name, true),
   );
 }
 
@@ -111,6 +105,7 @@ const {
   error: encryptionError,
   setEncryption: setSecretEncryption,
 } = useSecretEncryption();
+const showEncryptionProgress = useDelayedBusy(isChangingEncryption);
 const isDecryptWarningOpen = ref(false);
 const isProtectionWarningOpen = ref(false);
 const {
@@ -196,18 +191,16 @@ const {
 </script>
 
 <template>
-  <div class="mx-auto grid max-w-xl gap-y-6">
+  <div class="grid gap-y-6">
     <SettingsSection>
       <template #section-title>Permissions</template>
 
       <SettingsField>
         <template #label>Accessibility</template>
         <template #description>Needed to paste into other apps</template>
-        <span
-          v-if="accessibilityStatus === 'granted'"
-          class="text-success flex items-center gap-1 text-sm">
-          <TickIcon /> Granted
-        </span>
+        <SettingsStatus v-if="accessibilityStatus === 'granted'" tone="success">
+          Granted
+        </SettingsStatus>
         <Button
           v-else-if="accessibilityStatus"
           variant="outline"
@@ -224,23 +217,25 @@ const {
               ? "Not allowed. You can change this in System Settings → Privacy & Security → Files and Folders."
               : folderStatus[name] === "missing"
                 ? "This folder isn’t available."
-                : "Thumbnails and sizes of files you copy"
+                : "Thumbnails and sizes of files you copy."
           }}
         </template>
-        <span
-          v-if="folderStatus[name] === 'granted'"
-          class="text-success text-sm"
-          >Allowed</span
-        >
-        <Button
-          v-else
-          size="sm"
-          variant="outline"
-          :disabled="requestingFolder !== null"
-          @click="allowFolder(name)">
-          {{ folderStatus[name] ? "Try again" : "Allow previews" }}
-        </Button>
+        <Switch
+          :model-value="folderStatus[name] === 'granted'"
+          :disabled="loadingFolders || requestingFolder !== null"
+          :aria-label="`File previews for ${name}`"
+          :aria-busy="requestingFolder === name"
+          @update:model-value="
+            (enabled) =>
+              enabled ? allowFolder(name) : setFolderEnabled(name, false)
+          " />
       </SettingsField>
+      <p
+        v-if="folderError"
+        role="alert"
+        class="text-destructive px-3 py-2.5 text-sm">
+        {{ folderError }}
+      </p>
     </SettingsSection>
 
     <SettingsSection>
@@ -261,8 +256,7 @@ const {
       </p>
       <p
         v-else-if="!excludedApps"
-        class="text-foreground/60 flex items-center gap-2 px-3 py-2.5 text-sm">
-        <Spinner />
+        class="text-foreground/60 px-3 py-2.5 text-sm">
         Looking for ignored apps…
       </p>
       <p
@@ -338,13 +332,21 @@ const {
           <span v-if="encryptionError" class="text-destructive block">
             {{ encryptionError }}
           </span>
+          <span
+            v-if="showEncryptionProgress"
+            role="status"
+            class="mt-1 flex items-center gap-2">
+            <Spinner aria-hidden="true" class="size-3" />
+            Updating saved secrets…
+          </span>
         </template>
-        <Spinner v-if="isChangingEncryption" />
         <Switch
-          v-else
           v-model="encryptSecrets"
           :disabled="
-            isChangingProtection || protection?.locked || protection?.unreadable
+            isChangingEncryption ||
+            isChangingProtection ||
+            protection?.locked ||
+            protection?.unreadable
           " />
       </SettingsField>
 
@@ -372,12 +374,12 @@ const {
             >{{ protectionError }}</span
           >
         </template>
-        <span v-if="protection.unreadable" class="text-destructive text-sm"
-          >Unavailable</span
-        >
-        <span v-else-if="protection.protected" class="text-success text-sm"
-          >On</span
-        >
+        <SettingsStatus v-if="protection.unreadable" tone="danger" live>
+          Unavailable
+        </SettingsStatus>
+        <SettingsStatus v-else-if="protection.protected" tone="success">
+          On
+        </SettingsStatus>
         <Button
           v-else-if="protection.available"
           variant="outline"
@@ -390,9 +392,10 @@ const {
 
       <SettingsField v-if="protection?.needsKeychainAccess">
         <template #label>Saved secrets are unavailable</template>
-        <template #description
-          >Allow Teneo to read its Keychain key for this session.</template
-        >
+        <template #description>
+          Teneo couldn’t read the saved key from Keychain. Restore access to use
+          your encrypted history again.
+        </template>
         <Button
           size="sm"
           variant="outline"
@@ -426,11 +429,20 @@ const {
 
       <SettingsField
         v-if="settings.encryptSecrets && protection?.requireAuthentication">
-        <template #label>{{
-          protection.locked
-            ? "Saved secrets are locked"
-            : "Saved secrets are unlocked"
-        }}</template>
+        <template #label>Saved secrets</template>
+        <template #status>
+          <SettingsStatus
+            :tone="protection.locked ? 'warning' : 'success'"
+            live>
+            <template #icon>
+              <component
+                :is="protection.locked ? LockIcon : LockOpenIcon"
+                aria-hidden="true"
+                class="size-3 shrink-0" />
+            </template>
+            {{ protection.locked ? "Locked" : "Unlocked" }}
+          </SettingsStatus>
+        </template>
         <template #description>
           While locked, you can’t see or sync these entries, and new copies
           containing secrets aren’t saved to history.

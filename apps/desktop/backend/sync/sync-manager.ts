@@ -25,6 +25,7 @@ import {
 } from "@teneo/sync";
 
 import { devName } from "../dev-run";
+import { readKeychain } from "../keychain";
 import { getSettings, updateSettings } from "../settings";
 import { type NetworkAddress, pairingAddresses } from "./local-address";
 import type { SyncService, SyncServiceOptions } from "./service";
@@ -45,10 +46,13 @@ export interface SyncManagerDeps {
   networkAddresses(): NetworkAddress[];
   /** For what is wrong, never for item text or keys. */
   log(message: string, error: unknown): void;
+  /** Evidence that a previous user-initiated LAN operation succeeded. */
+  hasUsedLocalNetwork?(): Promise<boolean>;
+  rememberLocalNetwork?(): Promise<void>;
   trusted?: {
     offerUpgrade(): boolean | Promise<boolean>;
     store: TrustedVaultStore;
-    identity(create: boolean): Promise<DeviceIdentity>;
+    identity(create: boolean, interactive?: boolean): Promise<DeviceIdentity>;
     join(
       identity: DeviceIdentity,
       invite: NonNullable<ReturnType<typeof parseEnrollmentLink>>,
@@ -131,18 +135,23 @@ export class SyncManager {
     };
   }
 
-  /** At launch, once the history is checked for secrets: carry on as before. */
-  startIfEnabled(): Promise<void> {
+  /** At launch, renew saved access without prompting. User requests may ask. */
+  startIfEnabled(interactive = true): Promise<void> {
     return this.serial(async () => {
       if (!this.deps.available() || !getSettings().syncEnabled) return;
       if (this.service) return;
+      if (!interactive && !(await this.deps.hasUsedLocalNetwork?.())) {
+        this.problem = "Confirm local network access to resume sync.";
+        await this.publish();
+        return;
+      }
       if (this.deps.trusted) {
         try {
-          const trusted = await this.deps.trusted.store.read(() =>
-            this.deps.trusted!.identity(false),
+          const trusted = await this.deps.trusted.store.read(
+            () => this.deps.trusted!.identity(false, interactive),
+            interactive,
           );
           if (trusted) {
-            await this.app.secrets.delete(vaultKeyName());
             await this.runTrusted(trusted);
             await this.publish();
             return;
@@ -154,7 +163,7 @@ export class SyncManager {
           return;
         }
       }
-      const key = await this.readVaultKey();
+      const key = await this.readVaultKey(interactive);
       if (key) {
         try {
           await this.run(key);
@@ -430,6 +439,7 @@ export class SyncManager {
       name: await this.name(),
       syncSecrets: () => getSettings().syncSecrets,
       onPeersChanged: () => void this.publish(),
+      onLocalNetworkReady: () => this.rememberLocalNetwork(),
       onError: (error) => this.deps.log("sync:", error),
       pairingKey: () =>
         this.pairing && Date.now() < this.pairing.expiresAt
@@ -462,12 +472,21 @@ export class SyncManager {
       name: await this.name(),
       syncSecrets: () => getSettings().syncSecrets,
       onPeersChanged: () => void this.publish(),
+      onLocalNetworkReady: () => this.rememberLocalNetwork(),
       onError: (error) => this.deps.log("sync:", error),
     });
     this.problem =
       this.service.port === null
         ? "Teneo couldn't open a port, so the primary may not be reachable."
         : null;
+  }
+
+  private rememberLocalNetwork(): void {
+    void this.deps
+      .rememberLocalNetwork?.()
+      .catch((error: unknown) =>
+        this.deps.log("saving sync access failed:", error),
+      );
   }
 
   private async approve(device: DevicePublicIdentity): Promise<boolean> {
@@ -498,9 +517,9 @@ export class SyncManager {
   }
 
   /** The vault key from the Keychain, or null with the reason in `problem`. */
-  private async readVaultKey(): Promise<Bytes | null> {
+  private async readVaultKey(interactive: boolean): Promise<Bytes | null> {
     try {
-      const saved = await this.app.secrets.get(vaultKeyName());
+      const saved = await readKeychain(this.app, vaultKeyName(), interactive);
       const key = saved ? fromBase64(saved) : null;
       if (key?.length === vaultKeyLength) return key;
       this.problem =

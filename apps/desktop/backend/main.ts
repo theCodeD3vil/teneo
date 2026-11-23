@@ -28,7 +28,7 @@ import { warnIfDevRunUsesRealData } from "./dev-run";
 import { chooseAppToExclude, listExcludedApps } from "./excluded-apps";
 import { getFilePreview } from "./file-previews";
 import { logError } from "./files";
-import { requestFolderAccess } from "./folder-access";
+import { folderAccessStatus, setFolderPreviews } from "./folder-access";
 import {
   pauseOpenPanelShortcut,
   syncOpenPanelShortcut,
@@ -97,7 +97,9 @@ export const api: Record<string, TinyApiHandler> = {
   excludedApps: ({ addedBundleIds }, app) =>
     listExcludedApps(addedBundleIds, app),
   filePreview: ({ path, size }, app) => getFilePreview(path, size, app),
-  requestFolderAccess: ({ name }) => requestFolderAccess(name),
+  folderAccessStatus: (_parameters, app) => folderAccessStatus(app),
+  setFolderPreviews: ({ name, enabled }, app) =>
+    setFolderPreviews(name, enabled, app),
   openLink: ({ url }, app) => openLink(url, app),
   openItemFiles: ({ id }, app) => openItemFiles(id, app),
   revealItemFile: ({ id }, app) => revealItemFile(id, app),
@@ -243,18 +245,19 @@ export async function init(app: TinyApp) {
   void removeBackdoorAtLaunch(app);
   await loadSettings(app);
   await initializeDatabase(app);
-  // not awaited: the menu bar icon shouldn't wait on a Keychain prompt
   await keepEncryptionFromEarlierVersion(app);
-  if (getSettings().encryptSecrets) {
-    void encryptSecretsInHistory(app).catch((error) =>
-      logError("encrypting secrets in history failed:", error),
-    );
-  }
-  // Startup must not read a Keychain sync credential or touch the LAN. Only
-  // an explicitly confirmed resume may do either.
-  void refreshDetectionMetadata(app).catch((error: unknown) => {
-    logError("refreshing secret and link detection failed:", error);
-  });
+  // Don't prompt or block showing the UI while restoring saved access.
+  void (async () => {
+    try {
+      if (!(await restoreSecretHistoryAccess(app, false))) {
+        if (getSettings().encryptSecrets) await encryptSecretsInHistory(app);
+        await refreshDetectionMetadata(app);
+      }
+    } catch (error) {
+      logError("refreshing encrypted history at launch failed:", error);
+    }
+    await sync(app).startIfEnabled(false);
+  })().catch((error) => logError("starting sync at launch failed:", error));
   startTrimmingClipboardHistory(app);
   void removeStaleLinkPreviews(app);
   app.setHideOnClose(true);

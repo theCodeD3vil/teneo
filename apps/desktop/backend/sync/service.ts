@@ -32,6 +32,7 @@ interface CommonServiceOptions {
   ports?: number[];
   discovery?: Discovery;
   onPeersChanged?: () => void;
+  onLocalNetworkReady?: () => void;
   onError?: (error: unknown) => void;
 }
 
@@ -115,6 +116,7 @@ export async function startSyncService(
     options.discovery ??
     new MacDiscovery({
       registry: new ChildRegistry({ folder: (await app.paths()).cache }),
+      onRegistration: options.onLocalNetworkReady,
     });
   const transport = new LanTransport({
     engine,

@@ -1,6 +1,6 @@
 <template>
-  <section class="grid gap-y-3">
-    <h3 class="font-medium">
+  <section class="grid gap-y-2.5">
+    <h3 class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
       <slot name="section-title" />
     </h3>
     <!-- one SettingsField per setting; divide-y separates however many there are -->

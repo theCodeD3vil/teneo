@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { FolderAccess } from "@teneo/shared/types/storage";
 import { Button } from "@teneo/ui/components/button";
 import { Spinner } from "@teneo/ui/components/spinner";
 import { cn } from "@teneo/ui/lib/utils";
@@ -15,6 +14,7 @@ import FileIcon from "~icons/tabler/file";
 import SettingsField from "@/components/settings/SettingsField.vue";
 import SettingsSection from "@/components/settings/SettingsSection.vue";
 import { useAccessibilityPermission } from "@/composables/useAccessibilityPermission";
+import { useFolderAccess } from "@/composables/useFolderAccess";
 import { useHistoryProtection } from "@/composables/useHistoryProtection";
 import { useLaunchAtLogin } from "@/composables/useLaunchAtLogin";
 import { useSecretEncryption } from "@/composables/useSecretEncryption";
@@ -60,24 +60,13 @@ watch(accessibilityStatus, (status) => {
 });
 
 // A button only requests the named folder, never all three at once.
-const folderAccess = ref<
-  Partial<Record<FolderAccess["name"], FolderAccess["status"]>>
->({});
-const requestingFolder = ref<FolderAccess["name"] | null>(null);
-
-async function requestFolderAccess(name: FolderAccess["name"]): Promise<void> {
-  requestingFolder.value = name;
-  try {
-    const result: FolderAccess = await tiny.api.call("requestFolderAccess", {
-      name,
-    });
-    folderAccess.value[name] = result.status;
-  } catch {
-    folderAccess.value[name] = "denied";
-  } finally {
-    requestingFolder.value = null;
-  }
-}
+const {
+  status: folderAccess,
+  loading: loadingFolders,
+  requesting: requestingFolder,
+  error: folderError,
+  setEnabled: setFolderEnabled,
+} = useFolderAccess();
 
 // Same icons as Finder's sidebar
 const folders = [
@@ -185,7 +174,8 @@ function finishSetup(): void {
         class="flex flex-1 flex-col items-center justify-center gap-y-4 text-center">
         <h1 class="text-2xl font-medium">Preview the files you copy</h1>
         <p class="text-foreground/60 max-w-md text-xs text-balance">
-          Allow a folder to see thumbnails and sizes for files you copy.
+          Enable a folder to see thumbnails and sizes for files you copy. macOS
+          may ask for access the first time.
         </p>
 
         <SettingsSection class="mt-4 w-full text-left">
@@ -200,7 +190,7 @@ function finishSetup(): void {
             <span
               v-if="folderAccess[name] === 'granted'"
               class="text-success flex items-center gap-1 text-sm">
-              <TickIcon /> Allowed
+              <TickIcon /> Enabled
             </span>
             <span
               v-else-if="folderAccess[name] === 'denied'"
@@ -211,12 +201,18 @@ function finishSetup(): void {
               v-else
               size="sm"
               variant="outline"
-              :disabled="requestingFolder !== null"
-              @click="requestFolderAccess(name)">
+              :disabled="loadingFolders || requestingFolder !== null"
+              @click="setFolderEnabled(name, true)">
               <Spinner v-if="requestingFolder === name" />
-              Allow {{ name }}
+              Enable {{ name }}
             </Button>
           </SettingsField>
+          <p
+            v-if="folderError"
+            role="alert"
+            class="text-destructive px-3 py-2.5 text-sm">
+            {{ folderError }}
+          </p>
         </SettingsSection>
         <p class="text-foreground/60 text-xs text-balance">
           Copying still works without previews.

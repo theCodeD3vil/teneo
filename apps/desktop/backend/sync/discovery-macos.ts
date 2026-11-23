@@ -52,9 +52,13 @@ export class MacDiscovery implements Discovery {
   // where the children are noted, so a Teneo that is killed outright doesn't
   // leave them running for good
   private readonly registry: ChildRegistry | null;
+  private readonly onRegistration?: () => void;
 
-  constructor(options: { registry?: ChildRegistry } = {}) {
+  constructor(
+    options: { registry?: ChildRegistry; onRegistration?: () => void } = {},
+  ) {
     this.registry = options.registry ?? null;
+    this.onRegistration = options.onRegistration;
   }
 
   start(options: DiscoveryOptions): void {
@@ -120,6 +124,7 @@ export class MacDiscovery implements Discovery {
    *  and saying nothing about the Mac, its owner or its vault. */
   private announce(record: DiscoveryRecord, port: number): void {
     const generation = this.generation;
+    const splitter = new LineSplitter();
     const job = this.spawn(
       [
         "-R",
@@ -131,7 +136,13 @@ export class MacDiscovery implements Discovery {
         `vt=${record.txt.vt}`,
         `dev=${record.txt.dev}`,
       ],
-      () => {},
+      (chunk) => {
+        if (generation !== this.generation) return;
+        for (const line of splitter.push(chunk)) {
+          if (line.trimEnd().endsWith("Name now registered and active"))
+            this.onRegistration?.();
+        }
+      },
     );
     this.keepRunning(job, generation, () => this.announce(record, port));
   }

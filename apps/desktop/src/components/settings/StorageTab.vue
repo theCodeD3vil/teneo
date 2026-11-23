@@ -32,6 +32,7 @@ import { formatFileSize } from "@teneo/ui/utils/file-size";
 import { computed, ref } from "vue";
 
 import { useDataFolderUsage } from "@/composables/useDataFolderUsage";
+import { useDelayedBusy } from "@/composables/useDelayedBusy";
 import { useSettings } from "@/composables/useSettings";
 
 import SettingsField from "./SettingsField.vue";
@@ -122,6 +123,9 @@ const limitWarningTitle = computed(() => {
 });
 
 const { usage, usageError } = useDataFolderUsage();
+const showMeasuringSpinner = useDelayedBusy(
+  () => !usage.value && !usageError.value,
+);
 
 // Same colors as each kind's icon on the clipboard cards; colors get their
 // own so they're told apart from images
@@ -198,7 +202,7 @@ const clearHistoryMutation = useMutation({
 });
 </script>
 <template>
-  <div class="mx-auto grid max-w-xl gap-y-6">
+  <div class="grid gap-y-6">
     <SettingsSection>
       <template #section-title>History</template>
 
@@ -282,7 +286,7 @@ const clearHistoryMutation = useMutation({
     </SettingsSection>
 
     <SettingsSection>
-      <template #section-title>Data</template>
+      <template #section-title>Storage</template>
 
       <SettingsField>
         <template #label>Storage used</template>
@@ -293,10 +297,13 @@ const clearHistoryMutation = useMutation({
           <template v-else-if="usage">{{ contentSummary }}</template>
           <template v-else>Measuring…</template>
         </template>
-        <span v-if="usage" class="text-foreground/60 text-sm tabular-nums">
+        <span v-if="usage" class="shrink-0 text-lg font-semibold tabular-nums">
           {{ formatFileSize(usage.size) }}
         </span>
-        <Spinner v-else-if="!usageError" class="text-foreground/60" />
+        <Spinner
+          v-else-if="showMeasuringSpinner"
+          aria-hidden="true"
+          class="text-foreground/60" />
         <template v-if="usage" #footer>
           <div class="grid gap-2">
             <div
@@ -347,7 +354,10 @@ const clearHistoryMutation = useMutation({
         </template>
         <Button variant="outline" size="sm">Show in Finder</Button>
       </SettingsField>
+    </SettingsSection>
 
+    <SettingsSection>
+      <template #section-title>History cleanup</template>
       <SettingsField>
         <template #label>Clear history</template>
         <template #description>

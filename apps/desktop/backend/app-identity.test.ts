@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 
-import { appIdentities, releaseVariant, withIdentity } from "./app-identity";
+import {
+  appIdentities,
+  menuBarIcon,
+  releaseVariant,
+  withIdentity,
+} from "./app-identity";
 
 const config = {
   name: "teneo",
@@ -56,4 +61,19 @@ test("each app's icon is a file beside tinyjs.json; the full release takes icon.
 test("tinyjs.json is formatted the way the scripts write it back", () => {
   const text = readFileSync(`${import.meta.dir}/../tinyjs.json`, "utf8");
   expect(`${JSON.stringify(JSON.parse(text), null, 2)}\n`).toBe(text);
+});
+
+test("production, beta and debug have distinct bundled menu bar assets", () => {
+  const { production, beta, debug } = appIdentities;
+  const expected = [
+    [production.id, false, "tray.png"],
+    [beta.id, false, "tray-beta.png"],
+    [debug.id, false, "tray-debug.png"],
+    [production.id, true, "tray-debug.png"],
+    [beta.id, true, "tray-debug.png"],
+  ] as const;
+  for (const [id, dev, asset] of expected) {
+    expect(menuBarIcon(id, dev)).toBe(asset);
+    expect(existsSync(`${import.meta.dir}/../resources/${asset}`)).toBe(true);
+  }
 });
